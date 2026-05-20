@@ -4,9 +4,10 @@ import {
   Award, Save, Calendar as CalIcon, Activity, Dumbbell, Apple, ListChecks, ChevronRight, ChevronDown, ChevronLeft,
   TrendingUp, TrendingDown, Edit3, Trash2, Flame, ArrowUp, ArrowDown, Minus, Target, BookOpen, Clock, Moon, Coffee,
   Download, Upload, History, Repeat, Zap, Play, AlertTriangle, RotateCcw, MapPin, Building2, TreePine,
-  Camera, BookMarked, TrendingUp as Journal, DollarSign, ShoppingCart, Briefcase, Car, ChevronUp, Trophy, Archive, Infinity
+  Camera, BookMarked, TrendingUp as Journal, DollarSign, ShoppingCart, Briefcase, Car, ChevronUp, Trophy, Archive, Infinity, Mic
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 // ════════════════════════════════════════════════════════════════════════════════
 // STORAGE — localStorage-backed persistence
@@ -27,6 +28,7 @@ const K = {
   activity: 'st:activity',
   checkins: 'st:checkins',
   backups: 'st:backups',
+  achievements: 'st:achievements',
 };
 
 // Keys included in a full data snapshot (for auto-backup + export/restore).
@@ -215,6 +217,27 @@ function doneThisWeek(subjectKey: string, checkins: any) {
 }
 function doneTotal(subjectKey: string, checkins: any) {
   return (checkins?.[subjectKey] || []).length;
+}
+
+// Derive earned/locked achievement badges from existing data (no separate tracking needed).
+function computeAchievements(totals: any, streaks: any, workout: any, body: any, meals: any) {
+  const totalMins = (Object.values(totals || {}) as any[]).reduce((a: number, b: any) => a + (Number(b) || 0), 0);
+  const bestStreak = Math.max(0, ...Object.values(streaks || {}).map((s: any) => s?.longest || s?.current || 0));
+  const workoutCount = Object.keys(workout?.logs || {}).length;
+  const mealDays = Object.keys(meals?.log || {}).filter((d) => { const t = meals.log[d]; return t && (t.protein || t.calories); }).length;
+  const bodyCount = (body?.entries || []).length;
+  const defs = [
+    { id: 'first_hour', label: 'First Hour', desc: 'Log your first 60 min', earned: totalMins >= 60 },
+    { id: 'ten_hours', label: '10 Hours', desc: '10 hours of focused work', earned: totalMins >= 600 },
+    { id: 'fifty_hours', label: '50 Hours', desc: '50 hours total', earned: totalMins >= 3000 },
+    { id: 'week_streak', label: 'Week Warrior', desc: '7-day streak', earned: bestStreak >= 7 },
+    { id: 'month_streak', label: 'Unbreakable', desc: '30-day streak', earned: bestStreak >= 30 },
+    { id: 'lift_12', label: 'Consistent', desc: '12 workouts logged', earned: workoutCount >= 12 },
+    { id: 'lift_40', label: 'Iron Will', desc: '40 workouts logged', earned: workoutCount >= 40 },
+    { id: 'fuel_7', label: 'Dialed In', desc: 'Track meals 7 days', earned: mealDays >= 7 },
+    { id: 'measured', label: 'Measured Up', desc: 'Log 2+ body check-ins', earned: bodyCount >= 2 },
+  ];
+  return defs;
 }
 
 // Suggest macro targets from latest bodyweight + goal direction (lb-based heuristic;
@@ -1287,6 +1310,20 @@ function BodyTab({ settings, body, workout, onAddEntry, onEditGoals }: any) {
             </div>
           )}
 
+          {entries.filter((e: any) => e.weight != null).length >= 2 && (
+            <div className="card">
+              <div className="h2" style={{ marginBottom: 10 }}>Weight trend</div>
+              <ResponsiveContainer width="100%" height={160}>
+                <LineChart data={entries.filter((e: any) => e.weight != null).map((e: any) => ({ date: fmtShortDate(e.date), weight: e.weight }))} margin={{ top: 5, right: 8, left: -20, bottom: 0 }}>
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} />
+                  <YAxis domain={['dataMin - 2', 'dataMax + 2']} tick={{ fontSize: 10, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} />
+                  <Tooltip contentStyle={{ fontFamily: 'JetBrains Mono', fontSize: 12, borderRadius: 8 }} />
+                  <Line type="monotone" dataKey="weight" stroke="#B8460E" strokeWidth={2} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
           <div className="card">
             <div className="between" style={{ marginBottom: 14 }}>
               <div className="h2">Measurement detail</div>
@@ -1405,7 +1442,10 @@ function JournalTab({ journal, onSave }: any) {
           <div className="card" style={{ padding: 14, marginBottom: 12 }}>
             <div className="between" style={{ marginBottom: 8 }}>
               <span className="h3">Daily notes</span>
-              <span className="mono tiny muted">{fmtDate(today)}</span>
+              <div className="row" style={{ gap: 6 }}>
+                <VoiceButton onResult={(t: string) => setNote((prev: string) => prev ? `${prev} ${t}` : t)} />
+                <span className="mono tiny muted">{fmtShortDate(today)}</span>
+              </div>
             </div>
             <textarea
               value={note}
@@ -1772,7 +1812,7 @@ function PlanRow({ date, plans, onClick, highlight }: any) {
 // ════════════════════════════════════════════════════════════════════════════════
 // HISTORY TAB
 // ════════════════════════════════════════════════════════════════════════════════
-function HistoryTab({ settings, totals, workout, meals, body, activity, onSelectDay }: any) {
+function HistoryTab({ settings, totals, workout, meals, body, activity, streaks, onSelectDay }: any) {
   const [month, setMonth] = useState(() => {
     const d = new Date(todayStr() + 'T00:00:00');
     return { year: d.getFullYear(), month: d.getMonth() };
@@ -1863,6 +1903,26 @@ function HistoryTab({ settings, totals, workout, meals, body, activity, onSelect
         </div>
       </div>
 
+      {(() => {
+        const days: any[] = [];
+        for (let i = 13; i >= 0; i--) { const d = new Date(todayStr() + 'T00:00:00'); d.setDate(d.getDate() - i); const ds = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; days.push({ label: `${d.getMonth() + 1}/${d.getDate()}`, protein: Math.round(meals.log?.[ds]?.protein || 0) }); }
+        if (!days.some((d) => d.protein > 0)) return null;
+        return (
+          <div className="card">
+            <div className="h2" style={{ marginBottom: 10 }}>Protein · last 14 days</div>
+            <ResponsiveContainer width="100%" height={150}>
+              <BarChart data={days} margin={{ top: 5, right: 8, left: -22, bottom: 0 }}>
+                <XAxis dataKey="label" tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} interval={1} />
+                <YAxis tick={{ fontSize: 10, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} />
+                <Tooltip contentStyle={{ fontFamily: 'JetBrains Mono', fontSize: 12, borderRadius: 8 }} />
+                <Bar dataKey="protein" fill="#B8460E" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+            <div className="mono tiny muted" style={{ textAlign: 'center' }}>Target: {settings.macroTargets.protein}g/day</div>
+          </div>
+        );
+      })()}
+
       <div className="card">
         <div className="h2" style={{ marginBottom: 12 }}>This month</div>
         <div className="between" style={{ padding: '6px 0' }}>
@@ -1878,6 +1938,28 @@ function HistoryTab({ settings, totals, workout, meals, body, activity, onSelect
           <span className="mono small">{avgProtein}g</span>
         </div>
       </div>
+
+      {(() => {
+        const badges = computeAchievements(totals, streaks, workout, body, meals);
+        const earned = badges.filter((b) => b.earned).length;
+        return (
+          <div className="card">
+            <div className="between" style={{ marginBottom: 12 }}>
+              <div className="h2">Achievements</div>
+              <span className="mono small muted">{earned}/{badges.length}</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              {badges.map((b) => (
+                <div key={b.id} title={b.desc} style={{ textAlign: 'center', padding: '10px 4px', borderRadius: 10, background: b.earned ? '#FBF7EE' : '#F2EEE4', border: `1px solid ${b.earned ? '#C8932E' : '#E4DCC8'}`, opacity: b.earned ? 1 : 0.5 }}>
+                  <Trophy size={18} color={b.earned ? '#C8932E' : '#A0A898'} />
+                  <div className="tiny" style={{ fontWeight: 600, marginTop: 4 }}>{b.label}</div>
+                  <div className="tiny muted" style={{ lineHeight: 1.3 }}>{b.desc}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       <p className="muted tiny" style={{ textAlign: 'center', marginTop: 8 }}>Tap any past day for the full breakdown.</p>
     </>
@@ -2363,6 +2445,29 @@ function EditSplitModal({ workout, onSave, onClose }: any) {
   );
 }
 
+function VoiceButton({ onResult, style }: any) {
+  const [listening, setListening] = useState(false);
+  const recRef = useRef<any>(null);
+  const SR = (typeof window !== 'undefined') && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+  if (!SR) return null;
+  const toggle = () => {
+    if (listening) { recRef.current?.stop(); return; }
+    const rec = new SR();
+    recRef.current = rec;
+    rec.lang = 'en-US'; rec.interimResults = false; rec.maxAlternatives = 1;
+    rec.onresult = (e: any) => { onResult(e.results[0][0].transcript); };
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    rec.start();
+    setListening(true);
+  };
+  return (
+    <button className={`tap ${listening ? 'active' : ''}`} onClick={toggle} title="Voice input" style={{ padding: '6px 10px', ...style }}>
+      <Mic size={14} style={{ verticalAlign: 'middle' }} />{listening ? ' …' : ''}
+    </button>
+  );
+}
+
 function QtyStepper({ qty, setQty }: any) {
   return (
     <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 10 }}>
@@ -2490,7 +2595,10 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
 
       {mode === 'type' && (
         <>
-          <label>Describe what you ate</label>
+          <div className="between" style={{ marginBottom: 6 }}>
+            <label style={{ margin: 0 }}>Describe what you ate</label>
+            <VoiceButton onResult={(t: string) => setTypeText((prev) => prev ? `${prev} ${t}` : t)} />
+          </div>
           <textarea value={typeText} onChange={(e) => setTypeText(e.target.value)} placeholder="e.g. 2 scrambled eggs, a slice of buttered toast, and a banana" style={{ height: 70, marginBottom: 10, width: '100%', resize: 'vertical' }} />
           {scanError && <p className="small" style={{ color: '#B8460E', marginBottom: 8 }}>{scanError}</p>}
           {ReviewPanel}
@@ -2902,13 +3010,48 @@ function EditSubjectModal({ subjectKey, settings, onSave, onClose }: any) {
   );
 }
 
-function WeeklyReviewModal({ settings, totals, body, workout, streaks, onAck, onSkip }: any) {
+function WeeklyReviewModal({ settings, totals, body, workout, meals, streaks, onAck, onSkip }: any) {
   const subjects = settings.subjectOrder.filter((k: string) => settings.subjects[k] && !settings.subjects[k].archived);
+  const [aiState, setAiState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+  const [ai, setAi] = useState<any>(null);
+  const [aiErr, setAiErr] = useState('');
+
+  const runAiReview = async () => {
+    setAiState('loading'); setAiErr('');
+    try {
+      const week: string[] = [];
+      for (let i = 0; i < 7; i++) { const d = new Date(todayStr() + 'T00:00:00'); d.setDate(d.getDate() - i); week.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`); }
+      const proteinDays = week.map((d) => meals?.log?.[d]?.protein).filter((x: any) => x > 0);
+      const avgProtein = proteinDays.length ? Math.round(proteinDays.reduce((a: number, b: number) => a + b, 0) / proteinDays.length) : 0;
+      const subjSummary = subjects.map((k: string) => { const s = settings.subjects[k]; const diff = (totals[k] || 0) - expectedTotal(k, settings); return { name: s.name, status: s.deadline ? (diff >= 0 ? 'ahead/on-pace' : 'behind') : 'no deadline', streak: streaks[k]?.current || 0 }; });
+      const first = body.entries?.[0], last = body.entries?.[body.entries.length - 1];
+      const bodyTrend = first && last && first.weight && last.weight ? { weightChange: Math.round((last.weight - first.weight) * 10) / 10 } : {};
+      const resp = await fetch('/api/weekly-review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subjects: subjSummary, workoutsThisWeek: week.filter((d) => workout.logs[d]).length, avgProtein, proteinTarget: settings.macroTargets.protein, bodyTrend, streaks }) });
+      if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || 'Review unavailable.'); }
+      setAi(await resp.json()); setAiState('done');
+    } catch (e: any) { setAiErr(e?.message || 'Review unavailable.'); setAiState('error'); }
+  };
+
   return (
     <ModalShell title="Sunday review" onClose={onSkip} icon={<ListChecks size={18} color="#4A6741" />}>
       <p className="muted small" style={{ marginBottom: 16, lineHeight: 1.5 }}>
         Quick weekly checkpoint. Where are you, and what to push next week.
       </p>
+
+      {aiState === 'idle' && (
+        <button className="tap" style={{ width: '100%', marginBottom: 14, color: '#8E4585', borderColor: '#8E4585' }} onClick={runAiReview}>
+          <Zap size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Get AI review of my week
+        </button>
+      )}
+      {aiState === 'loading' && <p className="muted small" style={{ marginBottom: 14 }}>Reviewing your week…</p>}
+      {aiState === 'error' && <p className="small" style={{ color: '#B8460E', marginBottom: 14 }}>{aiErr}</p>}
+      {aiState === 'done' && ai && (
+        <div className="card" style={{ background: '#F3EEF6', border: '1px solid #DCCDE6', marginBottom: 16 }}>
+          {ai.summary && <p className="small" style={{ fontWeight: 600, marginBottom: 8, lineHeight: 1.5 }}>{ai.summary}</p>}
+          {ai.wins?.length > 0 && <><div className="mono tiny" style={{ color: '#4A6741', fontWeight: 600, marginBottom: 4 }}>WINS</div>{ai.wins.map((w: string, i: number) => <div key={i} className="small" style={{ marginBottom: 3 }}>• {w}</div>)}</>}
+          {ai.focus?.length > 0 && <><div className="mono tiny" style={{ color: '#8E4585', fontWeight: 600, margin: '8px 0 4px' }}>NEXT WEEK</div>{ai.focus.map((w: string, i: number) => <div key={i} className="small" style={{ marginBottom: 3 }}>→ {w}</div>)}</>}
+        </div>
+      )}
       {subjects.map((k: string) => {
         const s = settings.subjects[k];
         const totalDone = totals[k] || 0;
@@ -3451,6 +3594,22 @@ export default function App() {
     return () => clearInterval(id);
   }, [loaded]);
 
+  // Celebrate newly-earned achievements (silent on first load so we don't dump them all at once).
+  useEffect(() => {
+    if (!loaded) return;
+    (async () => {
+      const badges = computeAchievements(totals, streaks, workout, body, meals);
+      const earnedIds = badges.filter((b) => b.earned).map((b) => b.id);
+      const seen = await safeGet(K.achievements, null);
+      if (seen === null) { await safeSet(K.achievements, earnedIds); return; }
+      const fresh = badges.filter((b) => b.earned && !seen.includes(b.id));
+      if (fresh.length) {
+        fresh.forEach((b) => toast(`Achievement unlocked: ${b.label}`, { icon: <Trophy size={16} color="#C8932E" /> }));
+        await safeSet(K.achievements, earnedIds);
+      }
+    })();
+  }, [loaded, totals, streaks, workout, body, meals]);
+
   const saveSettings = async (next: any) => { setSettings(next); await safeSet(K.settings, next); };
   const saveDaily = async (next: any) => { setDaily(next); await safeSet(K.daily, next); };
   const saveTotals = async (next: any) => { setTotals(next); await safeSet(K.totals, next); };
@@ -3709,7 +3868,7 @@ export default function App() {
         {tab === 'history' && (
           <HistoryTab
             settings={settings} totals={totals} workout={workout} meals={meals} body={body}
-            activity={activity}
+            activity={activity} streaks={streaks}
             onSelectDay={(date: string) => setModal({ type: 'dayDetail', date })}
           />
         )}
@@ -3747,7 +3906,7 @@ export default function App() {
         if (d.checkins) { await safeSet(K.checkins, d.checkins); }
         setModal(null);
       }} onClose={() => setModal(null)} />}
-      {showWeekly && <WeeklyReviewModal settings={settings} totals={totals} body={body} workout={workout} streaks={streaks} onAck={async () => { const next = { lastAck: todayStr() }; await safeSet(K.weeklyReview, next); setWeeklyAck(next); }} onSkip={async () => { const next = { lastAck: todayStr() }; await safeSet(K.weeklyReview, next); setWeeklyAck(next); }} />}
+      {showWeekly && <WeeklyReviewModal settings={settings} totals={totals} body={body} workout={workout} meals={meals} streaks={streaks} onAck={async () => { const next = { lastAck: todayStr() }; await safeSet(K.weeklyReview, next); setWeeklyAck(next); }} onSkip={async () => { const next = { lastAck: todayStr() }; await safeSet(K.weeklyReview, next); setWeeklyAck(next); }} />}
     </div>
   );
 }
