@@ -555,7 +555,7 @@ function BottomNav({ tab, setTab }: { tab: string; setTab: (t: string) => void }
 // ════════════════════════════════════════════════════════════════════════════════
 // TODAY TAB
 // ════════════════════════════════════════════════════════════════════════════════
-function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, onWake, onStatus, onLogTime, onBusy, onLogMeal, onScheduleStart, onResetMacros, onMarkDone, onFocusStart, onFocusStop, onCoach }: any) {
+function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, onWake, onStatus, onLogTime, onBusy, onBack, onSwitch, onLogMeal, onScheduleStart, onResetMacros, onMarkDone, onFocusStart, onFocusStop, onCoach }: any) {
   const now = useCurrentTime();
   const nowMins = timeToMins(now);
   const subjectKeys = settings.subjectOrder.filter((k: string) => settings.subjects[k] && !settings.subjects[k].archived && !settings.subjects[k].deletedAt);
@@ -595,7 +595,7 @@ function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, 
         <ScheduleStartCard daily={daily} defaultOffset={settings.scheduleStartOffsetMin} onStart={onScheduleStart} />
       ) : (
         <>
-          <StatusBar daily={daily} onBusy={onBusy} onHome={() => onStatus('home', null)} nowMins={nowMins} now={now} sleepTime={settings.sleepTime} />
+          <StatusBar daily={daily} onBusy={onBusy} onBack={onBack} onSwitch={onSwitch} nowMins={nowMins} now={now} sleepTime={settings.sleepTime} />
           {daily.focus && <FocusTimerCard focus={daily.focus} subject={settings.subjects[daily.focus.subject]} onStop={onFocusStop} />}
           <Schedule settings={settings} daily={daily} onLog={onLogTime} subjectKeys={subjectKeys} nowMins={nowMins} checkins={checkins} />
           <Progress settings={settings} totals={totals} daily={daily} streaks={streaks} subjectKeys={subjectKeys} onLogExtra={onLogTime} checkins={checkins} onMarkDone={onMarkDone} onFocusStart={onFocusStart} focus={daily.focus} />
@@ -658,8 +658,12 @@ function ScheduleStartCard({ daily, defaultOffset, onStart }: any) {
   );
 }
 
-function StatusBar({ daily, onBusy, onHome, nowMins, now, sleepTime }: any) {
+function StatusBar({ daily, onBusy, onBack, onSwitch, nowMins, now, sleepTime }: any) {
   const isBusy = daily.status === 'busy';
+  const seg = daily.busy?.segments?.[daily.busy.segments.length - 1];
+  const reason = seg?.reason || daily.busyReason;
+  const plannedUntil = daily.busy?.plannedUntil || daily.busyUntil;
+  const elapsed = seg?.start ? Math.max(0, nowMins - timeToMins(seg.start)) : 0;
   const sleepMins = timeToMins(sleepTime || '23:00');
   const minsLeft = sleepMins - nowMins;
   const timeColor = minsLeft <= 60 ? '#B8460E' : minsLeft <= 120 ? '#C8932E' : '#6B6457';
@@ -671,9 +675,14 @@ function StatusBar({ daily, onBusy, onHome, nowMins, now, sleepTime }: any) {
           <div className="row" style={{ gap: 8 }}>
             {isBusy ? <Footprints size={16} color="#C8932E" /> : <Home size={16} color="#4A6741" />}
             <span style={{ fontSize: 15, fontWeight: 500 }}>
-              {isBusy ? `Busy until ${fmtTime(daily.busyUntil)}` : 'Home & available'}
+              {isBusy ? (reason || 'Busy') : 'Home & available'}
             </span>
           </div>
+          {isBusy && (
+            <div className="mono tiny muted" style={{ marginTop: 2 }}>
+              {elapsed}m so far{plannedUntil ? ` · planned till ${fmtTime(plannedUntil)}` : ' · open-ended'}
+            </div>
+          )}
         </div>
         <div style={{ textAlign: 'right' }}>
           <div className="mono small" style={{ fontWeight: 600, color: '#1A1A2E', fontSize: 18 }}>{fmtTime(now)}</div>
@@ -685,7 +694,14 @@ function StatusBar({ daily, onBusy, onHome, nowMins, now, sleepTime }: any) {
         </div>
       </div>
       <div style={{ borderTop: '1px solid #E4DCC8', marginTop: 10, paddingTop: 10 }}>
-        {isBusy ? <button className="tap active" onClick={onHome} style={{ width: '100%' }}>I'm back</button> : <button className="tap" onClick={onBusy} style={{ width: '100%' }}>I'm stepping out</button>}
+        {isBusy ? (
+          <div className="row" style={{ gap: 6 }}>
+            <button className="tap" onClick={onSwitch} style={{ flex: 1 }}><Repeat size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Switch</button>
+            <button className="tap active" onClick={onBack} style={{ flex: 1 }}>I'm back</button>
+          </div>
+        ) : (
+          <button className="tap" onClick={onBusy} style={{ width: '100%' }}>I'm stepping out</button>
+        )}
       </div>
     </div>
   );
@@ -1756,7 +1772,7 @@ function PlanRow({ date, plans, onClick, highlight }: any) {
 // ════════════════════════════════════════════════════════════════════════════════
 // HISTORY TAB
 // ════════════════════════════════════════════════════════════════════════════════
-function HistoryTab({ settings, totals, workout, meals, body, onSelectDay }: any) {
+function HistoryTab({ settings, totals, workout, meals, body, activity, onSelectDay }: any) {
   const [month, setMonth] = useState(() => {
     const d = new Date(todayStr() + 'T00:00:00');
     return { year: d.getFullYear(), month: d.getMonth() };
@@ -1808,6 +1824,7 @@ function HistoryTab({ settings, totals, workout, meals, body, onSelectDay }: any
             const hasWorkout = !!workout.logs?.[d];
             const hasMeal = !!meals.log?.[d];
             const hasMeasurement = body.entries?.some((e: any) => e.date === d);
+            const hasActivity = !!(activity?.[d]?.length);
             const isToday = d === todayStr();
             const isFuture = diffDays(d) > 0;
             return (
@@ -1817,7 +1834,7 @@ function HistoryTab({ settings, totals, workout, meals, body, onSelectDay }: any
                 disabled={isFuture}
                 style={{
                   padding: '6px 0',
-                  background: isToday ? '#1A1A2E' : (hasWorkout || hasMeal || hasMeasurement) ? '#FBF7EE' : 'transparent',
+                  background: isToday ? '#1A1A2E' : (hasWorkout || hasMeal || hasMeasurement || hasActivity) ? '#FBF7EE' : 'transparent',
                   border: '1px solid #E4DCC8',
                   borderRadius: 6,
                   cursor: isFuture ? 'default' : 'pointer',
@@ -1831,6 +1848,7 @@ function HistoryTab({ settings, totals, workout, meals, body, onSelectDay }: any
                   {hasWorkout && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#3B5C6B' }} />}
                   {hasMeal && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#4A6741' }} />}
                   {hasMeasurement && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#B8460E' }} />}
+                  {hasActivity && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#C8932E' }} />}
                 </div>
               </button>
             );
@@ -1841,6 +1859,7 @@ function HistoryTab({ settings, totals, workout, meals, body, onSelectDay }: any
           <span className="tiny muted"><span className="swatch" style={{ background: '#3B5C6B' }} />Workout</span>
           <span className="tiny muted"><span className="swatch" style={{ background: '#4A6741' }} />Meals</span>
           <span className="tiny muted"><span className="swatch" style={{ background: '#B8460E' }} />Measurement</span>
+          <span className="tiny muted"><span className="swatch" style={{ background: '#C8932E' }} />Activity</span>
         </div>
       </div>
 
@@ -1887,14 +1906,28 @@ function ModalShell({ title, onClose, children, icon = null, color = '#1A1A2E' }
   );
 }
 
-function DayDetailModal({ date, settings, totals, workout, meals, body, onClose }: any) {
+function DayDetailModal({ date, settings, totals, workout, meals, body, activity, onClose }: any) {
   const dayMeals = meals.log?.[date];
   const dayEntries = meals.entries?.[date] || [];
   const dayWorkout = workout.logs?.[date];
   const dayMeasurement = body.entries?.find((e: any) => e.date === date);
+  const dayActivities = activity?.[date] || [];
 
   return (
     <ModalShell title={fmtDate(date)} onClose={onClose} icon={<History size={18} color="#6B6457" />}>
+      {dayActivities.length > 0 && (
+        <>
+          <div className="h2" style={{ marginBottom: 8 }}>Activities</div>
+          <div className="card" style={{ padding: 12, marginBottom: 14 }}>
+            {dayActivities.map((a: any, i: number) => (
+              <div key={i} className="between" style={{ padding: '4px 0' }}>
+                <span className="small">{a.reason}</span>
+                <span className="mono tiny muted">{fmtTime(a.start)}–{fmtTime(a.end)} · {a.mins}m</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
       <div className="h2" style={{ marginBottom: 8 }}>Nutrition</div>
       {dayMeals && (dayMeals.protein || dayMeals.calories || dayMeals.carbs || dayMeals.fat) ? (
         <div className="card" style={{ padding: 12, marginBottom: 14 }}>
@@ -2030,22 +2063,25 @@ function LogTimeModal({ subject, settings, daily, onLog, onSet, onClose, editMod
 
 const BUSY_PRESET_DEFAULTS = ['Shopping', 'Work', 'Errands', 'Gym', 'Appointment', 'Commute', 'Family'];
 
-function BusyModal({ onConfirm, onClose, busyPresets, onSavePresets }: any) {
-  const [mins, setMins] = useState(60);
+function BusyModal({ onConfirm, onClose, busyPresets, onSavePresets, isSwitch }: any) {
   const [reason, setReason] = useState('');
   const [showSave, setShowSave] = useState(false);
+  const [timed, setTimed] = useState(false);
+  const [mins, setMins] = useState(60);
   const presets: string[] = busyPresets || BUSY_PRESET_DEFAULTS;
 
   const confirm = async () => {
     if (reason && showSave && !presets.includes(reason)) {
       await onSavePresets([...presets, reason]);
     }
-    onConfirm(mins, reason);
+    onConfirm(timed ? mins : null, reason);
   };
 
   return (
-    <ModalShell title="Stepping out" onClose={onClose} icon={<Footprints size={18} color="#C8932E" />}>
-      <p className="muted small" style={{ marginBottom: 14 }}>Your schedule shifts automatically. Tap "I'm back" when you return.</p>
+    <ModalShell title={isSwitch ? 'Switch activity' : 'Stepping out'} onClose={onClose} icon={<Footprints size={18} color="#C8932E" />}>
+      <p className="muted small" style={{ marginBottom: 14 }}>
+        {isSwitch ? 'Stops the current activity timer and starts a new one.' : 'Pick a duration, or leave it open-ended and tap "I\'m back" when you return.'}
+      </p>
 
       <label style={{ marginBottom: 6 }}>What are you doing?</label>
       <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
@@ -2062,15 +2098,44 @@ function BusyModal({ onConfirm, onClose, busyPresets, onSavePresets }: any) {
         )}
       </div>
 
-      <label>How long?</label>
-      <div className="row" style={{ gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-        {[30, 60, 90, 120, 180].map(m => <button key={m} className={`tap ${mins === m ? 'active' : ''}`} onClick={() => setMins(m)}>{m < 60 ? `${m}m` : `${m / 60}h`}</button>)}
+      <div className="row" style={{ gap: 6, marginBottom: 10 }}>
+        <button className={`tap ${!timed ? 'active' : ''}`} style={{ flex: 1 }} onClick={() => setTimed(false)}>Open-ended</button>
+        <button className={`tap ${timed ? 'active' : ''}`} style={{ flex: 1 }} onClick={() => setTimed(true)}>Set a time</button>
       </div>
-      <input type="number" value={mins} onChange={(e) => setMins(parseInt(e.target.value) || 0)} style={{ marginBottom: 14 }} />
+      {timed && (
+        <>
+          <div className="row" style={{ gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+            {[30, 60, 90, 120, 180].map(m => <button key={m} className={`tap ${mins === m ? 'active' : ''}`} onClick={() => setMins(m)}>{m < 60 ? `${m}m` : `${m / 60}h`}</button>)}
+          </div>
+          <input type="number" value={mins} onChange={(e) => setMins(parseInt(e.target.value) || 0)} style={{ marginBottom: 14 }} />
+        </>
+      )}
       <button className="btn" style={{ width: '100%' }} onClick={confirm}>
         <Footprints size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-        {reason ? `Out for ${reason} · ${mins < 60 ? mins + 'm' : mins / 60 + 'h'}` : `Set busy · ${mins < 60 ? mins + 'm' : mins / 60 + 'h'}`}
+        {reason || 'Set busy'}{timed ? ` · ${mins < 60 ? mins + 'm' : mins / 60 + 'h'}` : ''}
       </button>
+    </ModalShell>
+  );
+}
+
+function BusyBackModal({ daily, onConfirm, onClose }: any) {
+  const segs = (daily.busy?.segments || []).map((s: any) => ({ ...s, end: s.end || nowHHMM() }));
+  return (
+    <ModalShell title="Welcome back" onClose={onClose} icon={<Home size={18} color="#4A6741" />}>
+      <p className="muted small" style={{ marginBottom: 12, lineHeight: 1.5 }}>Add what you did to today's log?</p>
+      {segs.map((s: any, i: number) => {
+        const m = Math.max(0, timeToMins(s.end) - timeToMins(s.start));
+        return (
+          <div key={i} className="between" style={{ padding: '6px 0' }}>
+            <span className="small">{s.reason || 'Busy'}</span>
+            <span className="mono tiny muted">{fmtTime(s.start)}–{fmtTime(s.end)} · {m}m</span>
+          </div>
+        );
+      })}
+      <button className="btn" style={{ width: '100%', marginTop: 12, marginBottom: 8 }} onClick={() => onConfirm(true)}>
+        <Check size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Yes, log to my day
+      </button>
+      <button className="tap" style={{ width: '100%' }} onClick={() => onConfirm(false)}>No, just clear</button>
     </ModalShell>
   );
 }
@@ -3549,6 +3614,31 @@ export default function App() {
     setDaily((d: any) => { const nd = { ...d, focus: null }; void safeSet(K.daily, nd); return nd; });
   };
 
+  const startBusy = async (mins: number | null, reason: string) => {
+    const now = nowHHMM();
+    const plannedUntil = mins ? addMinutes(now, mins) : null;
+    await saveDaily({ ...daily, status: 'busy', busyUntil: plannedUntil, busyReason: reason, busy: { segments: [{ reason: reason || 'Busy', start: now, end: null }], plannedUntil } });
+  };
+  const switchBusy = async (mins: number | null, reason: string) => {
+    const now = nowHHMM();
+    const segs = (daily.busy?.segments || []).map((s: any, i: number, arr: any[]) => (i === arr.length - 1 && !s.end ? { ...s, end: now } : s));
+    segs.push({ reason: reason || 'Busy', start: now, end: null });
+    const plannedUntil = mins ? addMinutes(now, mins) : (daily.busy?.plannedUntil || null);
+    await saveDaily({ ...daily, status: 'busy', busyUntil: plannedUntil, busyReason: reason, busy: { segments: segs, plannedUntil } });
+  };
+  const endBusy = async (shouldLog: boolean) => {
+    const now = nowHHMM();
+    const segs = (daily.busy?.segments || []).map((s: any) => {
+      const end = s.end || now;
+      return { reason: s.reason || 'Busy', start: s.start, end, mins: Math.max(0, timeToMins(end) - timeToMins(s.start)) };
+    });
+    if (shouldLog && segs.length) {
+      const today = todayStr();
+      await saveActivity({ ...activity, [today]: [...(activity[today] || []), ...segs] });
+    }
+    await saveDaily({ ...daily, status: 'home', busyUntil: null, busyReason: null, busy: null });
+  };
+
   if (!loaded) {
     return <div style={{ minHeight: '100vh', background: '#F5F0E6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'serif', color: '#6B6457' }}>Loading…</div>;
   }
@@ -3582,6 +3672,8 @@ export default function App() {
             onStatus={(status: string, busyUntil: string) => saveDaily({ ...daily, status, busyUntil })}
             onLogTime={(s: string, mode?: string) => setModal({ type: 'logTime', subject: s, editMode: mode === 'edit' })}
             onBusy={() => setModal({ type: 'busy' })}
+            onBack={() => setModal({ type: 'busyBack' })}
+            onSwitch={() => setModal({ type: 'busy', mode: 'switch' })}
             onLogMeal={() => setModal({ type: 'logMeal' })}
             onResetMacros={resetMacros}
             onMarkDone={markDone}
@@ -3617,6 +3709,7 @@ export default function App() {
         {tab === 'history' && (
           <HistoryTab
             settings={settings} totals={totals} workout={workout} meals={meals} body={body}
+            activity={activity}
             onSelectDay={(date: string) => setModal({ type: 'dayDetail', date })}
           />
         )}
@@ -3628,7 +3721,8 @@ export default function App() {
       {modal?.type === 'resetDay' && <ResetDayModal onReset={resetDay} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'editSubject' && <EditSubjectModal subjectKey={modal.key} settings={settings} onSave={saveSettings} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'logTime' && <LogTimeModal subject={modal.subject} settings={settings} daily={daily} editMode={modal.editMode} onLog={(m: number) => { logTime(modal.subject, m); setModal(null); }} onSet={(m: number) => { setSubjectTime(modal.subject, m); setModal(null); }} onClose={() => setModal(null)} />}
-      {modal?.type === 'busy' && <BusyModal busyPresets={busyPresets} onSavePresets={saveBusyPresets} onConfirm={(m: number, reason: string) => { saveDaily({ ...daily, status: 'busy', busyUntil: addMinutes(nowHHMM(), m), busyReason: reason }); setModal(null); }} onClose={() => setModal(null)} />}
+      {modal?.type === 'busy' && <BusyModal isSwitch={modal.mode === 'switch'} busyPresets={busyPresets} onSavePresets={saveBusyPresets} onConfirm={(m: number | null, reason: string) => { if (modal.mode === 'switch') switchBusy(m, reason); else startBusy(m, reason); setModal(null); }} onClose={() => setModal(null)} />}
+      {modal?.type === 'busyBack' && <BusyBackModal daily={daily} onConfirm={(log: boolean) => { endBusy(log); setModal(null); }} onClose={() => setModal(null)} />}
       {modal?.type === 'addMeasurement' && <AddMeasurementModal onSave={async (entry: any) => { const next = { ...body, entries: [...body.entries, entry] }; const nextSettings = { ...settings, nextMeasurement: addMonth(todayStr(), 1) }; await saveBody(next); await saveSettings(nextSettings); setModal(null); }} onClose={() => setModal(null)} previous={body.entries[body.entries.length - 1]} />}
       {modal?.type === 'bodyGoals' && <BodyGoalsModal settings={settings} onSave={saveSettings} onClose={() => setModal(null)} />}
       {modal?.type === 'logWorkout' && <LogWorkoutModal dayIdx={modal.dayIdx} workout={workout} onSave={saveWorkout} onClose={() => setModal(null)} />}
@@ -3637,7 +3731,7 @@ export default function App() {
       {modal?.type === 'logMeal' && <LogMealModal meals={meals} settings={settings} onSave={saveMeals} onClose={() => setModal(null)} />}
       {modal?.type === 'nutritionCoach' && <NutritionCoachModal settings={settings} meals={meals} body={body} onLogItem={async (item: any) => { await saveMeals(addMealEntry(meals, todayStr(), { qty: 1, ...item })); toast(`Logged ${item.name}`); }} onClose={() => setModal(null)} />}
       {modal?.type === 'planDay' && <PlanDayModal date={modal.date} plans={plans} onSave={savePlans} onClose={() => setModal(null)} />}
-      {modal?.type === 'dayDetail' && <DayDetailModal date={modal.date} settings={settings} totals={totals} workout={workout} meals={meals} body={body} onClose={() => setModal(null)} />}
+      {modal?.type === 'dayDetail' && <DayDetailModal date={modal.date} settings={settings} totals={totals} workout={workout} meals={meals} body={body} activity={activity} onClose={() => setModal(null)} />}
       {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, journal, challengeHistory, busyPresets, weeklyAck }} onImport={async (d: any) => {
         if (d.settings) { setSettings(d.settings); await safeSet(K.settings, d.settings); }
         if (d.totals) { setTotals(d.totals); await safeSet(K.totals, d.totals); }
