@@ -4,7 +4,8 @@ import {
   Award, Save, Calendar as CalIcon, Activity, Dumbbell, Apple, ListChecks, ChevronRight, ChevronDown, ChevronLeft,
   TrendingUp, TrendingDown, Edit3, Trash2, Flame, ArrowUp, ArrowDown, Minus, Target, BookOpen, Clock, Moon, Coffee,
   Download, Upload, History, Repeat, Zap, Play, AlertTriangle, RotateCcw, MapPin, Building2, TreePine,
-  Camera, BookMarked, TrendingUp as Journal, DollarSign, ShoppingCart, Briefcase, Car, ChevronUp, Trophy, Archive, Infinity, Mic
+  Camera, BookMarked, TrendingUp as Journal, DollarSign, ShoppingCart, Briefcase, Car, ChevronUp, Trophy, Archive, Infinity, Mic,
+  Wallet, PiggyBank, CreditCard, PieChart, Receipt, Pencil, ArrowUpRight, ArrowDownRight, Sparkles
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
@@ -38,10 +39,11 @@ const K = {
   checkins: 'st:checkins',
   backups: 'st:backups',
   achievements: 'st:achievements',
+  spending: 'st:spending',
 };
 
 // Keys included in a full data snapshot (for auto-backup + export/restore).
-const BACKUP_KEYS = ['settings', 'totals', 'body', 'workout', 'meals', 'plans', 'streaks', 'journal', 'challengeHistory', 'busyPresets', 'activity', 'checkins'] as const;
+const BACKUP_KEYS = ['settings', 'totals', 'body', 'workout', 'meals', 'plans', 'streaks', 'journal', 'challengeHistory', 'busyPresets', 'activity', 'checkins', 'spending'] as const;
 const MAX_BACKUPS = 10;
 
 async function safeGet(key: string, fallback: any): Promise<any> {
@@ -173,8 +175,18 @@ function removeMealEntry(meals: any, date: string, id: string): any {
 }
 
 // One-time migration: turn legacy daily totals into a single editable entry.
+// Also runs a ONE-TIME purge of macro-only presets (tracked via presetsMicrosMigrated)
+// so the user can re-add them via AI which now grabs micros. After that, manually-created
+// macro-only presets are preserved — we don't want to silently delete fresh user data.
 function migrateMeals(meals: any): any {
-  const m = { presets: meals.presets || [], log: meals.log || {}, entries: meals.entries || {} };
+  const already = !!meals.presetsMicrosMigrated;
+  const rawPresets = already ? (meals.presets || []) : (meals.presets || []).filter(isCompletePreset);
+  const m = {
+    presets: rawPresets,
+    log: meals.log || {},
+    entries: meals.entries || {},
+    presetsMicrosMigrated: true,
+  };
   for (const date of Object.keys(m.log)) {
     if (!m.entries[date]) {
       const t = m.log[date];
@@ -293,6 +305,23 @@ function suggestMacros(latestBody: any, bodyGoals: any) {
   const fat = Math.round(wLb * 0.4);
   const carbs = Math.max(0, Math.round((calories - protein * 4 - fat * 9) / 4));
   return { protein, carbs, fat, calories };
+}
+
+// Suggest micro targets based on body weight + goal direction. Essentials scale modestly
+// with size; limits tighten on a cut, loosen slightly on a bulk.
+function suggestMicros(latestBody: any, bodyGoals: any) {
+  const wLb = Number(latestBody?.weight);
+  if (!wLb) return null;
+  const dir = bodyGoals?.weight?.direction || 'maintain';
+  const scale = Math.min(1.4, Math.max(0.7, wLb / 175));
+  const limitScale = dir === 'down' ? 0.85 : dir === 'up' ? 1.1 : 1.0;
+  const out: Record<string, number> = {};
+  for (const d of MICRO_DEFS) {
+    const base = d.defaultTarget;
+    const v = d.limit ? base * limitScale : base * scale;
+    out[d.key] = v < 10 ? Math.round(v * 10) / 10 : Math.round(v);
+  }
+  return out;
 }
 
 function projectedDate(subjectKey: string, settings: any, totals: any, daily: any) {
@@ -510,13 +539,86 @@ function targetTotalByDeadline(subjectKey: string, settings: any) {
 // ════════════════════════════════════════════════════════════════════════════════
 // SAMPLE PRESETS
 // ════════════════════════════════════════════════════════════════════════════════
-const SAMPLE_PRESETS = [
-  { id: 'p1', name: '4 eggs + 1 cup oats + banana', protein: 38, carbs: 65, fat: 22, calories: 600, source: 'Breakfast staple' },
-  { id: 'p2', name: 'Chicken rice bowl (200g chk)', protein: 50, carbs: 60, fat: 8, calories: 530, source: 'Pre-workout' },
-  { id: 'p3', name: 'Protein shake + banana', protein: 30, carbs: 30, fat: 3, calories: 280, source: 'Post-workout' },
-  { id: 'p4', name: 'Salmon + sweet potato + greens', protein: 40, carbs: 45, fat: 18, calories: 510, source: 'Dinner' },
-  { id: 'p5', name: 'Greek yogurt + berries', protein: 18, carbs: 15, fat: 4, calories: 170, source: 'Snack' },
+// Presets start empty so the user re-adds them via AI scan/type — that path captures full micros.
+const SAMPLE_PRESETS: any[] = [];
+
+// A preset is "complete" if it carries micro data. Older presets (macros-only) are dropped so
+// the user can recapture them with full nutrition via the AI scan/type flow.
+function isCompletePreset(p: any): boolean {
+  return p && typeof p === 'object' && MICRO_KEYS.some((k) => Number(p[k]) > 0);
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// SPENDING — defaults + helpers
+// ════════════════════════════════════════════════════════════════════════════════
+const DEFAULT_SPEND_CATEGORIES = [
+  // Income
+  { id: 'c_salary',     name: 'Salary',         kind: 'in',  color: '#3F7A4F' },
+  { id: 'c_freelance',  name: 'Freelance',      kind: 'in',  color: '#2F6E5F' },
+  { id: 'c_invest',     name: 'Investments',    kind: 'in',  color: '#5C8E4F' },
+  { id: 'c_other_in',   name: 'Other income',   kind: 'in',  color: '#7A9A4E' },
+  // Expenses
+  { id: 'c_rent',       name: 'Rent / Housing', kind: 'out', color: '#8E4585' },
+  { id: 'c_food',       name: 'Food & Groceries', kind: 'out', color: '#B8460E' },
+  { id: 'c_dining',     name: 'Dining out',     kind: 'out', color: '#C8932E' },
+  { id: 'c_transport',  name: 'Transport',      kind: 'out', color: '#3B5C6B' },
+  { id: 'c_bills',      name: 'Bills & Utilities', kind: 'out', color: '#6E5C8E' },
+  { id: 'c_subs',       name: 'Subscriptions',  kind: 'out', color: '#5C6E8E' },
+  { id: 'c_shopping',   name: 'Shopping',       kind: 'out', color: '#A65E8E' },
+  { id: 'c_health',     name: 'Health',         kind: 'out', color: '#8E5C5C' },
+  { id: 'c_fun',        name: 'Entertainment',  kind: 'out', color: '#C87A2E' },
+  { id: 'c_other_out',  name: 'Other',          kind: 'out', color: '#6B6457' },
 ];
+
+const DEFAULT_SPENDING = {
+  entries: [] as any[],
+  categories: DEFAULT_SPEND_CATEGORIES,
+  monthlyBudget: 0,
+  savingsGoal: 0,
+};
+
+function migrateSpending(s: any): any {
+  const base = { ...DEFAULT_SPENDING, ...(s || {}) };
+  base.entries = Array.isArray(base.entries) ? base.entries : [];
+  base.categories = Array.isArray(base.categories) && base.categories.length > 0 ? base.categories : DEFAULT_SPEND_CATEGORIES;
+  base.monthlyBudget = Number(base.monthlyBudget) || 0;
+  base.savingsGoal = Number(base.savingsGoal) || 0;
+  return base;
+}
+
+function fmtMoney(n: number, opts: { signed?: boolean } = {}): string {
+  const v = Number(n) || 0;
+  const abs = Math.abs(v);
+  const s = abs >= 1000 ? abs.toLocaleString('en-US', { maximumFractionDigits: 0 }) : abs.toFixed(2);
+  if (opts.signed) return `${v < 0 ? '−' : '+'}$${s}`;
+  return `${v < 0 ? '−' : ''}$${s}`;
+}
+
+function monthKey(date: string): string { return date.slice(0, 7); }
+function monthLabel(ym: string): string {
+  const [y, m] = ym.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+}
+function monthShort(ym: string): string {
+  const [y, m] = ym.split('-').map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short' });
+}
+function prevMonth(ym: string): string {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(y, m - 2, 1);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+}
+function spendingByMonth(entries: any[], ym: string) {
+  let income = 0, spent = 0;
+  const byCat: Record<string, number> = {};
+  for (const e of entries) {
+    if (!e?.date || monthKey(e.date) !== ym) continue;
+    const amt = Number(e.amount) || 0;
+    if (e.type === 'in') income += amt;
+    else { spent += amt; byCat[e.categoryId] = (byCat[e.categoryId] || 0) + amt; }
+  }
+  return { income, spent, net: income - spent, byCat };
+}
 
 // ════════════════════════════════════════════════════════════════════════════════
 // GLOBAL STYLES
@@ -607,6 +709,7 @@ function BottomNav({ tab, setTab }: { tab: string; setTab: (t: string) => void }
     { key: 'today', label: 'Today', icon: Sun },
     { key: 'body', label: 'Body', icon: Activity },
     { key: 'workout', label: 'Lift', icon: Dumbbell },
+    { key: 'money', label: 'Money', icon: Wallet },
     { key: 'journal', label: 'Journal', icon: BookMarked },
     { key: 'plan', label: 'Plan', icon: CalIcon },
     { key: 'history', label: 'History', icon: History },
@@ -1554,7 +1657,7 @@ function JournalTab({ journal, onSave, settings }: any) {
         <button className={`tap ${view === 'today' ? 'active' : ''}`} onClick={() => setView('today')}>Today</button>
         {cfg.tradesEnabled && (
           <button className={`tap ${view === 'trades' ? 'active' : ''}`} onClick={() => setView('trades')}>
-            <DollarSign size={11} style={{ verticalAlign: 'middle', marginRight: 3 }} />{cfg.tradesLabel || 'Trades'}
+            {cfg.tradesLabel || 'Trades'}
           </button>
         )}
         <button className={`tap ${view === 'history' ? 'active' : ''}`} onClick={() => setView('history')}>History</button>
@@ -2926,6 +3029,7 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
   const [subTab, setSubTab] = useState<'active' | 'archived' | 'deleted'>('active');
   const latestBody = body?.entries?.[body.entries.length - 1];
   const suggested = suggestMacros(latestBody, draft.bodyGoals);
+  const suggestedMicros = suggestMicros(latestBody, draft.bodyGoals);
   const update = (patch: any) => setDraft({ ...draft, ...patch });
 
   // Subject actions persist immediately (and preserve any in-progress schedule/macro edits).
@@ -3028,11 +3132,15 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
         <div style={{ flex: 1 }}><label>Fat (g)</label><input type="number" value={draft.macroTargets.fat} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, fat: parseInt(e.target.value) || 0 } })} /></div>
       </div>
       {suggested ? (
-        <button className="tap" style={{ width: '100%', marginBottom: 16, fontSize: 12 }} onClick={() => update({ macroTargets: suggested })}>
-          <Zap size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Auto from body + goal ({suggested.protein}p · {suggested.carbs}c · {suggested.fat}f · {suggested.calories}cal)
+        <button
+          className="tap"
+          style={{ width: '100%', marginBottom: 16, fontSize: 12, color: '#8E4585', borderColor: '#8E4585' }}
+          onClick={() => update({ macroTargets: suggested, ...(suggestedMicros ? { microTargets: suggestedMicros } : {}) })}
+        >
+          <Zap size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Auto from body + goal — sets macros &amp; micros ({suggested.protein}p · {suggested.carbs}c · {suggested.fat}f · {suggested.calories}cal)
         </button>
       ) : (
-        <p className="muted tiny" style={{ marginBottom: 16, lineHeight: 1.4 }}>Add a body weight entry to auto-calculate macro targets from your goal.</p>
+        <p className="muted tiny" style={{ marginBottom: 16, lineHeight: 1.4 }}>Add a body weight entry to auto-calculate macro + micro targets from your goal.</p>
       )}
 
       <div className="between" style={{ marginBottom: 8, marginTop: 8 }}>
@@ -3084,37 +3192,6 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
           </button>
         </>
       )}
-
-      <div className="h2" style={{ marginBottom: 8, marginTop: 8 }}>Journal</div>
-      <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 10 }}>
-        <span className="small" style={{ flex: 1 }}>Show "{(draft.journal?.tradesLabel || 'Trades')}" section</span>
-        <button
-          className="tap"
-          style={{ padding: '4px 10px', fontSize: 11 }}
-          onClick={() => update({ journal: { ...(draft.journal || {}), tradesEnabled: !(draft.journal?.tradesEnabled !== false) } })}
-        >
-          {draft.journal?.tradesEnabled !== false ? 'On' : 'Off'}
-        </button>
-      </div>
-      {(draft.journal?.tradesEnabled !== false) && (
-        <div style={{ marginBottom: 10 }}>
-          <label>Section name (rename "Trades" to anything)</label>
-          <input
-            type="text"
-            value={draft.journal?.tradesLabel ?? 'Trades'}
-            onChange={(e) => update({ journal: { ...(draft.journal || {}), tradesLabel: e.target.value } })}
-            placeholder="Trades, Wins, Deals, Logs…"
-          />
-        </div>
-      )}
-      <div style={{ marginBottom: 16 }}>
-        <label>Notes placeholder</label>
-        <input
-          type="text"
-          value={draft.journal?.notesPlaceholder ?? "What's on your mind?"}
-          onChange={(e) => update({ journal: { ...(draft.journal || {}), notesPlaceholder: e.target.value } })}
-        />
-      </div>
 
       <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={() => { onSave(draft); onClose(); }}>
         <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save settings
@@ -3733,6 +3810,574 @@ function Setup({ onComplete, onImport }: any) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
+// MONEY TAB — manual personal-finance tracker (Rocket Money inspired)
+// ════════════════════════════════════════════════════════════════════════════════
+function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories }: any) {
+  const today = todayStr();
+  const thisMonth = monthKey(today);
+  const lastMonth = prevMonth(thisMonth);
+  const cur = spendingByMonth(spending.entries, thisMonth);
+  const prev = spendingByMonth(spending.entries, lastMonth);
+  const catMap = useMemo(() => Object.fromEntries(spending.categories.map((c: any) => [c.id, c])), [spending.categories]);
+  const budget = Number(spending.monthlyBudget) || 0;
+  const goal = Number(spending.savingsGoal) || 0;
+  const spentPct = budget > 0 ? Math.min(100, (cur.spent / budget) * 100) : 0;
+  const savedThisMonth = Math.max(0, cur.net);
+  const savedPct = goal > 0 ? Math.min(100, (savedThisMonth / goal) * 100) : 0;
+  const savingsRate = cur.income > 0 ? Math.max(0, Math.min(100, (cur.net / cur.income) * 100)) : 0;
+
+  const recent = useMemo(
+    () => [...spending.entries].sort((a: any, b: any) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (b.id || '').localeCompare(a.id || ''))).slice(0, 8),
+    [spending.entries],
+  );
+
+  const recurring = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const e of spending.entries) {
+      if (!e.recurring || e.type !== 'out') continue;
+      const k = `${e.name?.toLowerCase().trim()}|${e.categoryId}`;
+      const cur = map.get(k);
+      if (!cur || e.date > cur.date) map.set(k, e);
+    }
+    return Array.from(map.values()).sort((a, b) => b.amount - a.amount).slice(0, 6);
+  }, [spending.entries]);
+
+  const trend = useMemo(() => {
+    const arr: { ym: string; income: number; spent: number; net: number }[] = [];
+    let cursor = thisMonth;
+    for (let i = 0; i < 6; i++) {
+      const m = spendingByMonth(spending.entries, cursor);
+      arr.unshift({ ym: cursor, income: m.income, spent: m.spent, net: m.net });
+      cursor = prevMonth(cursor);
+    }
+    return arr;
+  }, [spending.entries, thisMonth]);
+
+  const topCats = useMemo(() => {
+    return Object.entries(cur.byCat)
+      .map(([id, amt]: any) => ({ id, amount: amt as number, cat: catMap[id] }))
+      .filter((x) => x.cat)
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 6);
+  }, [cur.byCat, catMap]);
+
+  const netDelta = cur.net - prev.net;
+  const spentDelta = prev.spent > 0 ? ((cur.spent - prev.spent) / prev.spent) * 100 : 0;
+  const trendMax = Math.max(1, ...trend.map((t) => Math.max(t.income, t.spent)));
+
+  const empty = spending.entries.length === 0;
+
+  return (
+    <>
+      <div className="between" style={{ marginBottom: 6 }}>
+        <h1 className="h1">Money.</h1>
+        <button className="tap" onClick={onBudget} style={{ padding: '6px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <Target size={12} /> Goals
+        </button>
+      </div>
+      <div className="muted small" style={{ marginBottom: 16 }}>{monthLabel(thisMonth)} · manual entries, your data stays local.</div>
+
+      {/* HERO — net for the month */}
+      <div
+        className="card"
+        style={{
+          background: 'linear-gradient(135deg, #1A1A2E 0%, #2A2A4E 100%)',
+          color: '#F5F0E6',
+          padding: 22,
+          marginBottom: 14,
+          border: 'none',
+        }}
+      >
+        <div className="row" style={{ gap: 6, marginBottom: 6, opacity: 0.7 }}>
+          <Wallet size={13} />
+          <span className="h2" style={{ color: '#F5F0E6', opacity: 0.7 }}>Net this month</span>
+        </div>
+        <div
+          className="mono"
+          style={{
+            fontSize: 38,
+            fontWeight: 600,
+            letterSpacing: '-0.02em',
+            color: cur.net >= 0 ? '#A8D8B0' : '#F4A89E',
+            lineHeight: 1.05,
+          }}
+        >
+          {fmtMoney(cur.net, { signed: true })}
+        </div>
+        {!empty && (
+          <div className="row" style={{ gap: 6, marginTop: 8, fontSize: 11, opacity: 0.8 }}>
+            {netDelta >= 0 ? <ArrowUpRight size={12} color="#A8D8B0" /> : <ArrowDownRight size={12} color="#F4A89E" />}
+            <span className="mono">{fmtMoney(Math.abs(netDelta))}</span>
+            <span style={{ opacity: 0.7 }}>vs {monthShort(lastMonth)}</span>
+          </div>
+        )}
+        <div className="row" style={{ gap: 10, marginTop: 18 }}>
+          <div style={{ flex: 1 }}>
+            <div className="tiny" style={{ opacity: 0.65, marginBottom: 2 }}>Income</div>
+            <div className="mono" style={{ fontSize: 15, fontWeight: 600, color: '#A8D8B0' }}>{fmtMoney(cur.income)}</div>
+          </div>
+          <div style={{ width: 1, background: 'rgba(245,240,230,0.15)' }} />
+          <div style={{ flex: 1 }}>
+            <div className="tiny" style={{ opacity: 0.65, marginBottom: 2 }}>Spent</div>
+            <div className="mono" style={{ fontSize: 15, fontWeight: 600, color: '#F4A89E' }}>{fmtMoney(cur.spent)}</div>
+          </div>
+          <div style={{ width: 1, background: 'rgba(245,240,230,0.15)' }} />
+          <div style={{ flex: 1 }}>
+            <div className="tiny" style={{ opacity: 0.65, marginBottom: 2 }}>Saved</div>
+            <div className="mono" style={{ fontSize: 15, fontWeight: 600 }}>{Math.round(savingsRate)}%</div>
+          </div>
+        </div>
+      </div>
+
+      {/* QUICK ACTIONS */}
+      <div className="row" style={{ gap: 8, marginBottom: 14 }}>
+        <button
+          className="btn"
+          style={{ flex: 1, background: '#3F7A4F', color: '#F5F0E6', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+          onClick={() => onAdd('in')}
+        >
+          <Plus size={14} /> Income
+        </button>
+        <button
+          className="btn"
+          style={{ flex: 1, background: '#B8460E', color: '#F5F0E6', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+          onClick={() => onAdd('out')}
+        >
+          <Plus size={14} /> Expense
+        </button>
+      </div>
+
+      {/* BUDGET PROGRESS */}
+      {budget > 0 ? (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div className="between" style={{ marginBottom: 8 }}>
+            <div className="row" style={{ gap: 6 }}>
+              <PieChart size={14} color="#8E4585" />
+              <span className="h2">Monthly budget</span>
+            </div>
+            <span className="mono small">{fmtMoney(cur.spent)} / {fmtMoney(budget)}</span>
+          </div>
+          <div style={{ height: 10, background: '#F5F0E6', borderRadius: 6, overflow: 'hidden', marginBottom: 6 }}>
+            <div
+              style={{
+                width: `${spentPct}%`,
+                height: '100%',
+                background: spentPct >= 100 ? '#B8460E' : spentPct >= 80 ? '#C8932E' : '#3F7A4F',
+                transition: 'width 0.3s',
+              }}
+            />
+          </div>
+          <div className="between tiny muted">
+            <span>{spentPct >= 100 ? `Over by ${fmtMoney(cur.spent - budget)}` : `${fmtMoney(budget - cur.spent)} left`}</span>
+            <span>{Math.round(spentPct)}% used</span>
+          </div>
+        </div>
+      ) : (
+        <button
+          className="tap"
+          onClick={onBudget}
+          style={{ width: '100%', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', textAlign: 'left' }}
+        >
+          <Target size={14} color="#8E4585" />
+          <span className="small" style={{ flex: 1 }}>Set a monthly budget to track spending</span>
+          <ChevronRight size={14} color="#6B6457" />
+        </button>
+      )}
+
+      {/* SAVINGS GOAL */}
+      {goal > 0 && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div className="between" style={{ marginBottom: 8 }}>
+            <div className="row" style={{ gap: 6 }}>
+              <PiggyBank size={14} color="#3F7A4F" />
+              <span className="h2">Savings goal</span>
+            </div>
+            <span className="mono small">{fmtMoney(savedThisMonth)} / {fmtMoney(goal)}</span>
+          </div>
+          <div style={{ height: 10, background: '#F5F0E6', borderRadius: 6, overflow: 'hidden', marginBottom: 6 }}>
+            <div style={{ width: `${savedPct}%`, height: '100%', background: '#3F7A4F', transition: 'width 0.3s' }} />
+          </div>
+          <div className="tiny muted">{savedPct >= 100 ? `Goal hit — ${fmtMoney(savedThisMonth - goal)} over` : `${fmtMoney(goal - savedThisMonth)} to go`}</div>
+        </div>
+      )}
+
+      {/* 6-MONTH TREND */}
+      {!empty && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div className="between" style={{ marginBottom: 12 }}>
+            <div className="row" style={{ gap: 6 }}>
+              <TrendingUp size={14} color="#3B5C6B" />
+              <span className="h2">6-month trend</span>
+            </div>
+            {prev.spent > 0 && (
+              <span className="tiny mono" style={{ color: spentDelta > 0 ? '#B8460E' : '#3F7A4F' }}>
+                {spentDelta > 0 ? '+' : ''}{Math.round(spentDelta)}% spend
+              </span>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', height: 90, marginBottom: 8 }}>
+            {trend.map((t) => (
+              <div key={t.ym} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                <div style={{ display: 'flex', gap: 2, alignItems: 'flex-end', height: 70, width: '100%', justifyContent: 'center' }}>
+                  <div
+                    title={`Income ${fmtMoney(t.income)}`}
+                    style={{
+                      width: '40%',
+                      height: `${(t.income / trendMax) * 100}%`,
+                      background: '#3F7A4F',
+                      borderRadius: '3px 3px 0 0',
+                      minHeight: t.income > 0 ? 2 : 0,
+                    }}
+                  />
+                  <div
+                    title={`Spent ${fmtMoney(t.spent)}`}
+                    style={{
+                      width: '40%',
+                      height: `${(t.spent / trendMax) * 100}%`,
+                      background: '#B8460E',
+                      borderRadius: '3px 3px 0 0',
+                      minHeight: t.spent > 0 ? 2 : 0,
+                    }}
+                  />
+                </div>
+                <div className="tiny muted" style={{ fontSize: 10 }}>{monthShort(t.ym)}</div>
+              </div>
+            ))}
+          </div>
+          <div className="row" style={{ gap: 14, fontSize: 11 }}>
+            <span className="row" style={{ gap: 4 }}><span style={{ width: 8, height: 8, background: '#3F7A4F', borderRadius: 2 }} /> <span className="muted">Income</span></span>
+            <span className="row" style={{ gap: 4 }}><span style={{ width: 8, height: 8, background: '#B8460E', borderRadius: 2 }} /> <span className="muted">Spent</span></span>
+          </div>
+        </div>
+      )}
+
+      {/* CATEGORY BREAKDOWN */}
+      {topCats.length > 0 && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div className="between" style={{ marginBottom: 12 }}>
+            <div className="row" style={{ gap: 6 }}>
+              <PieChart size={14} color="#B8460E" />
+              <span className="h2">Where it went</span>
+            </div>
+            <button className="tap" onClick={onCategories} style={{ padding: '4px 8px', fontSize: 10 }}>
+              <Pencil size={10} style={{ verticalAlign: 'middle', marginRight: 3 }} /> Categories
+            </button>
+          </div>
+          {topCats.map((c) => {
+            const pct = cur.spent > 0 ? (c.amount / cur.spent) * 100 : 0;
+            return (
+              <div key={c.id} style={{ marginBottom: 10 }}>
+                <div className="between" style={{ marginBottom: 4 }}>
+                  <span className="small"><span className="swatch" style={{ background: c.cat.color }} />{c.cat.name}</span>
+                  <span className="mono small">{fmtMoney(c.amount)}</span>
+                </div>
+                <div style={{ height: 6, background: '#F5F0E6', borderRadius: 4, overflow: 'hidden' }}>
+                  <div style={{ width: `${pct}%`, height: '100%', background: c.cat.color, transition: 'width 0.3s' }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* RECURRING */}
+      {recurring.length > 0 && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div className="row" style={{ gap: 6, marginBottom: 12 }}>
+            <Repeat size={14} color="#6E5C8E" />
+            <span className="h2">Recurring</span>
+            <span className="mono tiny muted" style={{ marginLeft: 'auto' }}>~{fmtMoney(recurring.reduce((s, r) => s + Number(r.amount || 0), 0))}/mo</span>
+          </div>
+          {recurring.map((r) => {
+            const cat = catMap[r.categoryId];
+            return (
+              <div key={r.id} className="between" style={{ padding: '6px 0', borderBottom: '1px solid #F0EAD8' }}>
+                <div className="row" style={{ gap: 8 }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: cat?.color || '#6B6457' }} />
+                  <div>
+                    <div className="small" style={{ fontWeight: 500 }}>{r.name || 'Untitled'}</div>
+                    <div className="tiny muted">{cat?.name || 'Other'}</div>
+                  </div>
+                </div>
+                <span className="mono small">{fmtMoney(r.amount)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* RECENT TRANSACTIONS */}
+      <div className="card">
+        <div className="between" style={{ marginBottom: 10 }}>
+          <div className="row" style={{ gap: 6 }}>
+            <Receipt size={14} color="#1A1A2E" />
+            <span className="h2">Recent activity</span>
+          </div>
+          <span className="tiny muted mono">{spending.entries.length} total</span>
+        </div>
+        {recent.length === 0 ? (
+          <div className="muted small" style={{ padding: '12px 0', textAlign: 'center' }}>
+            <Sparkles size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />
+            No transactions yet — add income or an expense above.
+          </div>
+        ) : (
+          recent.map((e: any) => {
+            const cat = catMap[e.categoryId];
+            const isIn = e.type === 'in';
+            return (
+              <button
+                key={e.id}
+                className="tap"
+                onClick={() => onEdit(e)}
+                style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 8px', textAlign: 'left', borderBottom: '1px solid #F0EAD8', background: 'transparent', borderRadius: 0 }}
+              >
+                <div
+                  style={{
+                    width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+                    background: (cat?.color || '#6B6457') + '22',
+                    color: cat?.color || '#6B6457',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  {isIn ? <ArrowDownRight size={15} /> : <ArrowUpRight size={15} />}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="small" style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name || (isIn ? 'Income' : 'Expense')}</div>
+                  <div className="tiny muted">{cat?.name || 'Other'} · {e.date}{e.recurring ? ' · recurring' : ''}</div>
+                </div>
+                <span className="mono small" style={{ color: isIn ? '#3F7A4F' : '#B8460E', fontWeight: 600 }}>
+                  {isIn ? '+' : '−'}{fmtMoney(e.amount).replace('−', '')}
+                </span>
+              </button>
+            );
+          })
+        )}
+      </div>
+    </>
+  );
+}
+
+function AddTransactionModal({ entry, defaultType, spending, onSave, onDelete, onClose }: any) {
+  const isEdit = !!entry;
+  const [type, setType] = useState<'in' | 'out'>(entry?.type || defaultType || 'out');
+  const cats = spending.categories.filter((c: any) => c.kind === type);
+  const [amount, setAmount] = useState<string>(entry ? String(entry.amount) : '');
+  const [name, setName] = useState<string>(entry?.name || '');
+  const [categoryId, setCategoryId] = useState<string>(entry?.categoryId || cats[0]?.id || '');
+  const [date, setDate] = useState<string>(entry?.date || todayStr());
+  const [recurring, setRecurring] = useState<boolean>(!!entry?.recurring);
+  const [note, setNote] = useState<string>(entry?.note || '');
+
+  useEffect(() => {
+    if (!cats.find((c: any) => c.id === categoryId)) setCategoryId(cats[0]?.id || '');
+  }, [type]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const save = () => {
+    const amt = parseFloat(amount);
+    if (!isFinite(amt) || amt <= 0) { toast.error('Enter an amount'); return; }
+    if (!categoryId) { toast.error('Pick a category'); return; }
+    const next = {
+      id: entry?.id || `tx_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      type, amount: Math.round(amt * 100) / 100, name: name.trim(), categoryId, date, recurring, note: note.trim() || undefined,
+    };
+    onSave(next);
+    onClose();
+  };
+
+  return (
+    <ModalShell title={isEdit ? 'Edit transaction' : 'New transaction'} onClose={onClose}>
+      <div className="row" style={{ gap: 8, marginBottom: 14 }}>
+        <button
+          className="tap"
+          onClick={() => setType('out')}
+          style={{
+            flex: 1, padding: '10px',
+            background: type === 'out' ? '#B8460E' : 'transparent',
+            color: type === 'out' ? '#F5F0E6' : '#1A1A2E',
+            borderColor: type === 'out' ? '#B8460E' : '#E4DCC8',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          }}
+        >
+          <ArrowUpRight size={14} /> Expense
+        </button>
+        <button
+          className="tap"
+          onClick={() => setType('in')}
+          style={{
+            flex: 1, padding: '10px',
+            background: type === 'in' ? '#3F7A4F' : 'transparent',
+            color: type === 'in' ? '#F5F0E6' : '#1A1A2E',
+            borderColor: type === 'in' ? '#3F7A4F' : '#E4DCC8',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          }}
+        >
+          <ArrowDownRight size={14} /> Income
+        </button>
+      </div>
+
+      <label>Amount</label>
+      <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 12 }}>
+        <span className="mono" style={{ fontSize: 20, color: '#6B6457' }}>$</span>
+        <input
+          type="number" step="0.01" inputMode="decimal" autoFocus={!isEdit}
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          placeholder="0.00"
+          style={{ flex: 1, fontSize: 20, fontFamily: 'JetBrains Mono, monospace' }}
+        />
+      </div>
+
+      <label>What's it for?</label>
+      <input
+        type="text" value={name} onChange={(e) => setName(e.target.value)}
+        placeholder={type === 'in' ? 'Paycheck, gig, dividend…' : 'Coffee, Netflix, rent…'}
+        style={{ marginBottom: 12 }}
+      />
+
+      <label>Category</label>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6, marginBottom: 12 }}>
+        {cats.map((c: any) => (
+          <button
+            key={c.id}
+            className="tap"
+            onClick={() => setCategoryId(c.id)}
+            style={{
+              padding: '8px 10px', textAlign: 'left', fontSize: 12,
+              background: categoryId === c.id ? c.color + '22' : 'transparent',
+              borderColor: categoryId === c.id ? c.color : '#E4DCC8',
+              color: '#1A1A2E',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: c.color }} />
+            {c.name}
+          </button>
+        ))}
+      </div>
+
+      <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+        <div style={{ flex: 1 }}>
+          <label>Date</label>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label>Recurring</label>
+          <button
+            className="tap"
+            onClick={() => setRecurring(!recurring)}
+            style={{
+              width: '100%', padding: '10px',
+              background: recurring ? '#6E5C8E' : 'transparent',
+              color: recurring ? '#F5F0E6' : '#1A1A2E',
+              borderColor: recurring ? '#6E5C8E' : '#E4DCC8',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            }}
+          >
+            <Repeat size={12} /> {recurring ? 'Yes' : 'No'}
+          </button>
+        </div>
+      </div>
+
+      <label>Note (optional)</label>
+      <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything to remember" style={{ marginBottom: 16 }} />
+
+      <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={save}>
+        <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> {isEdit ? 'Save changes' : 'Add transaction'}
+      </button>
+      {isEdit && (
+        <button
+          className="tap"
+          onClick={() => { if (confirm('Delete this transaction?')) { onDelete(entry.id); onClose(); } }}
+          style={{ width: '100%', color: '#B8460E', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+        >
+          <Trash2 size={12} /> Delete
+        </button>
+      )}
+    </ModalShell>
+  );
+}
+
+function MoneyGoalsModal({ spending, onSave, onClose }: any) {
+  const [budget, setBudget] = useState<string>(String(spending.monthlyBudget || ''));
+  const [goal, setGoal] = useState<string>(String(spending.savingsGoal || ''));
+  const save = () => {
+    onSave({ ...spending, monthlyBudget: parseFloat(budget) || 0, savingsGoal: parseFloat(goal) || 0 });
+    onClose();
+  };
+  return (
+    <ModalShell title="Money goals" onClose={onClose}>
+      <p className="muted small" style={{ marginBottom: 14, lineHeight: 1.4 }}>Set a monthly spending cap and a savings target. Leave at 0 to hide.</p>
+      <label>Monthly spending budget</label>
+      <div className="row" style={{ gap: 6, alignItems: 'center', marginBottom: 14 }}>
+        <span className="mono muted">$</span>
+        <input type="number" step="1" inputMode="decimal" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="e.g. 2500" />
+      </div>
+      <label>Monthly savings goal</label>
+      <div className="row" style={{ gap: 6, alignItems: 'center', marginBottom: 18 }}>
+        <span className="mono muted">$</span>
+        <input type="number" step="1" inputMode="decimal" value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="e.g. 800" />
+      </div>
+      <button className="btn" style={{ width: '100%' }} onClick={save}>
+        <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save goals
+      </button>
+    </ModalShell>
+  );
+}
+
+function MoneyCategoriesModal({ spending, onSave, onClose }: any) {
+  const [cats, setCats] = useState<any[]>(spending.categories);
+  const [name, setName] = useState('');
+  const [kind, setKind] = useState<'in' | 'out'>('out');
+  const [color, setColor] = useState('#8E4585');
+  const palette = ['#B8460E', '#C8932E', '#3F7A4F', '#3B5C6B', '#8E4585', '#6E5C8E', '#A65E8E', '#8E5C5C', '#5C8E4F', '#6B6457'];
+  const add = () => {
+    if (!name.trim()) return;
+    setCats([...cats, { id: `c_${Date.now()}`, name: name.trim(), kind, color }]);
+    setName('');
+  };
+  const remove = (id: string) => {
+    if (!confirm('Delete this category? Existing transactions keep the reference but will show as "Other".')) return;
+    setCats(cats.filter((c) => c.id !== id));
+  };
+  const rename = (id: string, n: string) => setCats(cats.map((c) => (c.id === id ? { ...c, name: n } : c)));
+  const recolor = (id: string, col: string) => setCats(cats.map((c) => (c.id === id ? { ...c, color: col } : c)));
+  return (
+    <ModalShell title="Categories" onClose={onClose}>
+      <div className="h2" style={{ marginBottom: 8 }}>Add new</div>
+      <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+        <button className="tap" onClick={() => setKind('out')} style={{ flex: 1, background: kind === 'out' ? '#B8460E22' : 'transparent', borderColor: kind === 'out' ? '#B8460E' : '#E4DCC8' }}>Expense</button>
+        <button className="tap" onClick={() => setKind('in')} style={{ flex: 1, background: kind === 'in' ? '#3F7A4F22' : 'transparent', borderColor: kind === 'in' ? '#3F7A4F' : '#E4DCC8' }}>Income</button>
+      </div>
+      <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Category name" style={{ marginBottom: 8 }} />
+      <div className="row" style={{ gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
+        {palette.map((p) => (
+          <button key={p} onClick={() => setColor(p)} style={{ width: 24, height: 24, borderRadius: 6, background: p, border: color === p ? '2px solid #1A1A2E' : '1px solid #E4DCC8', cursor: 'pointer' }} />
+        ))}
+      </div>
+      <button className="tap" style={{ width: '100%', marginBottom: 16 }} onClick={add}><Plus size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Add category</button>
+
+      <div className="h2" style={{ marginBottom: 8 }}>Existing</div>
+      {(['out', 'in'] as const).map((k) => (
+        <div key={k} style={{ marginBottom: 14 }}>
+          <div className="tiny muted" style={{ marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.1em' }}>{k === 'out' ? 'Expenses' : 'Income'}</div>
+          {cats.filter((c) => c.kind === k).map((c) => (
+            <div key={c.id} className="row" style={{ gap: 6, marginBottom: 6, alignItems: 'center' }}>
+              <input type="color" value={c.color} onChange={(e) => recolor(c.id, e.target.value)} style={{ width: 32, height: 32, padding: 0, border: '1px solid #E4DCC8', borderRadius: 6, background: 'transparent' }} />
+              <input type="text" value={c.name} onChange={(e) => rename(c.id, e.target.value)} style={{ flex: 1 }} />
+              <button className="tap" onClick={() => remove(c.id)} style={{ padding: '6px 8px', color: '#B8460E' }}><Trash2 size={12} /></button>
+            </div>
+          ))}
+        </div>
+      ))}
+
+      <button className="btn" style={{ width: '100%' }} onClick={() => { onSave({ ...spending, categories: cats }); onClose(); }}>
+        <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save categories
+      </button>
+    </ModalShell>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
 // ROOT
 // ════════════════════════════════════════════════════════════════════════════════
 export default function App() {
@@ -3752,6 +4397,7 @@ export default function App() {
   const [busyPresets, setBusyPresets] = useState<string[]>(BUSY_PRESET_DEFAULTS);
   const [checkins, setCheckins] = useState<any>({});
   const [activity, setActivity] = useState<any>({});
+  const [spending, setSpending] = useState<any>(DEFAULT_SPENDING);
   const [modal, setModal] = useState<any>(null);
 
   useEffect(() => {
@@ -3789,6 +4435,7 @@ export default function App() {
       const bp = await safeGet(K.busyPresets, BUSY_PRESET_DEFAULTS);
       const ci = await safeGet(K.checkins, {});
       const ac = await safeGet(K.activity, {});
+      const sp = migrateSpending(await safeGet(K.spending, DEFAULT_SPENDING));
       let d = await safeGet(K.daily, null);
       if (!d || d.date !== todayStr()) {
         const plan = p[todayStr()];
@@ -3822,6 +4469,7 @@ export default function App() {
       setBusyPresets(bp);
       setCheckins(ci);
       setActivity(ac);
+      setSpending(sp);
       setLoaded(true);
     })();
   }, []);
@@ -3864,6 +4512,43 @@ export default function App() {
   const saveBusyPresets = async (next: string[]) => { setBusyPresets(next); await safeSet(K.busyPresets, next); };
   const saveCheckins = async (next: any) => { setCheckins(next); await safeSet(K.checkins, next); };
   const saveActivity = async (next: any) => { setActivity(next); await safeSet(K.activity, next); };
+  const saveSpending = async (next: any) => { setSpending(next); await safeSet(K.spending, next); };
+  // Functional updates so concurrent edits (categories/goals/other tx) aren't clobbered.
+  const upsertTransaction = async (tx: any) => {
+    let isEdit = false;
+    let computed: any = null;
+    setSpending((prev: any) => {
+      const idx = prev.entries.findIndex((e: any) => e.id === tx.id);
+      isEdit = idx >= 0;
+      const nextEntries = isEdit
+        ? prev.entries.map((e: any) => (e.id === tx.id ? tx : e))
+        : [tx, ...prev.entries];
+      computed = { ...prev, entries: nextEntries };
+      return computed;
+    });
+    if (computed) await safeSet(K.spending, computed);
+    toast(isEdit ? 'Transaction updated' : `${tx.type === 'in' ? 'Income' : 'Expense'} added`);
+  };
+  const deleteTransaction = async (id: string) => {
+    let removed: any = null;
+    let computed: any = null;
+    setSpending((prev: any) => {
+      removed = prev.entries.find((e: any) => e.id === id);
+      computed = { ...prev, entries: prev.entries.filter((e: any) => e.id !== id) };
+      return computed;
+    });
+    if (computed) await safeSet(K.spending, computed);
+    // Undo restores only the affected transaction — categories/goals/other edits are safe.
+    undoToast('Transaction deleted', () => {
+      if (!removed) return;
+      setSpending((prev: any) => {
+        if (prev.entries.some((e: any) => e.id === removed.id)) return prev;
+        const next = { ...prev, entries: [removed, ...prev.entries] };
+        void safeSet(K.spending, next);
+        return next;
+      });
+    });
+  };
 
   const undoToast = (label: string, restore: () => void | Promise<void>) => {
     toast(label, { action: { label: 'Undo', onClick: () => { void restore(); } }, duration: 6000 });
@@ -4124,6 +4809,16 @@ export default function App() {
             onPlanDay={(date: string) => setModal({ type: 'planDay', date })}
           />
         )}
+        {tab === 'money' && (
+          <MoneyTab
+            spending={spending}
+            onAdd={(type: 'in' | 'out') => setModal({ type: 'addTransaction', defaultType: type })}
+            onEdit={(entry: any) => setModal({ type: 'addTransaction', entry })}
+            onDelete={deleteTransaction}
+            onBudget={() => setModal({ type: 'moneyGoals' })}
+            onCategories={() => setModal({ type: 'moneyCategories' })}
+          />
+        )}
         {tab === 'journal' && (
           <JournalTab journal={journal} onSave={saveJournal} settings={settings} />
         )}
@@ -4153,7 +4848,11 @@ export default function App() {
       {modal?.type === 'nutritionCoach' && <NutritionCoachModal settings={settings} meals={meals} body={body} onLogItem={async (item: any) => { await saveMeals(addMealEntry(meals, todayStr(), { qty: 1, ...item })); toast(`Logged ${item.name}`); }} onClose={() => setModal(null)} />}
       {modal?.type === 'planDay' && <PlanDayModal date={modal.date} plans={plans} onSave={savePlans} onClose={() => setModal(null)} />}
       {modal?.type === 'dayDetail' && <DayDetailModal date={modal.date} settings={settings} totals={totals} workout={workout} meals={meals} body={body} activity={activity} onClose={() => setModal(null)} />}
-      {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, journal, challengeHistory, busyPresets, weeklyAck }} onImport={async (d: any) => {
+      {modal?.type === 'addTransaction' && <AddTransactionModal entry={modal.entry} defaultType={modal.defaultType} spending={spending} onSave={upsertTransaction} onDelete={deleteTransaction} onClose={() => setModal(null)} />}
+      {modal?.type === 'moneyGoals' && <MoneyGoalsModal spending={spending} onSave={saveSpending} onClose={() => setModal(null)} />}
+      {modal?.type === 'moneyCategories' && <MoneyCategoriesModal spending={spending} onSave={saveSpending} onClose={() => setModal(null)} />}
+      {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, journal, challengeHistory, busyPresets, weeklyAck, spending }} onImport={async (d: any) => {
+        if (d.spending) { const sp = migrateSpending(d.spending); setSpending(sp); await safeSet(K.spending, sp); }
         if (d.settings) { setSettings(d.settings); await safeSet(K.settings, d.settings); }
         if (d.totals) { setTotals(d.totals); await safeSet(K.totals, d.totals); }
         if (d.body) { setBody(d.body); await safeSet(K.body, d.body); }
