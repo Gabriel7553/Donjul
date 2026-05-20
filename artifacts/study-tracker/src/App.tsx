@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Sun, Home, Footprints, Check, Plus, Settings as SettingsIcon, X, Music, Languages, Shield,
   Award, Save, Calendar as CalIcon, Activity, Dumbbell, Apple, ListChecks, ChevronRight, ChevronDown, ChevronLeft,
   TrendingUp, TrendingDown, Edit3, Trash2, Flame, ArrowUp, ArrowDown, Minus, Target, BookOpen, Clock, Moon, Coffee,
-  Download, Upload, History, Repeat, Zap, Play, AlertTriangle, RotateCcw, MapPin, Building2, TreePine
+  Download, Upload, History, Repeat, Zap, Play, AlertTriangle, RotateCcw, MapPin, Building2, TreePine,
+  Camera, BookMarked, TrendingUp as Journal, DollarSign, ShoppingCart, Briefcase, Car, ChevronUp, Trophy, Archive, Infinity
 } from 'lucide-react';
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -19,6 +20,9 @@ const K = {
   plans: 'st:plans',
   streaks: 'st:streaks',
   weeklyReview: 'st:weeklyReview',
+  journal: 'st:journal',
+  challengeHistory: 'st:challengeHistory',
+  busyPresets: 'st:busyPresets',
 };
 
 async function safeGet(key: string, fallback: any): Promise<any> {
@@ -165,54 +169,111 @@ const MEASUREMENT_FIELDS = [
 ];
 
 const DEFAULT_WORKOUT_SPLIT = [
-  { day: 0, name: 'Rest', rest: true, exercises: [] },
-  { day: 1, name: 'Push A · Upper Chest + Shoulders', rest: false, exercises: [
-    { name: 'Incline Barbell Press', sets: 4, reps: '6-8', weight: '' },
-    { name: 'Standing Overhead Press', sets: 4, reps: '6-8', weight: '' },
-    { name: 'Incline Dumbbell Press', sets: 3, reps: '8-10', weight: '' },
-    { name: 'Lateral Raise', sets: 4, reps: '12-15', weight: '' },
-    { name: 'Cable Tricep Pushdown', sets: 3, reps: '10-12', weight: '' },
-    { name: 'Face Pulls', sets: 3, reps: '15-20', weight: '' },
+  { day: 0, name: 'Rest — Active Recovery', rest: true, exercises: [] },
+  { day: 1, name: 'Push A — Shoulder Focus', rest: false, exercises: [
+    { name: 'Incline Barbell Press', sets: 4, reps: '6-10', notes: 'RPE 8 — upper chest and shoulder tie-in' },
+    { name: 'Seated DB Shoulder Press', sets: 4, reps: '8-10', notes: 'RPE 8 — full range, no locking out' },
+    { name: 'Cable Lateral Raises (unilateral)', sets: 4, reps: '15-20', notes: 'RPE 9 — KEY V-taper exercise, strict form' },
+    { name: 'Cable Triceps Pushdowns (rope)', sets: 3, reps: '12-15', notes: 'RPE 9 — squeeze fully at bottom' },
+    { name: 'Overhead Triceps Extension (cable)', sets: 3, reps: '10-12', notes: 'RPE 9 — long head stretch' },
   ]},
-  { day: 2, name: 'Pull A · Lat Width', rest: false, exercises: [
-    { name: 'Pull-ups (or Lat Pulldown)', sets: 4, reps: '6-10', weight: '' },
-    { name: 'Wide-Grip Lat Pulldown', sets: 3, reps: '10-12', weight: '' },
-    { name: 'Chest-Supported Row', sets: 4, reps: '8-10', weight: '' },
-    { name: 'Straight-Arm Pulldown', sets: 3, reps: '12-15', weight: '' },
-    { name: 'Hammer Curl', sets: 3, reps: '10-12', weight: '' },
-    { name: 'Rear Delt Flye', sets: 3, reps: '15-20', weight: '' },
+  { day: 2, name: 'Pull A — Width Focus', rest: false, exercises: [
+    { name: 'Weighted Pull-Ups (wide grip)', sets: 4, reps: '6-10', notes: 'RPE 8 — #1 lat width builder, full stretch' },
+    { name: 'Seated Cable Row (wide, FLARED)', sets: 3, reps: '10-12', notes: 'RPE 8 — elbows flared ~45 deg, upper back' },
+    { name: 'Single-Arm DB Row (TUCKED)', sets: 3, reps: '10-12', notes: 'RPE 8 — elbows tucked to ribs, hits lats' },
+    { name: 'Rear Delt Fly (pec deck reverse)', sets: 3, reps: '15-20', notes: 'RPE 9 — slow 3s eccentric, shoulder health' },
+    { name: 'Incline DB Curl', sets: 3, reps: '10-12', notes: 'RPE 9 — peak bicep stretch at bottom' },
+    { name: 'Hammer Curls', sets: 3, reps: '12-15', notes: 'RPE 9 — brachialis and forearm width' },
   ]},
-  { day: 3, name: 'Legs A · Quad-Dominant', rest: false, exercises: [
-    { name: 'Back Squat', sets: 4, reps: '6-8', weight: '' },
-    { name: 'Leg Press', sets: 4, reps: '10-12', weight: '' },
-    { name: 'Walking Lunges', sets: 3, reps: '10 each', weight: '' },
-    { name: 'Leg Extension', sets: 3, reps: '12-15', weight: '' },
-    { name: 'Lying Leg Curl', sets: 3, reps: '10-12', weight: '' },
-    { name: 'Standing Calf Raise', sets: 4, reps: '12-15', weight: '' },
+  { day: 3, name: 'Legs A — Quad + HIIT', rest: false, exercises: [
+    { name: 'Back Squat', sets: 4, reps: '6-8', notes: 'RPE 8 — controlled descent, drive through heels' },
+    { name: 'Leg Press (feet high & wide)', sets: 3, reps: '12-15', notes: 'RPE 9 — builds quad sweep' },
+    { name: 'Leg Extension Machine', sets: 3, reps: '12-15', notes: 'RPE 9 — full squeeze at top' },
+    { name: 'Seated Hamstring Curl', sets: 3, reps: '10-12', notes: 'RPE 9 — slow 3s eccentric, full contraction' },
+    { name: 'Standing Calf Raises', sets: 4, reps: '15-20', notes: 'RPE 9 — pause 1s at top' },
+    { name: 'Hanging Leg Raises', sets: 3, reps: '15-20', notes: 'RPE 9 — no swinging, controlled' },
+    { name: 'HIIT Finisher (bike/treadmill)', sets: 1, reps: '10 min', notes: '20s max sprint / 40s rest × 10 rounds' },
   ]},
-  { day: 4, name: 'Pull B · Back Thickness + Arms', rest: false, exercises: [
-    { name: 'Pull-ups (weighted if possible)', sets: 4, reps: '5-8', weight: '' },
-    { name: 'Barbell Row', sets: 4, reps: '6-8', weight: '' },
-    { name: 'Seated Cable Row', sets: 3, reps: '10-12', weight: '' },
-    { name: 'Barbell Curl', sets: 4, reps: '8-10', weight: '' },
-    { name: 'Incline Dumbbell Curl', sets: 3, reps: '10-12', weight: '' },
-    { name: 'Face Pulls', sets: 3, reps: '15-20', weight: '' },
+  { day: 4, name: 'Push B — Chest Focus', rest: false, exercises: [
+    { name: 'Barbell Bench Press (flat)', sets: 4, reps: '6-10', notes: 'RPE 8 — retract scapula, controlled descent' },
+    { name: 'Incline DB Press (30 deg)', sets: 3, reps: '8-10', notes: 'RPE 8 — targets upper chest' },
+    { name: 'Cable Lateral Raises (bilateral)', sets: 4, reps: '15-20', notes: 'RPE 9 — different stimulus than Day 1' },
+    { name: 'Dips (weighted if possible)', sets: 3, reps: '8-12', notes: 'RPE 9 — lean forward for chest emphasis' },
+    { name: 'Triceps Overhead Ext. (EZ bar)', sets: 3, reps: '10-12', notes: 'RPE 9 — full overhead stretch' },
   ]},
-  { day: 5, name: 'Legs B · Posterior Chain', rest: false, exercises: [
-    { name: 'Romanian Deadlift', sets: 4, reps: '6-8', weight: '' },
-    { name: 'Hip Thrust', sets: 4, reps: '8-10', weight: '' },
-    { name: 'Bulgarian Split Squat', sets: 3, reps: '8-10 each', weight: '' },
-    { name: 'Glute Bridge (single leg)', sets: 3, reps: '12 each', weight: '' },
-    { name: 'Seated Leg Curl', sets: 3, reps: '10-12', weight: '' },
-    { name: 'Seated Calf Raise', sets: 4, reps: '15-20', weight: '' },
+  { day: 5, name: 'Pull B — Thickness Focus', rest: false, exercises: [
+    { name: 'Pull-Ups AMRAP (bodyweight)', sets: 4, reps: 'AMRAP', notes: 'RPE 9 — log reps each set, beat weekly' },
+    { name: 'Barbell Row (TUCKED)', sets: 4, reps: '8-10', notes: 'RPE 8 — elbows tucked, heavy lat thickness' },
+    { name: 'Chest-Supported DB Row (FLARED)', sets: 3, reps: '10-12', notes: 'RPE 8 — elbows flared ~45 deg, upper back' },
+    { name: 'Straight-Arm Lat Pulldown', sets: 3, reps: '12-15', notes: 'RPE 9 — isolation, squeeze lats at bottom' },
+    { name: 'Face Pulls (cable rope)', sets: 3, reps: '15-20', notes: 'RPE 8 — external rotation, shoulder health' },
+    { name: 'Preacher Curl or EZ Bar Curl', sets: 3, reps: '10-12', notes: 'RPE 9 — strict form, no body swing' },
+    { name: 'Reverse Curls', sets: 2, reps: '12-15', notes: 'RPE 8 — forearm and brachialis' },
   ]},
-  { day: 6, name: 'Shoulders + Arms Specialization', rest: false, exercises: [
-    { name: 'Seated Dumbbell Press', sets: 4, reps: '8-10', weight: '' },
-    { name: 'Cable Lateral Raise', sets: 4, reps: '12-15', weight: '' },
-    { name: 'Rear Delt Cable Flye', sets: 3, reps: '15-20', weight: '' },
-    { name: 'Close-Grip Bench Press', sets: 3, reps: '8-10', weight: '' },
-    { name: 'EZ-Bar Curl', sets: 3, reps: '10-12', weight: '' },
-    { name: 'Cable Tricep Overhead Ext.', sets: 3, reps: '12-15', weight: '' },
+  { day: 6, name: 'Legs B — Posterior Chain + HIIT', rest: false, exercises: [
+    { name: 'Romanian Deadlift (RDL)', sets: 4, reps: '8-10', notes: 'RPE 8 — hinge at hips, big hamstring stretch' },
+    { name: 'Hip Thrust — Barbell', sets: 4, reps: '10-12', notes: 'RPE 9 — squeeze glutes hard at top' },
+    { name: 'Walking Lunges (DB)', sets: 3, reps: '10/leg', notes: 'RPE 8 — long stride, knee tracks toe' },
+    { name: 'Lying Hamstring Curl', sets: 3, reps: '10-12', notes: 'RPE 9 — slow 3s down, full squeeze' },
+    { name: 'Seated Calf Raises', sets: 4, reps: '15-20', notes: 'RPE 9 — different angle vs Day 3' },
+    { name: 'Ab Wheel Rollouts', sets: 3, reps: '10-12', notes: 'RPE 9 — slow, core braced throughout' },
+    { name: 'HIIT Finisher (bike/treadmill)', sets: 1, reps: '12 min', notes: '20s max sprint / 40s rest × 12 rounds' },
+  ]},
+];
+
+const HOME_WORKOUT_SPLIT = [
+  { day: 0, name: 'Rest — Active Recovery', rest: true, exercises: [] },
+  { day: 1, name: 'Home Push A — Shoulder Focus', rest: false, exercises: [
+    { name: 'Pike Push-Ups', sets: 4, reps: '10-12', notes: 'Hands close, hips high — mimics overhead press' },
+    { name: 'Wall Handstand Hold / Kick-Up', sets: 3, reps: '20-30s', notes: 'Build shoulder strength and balance' },
+    { name: 'Feet-Elevated Push-Ups', sets: 4, reps: '12-15', notes: 'Feet on chair — upper chest and front delt' },
+    { name: 'Prone Y Raises', sets: 3, reps: '20', notes: 'Face down, arms in Y — side/rear delt' },
+    { name: 'Diamond Push-Ups', sets: 3, reps: '15-20', notes: 'Tricep emphasis' },
+    { name: 'Chair Dips', sets: 3, reps: '12-15', notes: 'Hands on chair behind you, dip down' },
+  ]},
+  { day: 2, name: 'Home Pull A — Width Focus', rest: false, exercises: [
+    { name: 'Table Inverted Rows — Wide (FLARED)', sets: 4, reps: '10-12', notes: 'Elbows flared — upper back/rear delts' },
+    { name: 'Table Inverted Rows — Narrow (TUCKED)', sets: 3, reps: '10-12', notes: 'Elbows tucked — lat thickness' },
+    { name: 'Prone Superman Hold', sets: 3, reps: '30-45s', notes: 'Arms forward, lift chest and legs off floor' },
+    { name: 'Prone Y Raises', sets: 3, reps: '20', notes: 'Face down, arms in Y — upper back width' },
+    { name: 'Prone T Raises', sets: 3, reps: '20', notes: 'Arms out like a T — rear delt and rhomboids' },
+    { name: 'Prone W Raises', sets: 3, reps: '15', notes: 'Elbows bent 90 deg, pull back — traps' },
+    { name: 'Table Edge Isometric Curl', sets: 3, reps: '20s each', notes: 'Palms up under table edge, push up hard' },
+  ]},
+  { day: 3, name: 'Home Legs A — Quad + HIIT', rest: false, exercises: [
+    { name: 'Jump Squats', sets: 4, reps: '15', notes: 'Explosive up, soft controlled landing' },
+    { name: 'Bulgarian Split Squats (chair)', sets: 3, reps: '10/leg', notes: 'Long stride, knee stays behind toe' },
+    { name: 'Wall Sit', sets: 3, reps: '60 sec', notes: 'Thighs parallel, back flat on wall' },
+    { name: 'Step-Ups on Chair', sets: 3, reps: '12/leg', notes: 'Full hip extension at the top' },
+    { name: 'Single-Leg Calf Raises', sets: 4, reps: '20', notes: 'Hand on wall for balance' },
+    { name: 'Floor Leg Raises', sets: 3, reps: '20', notes: 'Lying flat, legs straight, raise to 90 deg' },
+    { name: 'HIIT: High Knees or Burpees', sets: 1, reps: '10 min', notes: '20s max effort / 40s rest × 10 rounds' },
+  ]},
+  { day: 4, name: 'Home Push B — Chest Focus', rest: false, exercises: [
+    { name: 'Standard Push-Ups', sets: 4, reps: '15-20', notes: 'Slow 3s down, explosive push up' },
+    { name: 'Wide-Grip Push-Ups', sets: 3, reps: '12-15', notes: 'Hands wide = more chest' },
+    { name: 'Decline Push-Ups (feet on chair)', sets: 3, reps: '10-12', notes: 'Targets upper chest heavily' },
+    { name: 'Archer Push-Ups', sets: 3, reps: '8-10/side', notes: 'One arm bent, one straight — unilateral' },
+    { name: 'Chair Dips', sets: 3, reps: '12-15', notes: 'Full range, lean forward for chest' },
+    { name: 'Close-Grip Push-Ups', sets: 3, reps: '12', notes: 'Hands close, tricep isolation' },
+  ]},
+  { day: 5, name: 'Home Pull B — Thickness Focus', rest: false, exercises: [
+    { name: 'Table Inverted Rows — Narrow (TUCKED)', sets: 4, reps: '10-12', notes: 'Elbows tucked — lat thickness focus' },
+    { name: 'Table Inverted Rows — Wide (FLARED)', sets: 3, reps: '10-12', notes: 'Elbows flared — upper back/rear delts' },
+    { name: 'Table Inverted Rows — Explosive', sets: 3, reps: '8-10', notes: 'Pull fast, lower slow 4s' },
+    { name: 'Prone Superman — Alternating', sets: 3, reps: '12/side', notes: 'One arm forward, one back' },
+    { name: 'Prone I Raises', sets: 3, reps: '15', notes: 'Arms straight overhead, lift — lower traps' },
+    { name: 'Prone W Raises', sets: 3, reps: '15', notes: 'Elbows bent, pull back — mid traps' },
+    { name: 'Bodyweight Good Mornings', sets: 3, reps: '15', notes: 'Hands behind head, hinge forward' },
+  ]},
+  { day: 6, name: 'Home Legs B — Posterior + HIIT', rest: false, exercises: [
+    { name: 'Single-Leg RDL (bodyweight)', sets: 3, reps: '10/leg', notes: 'Arms forward for balance, hinge at hips' },
+    { name: 'Glute Bridges (bodyweight)', sets: 4, reps: '20', notes: 'Drive hips up, hard squeeze at top' },
+    { name: 'Walking Lunges', sets: 3, reps: '12/leg', notes: 'Long stride, control the descent' },
+    { name: 'Nordic Hamstring Curl (feet under couch)', sets: 3, reps: '6-8', notes: 'Kneel, hook feet, lower slowly — brutal' },
+    { name: 'Single-Leg Calf Raises', sets: 4, reps: '20', notes: 'Slow and controlled both ways' },
+    { name: 'Mountain Climbers', sets: 3, reps: '30 sec', notes: 'Core and cardio — drive knees fast' },
+    { name: 'HIIT: Burpees or Jump Squats', sets: 1, reps: '12 min', notes: '20s max / 40s rest × 12 rounds' },
   ]},
 ];
 
@@ -295,9 +356,9 @@ function GlobalStyles() {
         display: flex; justify-content: space-around; max-width: 480px; margin: 0 auto; z-index: 30;
       }
       .nav-btn {
-        background: none; border: none; padding: 8px 12px; cursor: pointer; display: flex;
-        flex-direction: column; align-items: center; gap: 4px; color: #6B6457; font-family: inherit; font-size: 11px;
-        border-radius: 8px; transition: all 0.15s;
+        background: none; border: none; padding: 6px 8px; cursor: pointer; display: flex;
+        flex-direction: column; align-items: center; gap: 3px; color: #6B6457; font-family: inherit; font-size: 9.5px;
+        border-radius: 8px; transition: all 0.15s; flex: 1;
       }
       .nav-btn.active { color: #1A1A2E; background: #F5F0E6; }
       .sparkline { display: flex; align-items: flex-end; gap: 2px; height: 24px; }
@@ -331,7 +392,8 @@ function BottomNav({ tab, setTab }: { tab: string; setTab: (t: string) => void }
   const items = [
     { key: 'today', label: 'Today', icon: Sun },
     { key: 'body', label: 'Body', icon: Activity },
-    { key: 'workout', label: 'Workout', icon: Dumbbell },
+    { key: 'workout', label: 'Lift', icon: Dumbbell },
+    { key: 'journal', label: 'Journal', icon: BookMarked },
     { key: 'plan', label: 'Plan', icon: CalIcon },
     { key: 'history', label: 'History', icon: History },
   ];
@@ -975,22 +1037,210 @@ function BodyTab({ settings, body, workout, onAddEntry, onEditGoals }: any) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
+// JOURNAL TAB
+// ════════════════════════════════════════════════════════════════════════════════
+function JournalTab({ journal, onSave }: any) {
+  const today = todayStr();
+  const todayEntry = journal[today] || { note: '', trades: [] };
+  const [note, setNote] = useState(todayEntry.note || '');
+  const [trades, setTrades] = useState<any[]>(todayEntry.trades || []);
+  const [view, setView] = useState<'today'|'trades'|'history'>('today');
+  const [tradeForm, setTradeForm] = useState({ symbol: '', direction: 'L', entry: '', exit: '', pnl: '', notes: '' });
+  const [showTradeForm, setShowTradeForm] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const saveNote = async () => {
+    const next = { ...journal, [today]: { ...todayEntry, note, trades } };
+    await onSave(next);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  };
+
+  const addTrade = async () => {
+    const t = { ...tradeForm, id: 't' + Date.now(), date: today };
+    const newTrades = [...trades, t];
+    setTrades(newTrades);
+    await onSave({ ...journal, [today]: { ...todayEntry, note, trades: newTrades } });
+    setTradeForm({ symbol: '', direction: 'L', entry: '', exit: '', pnl: '', notes: '' });
+    setShowTradeForm(false);
+  };
+
+  const removeTrade = async (id: string) => {
+    const newTrades = trades.filter((t: any) => t.id !== id);
+    setTrades(newTrades);
+    await onSave({ ...journal, [today]: { ...todayEntry, note, trades: newTrades } });
+  };
+
+  const allDates = Object.keys(journal).sort((a, b) => b.localeCompare(a));
+  const allTrades = allDates.flatMap((d: string) => (journal[d]?.trades || []).map((t: any) => ({ ...t, date: t.date || d })));
+  const totalPnl = allTrades.reduce((sum: number, t: any) => sum + (parseFloat(t.pnl) || 0), 0);
+  const winTrades = allTrades.filter((t: any) => parseFloat(t.pnl) > 0);
+  const winRate = allTrades.length > 0 ? Math.round((winTrades.length / allTrades.length) * 100) : 0;
+
+  return (
+    <>
+      <h1 className="h1" style={{ marginBottom: 6 }}>Journal.</h1>
+      <div className="row" style={{ gap: 6, marginBottom: 16 }}>
+        <button className={`tap ${view === 'today' ? 'active' : ''}`} onClick={() => setView('today')}>Today</button>
+        <button className={`tap ${view === 'trades' ? 'active' : ''}`} onClick={() => setView('trades')}>
+          <DollarSign size={11} style={{ verticalAlign: 'middle', marginRight: 3 }} />Trades
+        </button>
+        <button className={`tap ${view === 'history' ? 'active' : ''}`} onClick={() => setView('history')}>History</button>
+      </div>
+
+      {view === 'today' && (
+        <>
+          <div className="card" style={{ padding: 14, marginBottom: 12 }}>
+            <div className="between" style={{ marginBottom: 8 }}>
+              <span className="h3">Daily notes</span>
+              <span className="mono tiny muted">{fmtDate(today)}</span>
+            </div>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="What's on your mind? Progress, setbacks, ideas, reflections…"
+              style={{ width: '100%', minHeight: 140, fontFamily: 'Fraunces, serif', fontSize: 15, padding: 10, border: '1px solid #E4DCC8', borderRadius: 8, background: '#FBF7EE', color: '#1A1A2E', resize: 'vertical', lineHeight: 1.6 }}
+            />
+            <button className="btn" style={{ width: '100%', marginTop: 10 }} onClick={saveNote}>
+              {saved ? <><Check size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Saved</> : <><Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Save note</>}
+            </button>
+          </div>
+
+          <div className="card" style={{ padding: 14 }}>
+            <div className="between" style={{ marginBottom: 10 }}>
+              <span className="h3">Today's trades</span>
+              <button className="tap" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => setShowTradeForm(!showTradeForm)}>
+                <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 3 }} />Add
+              </button>
+            </div>
+
+            {showTradeForm && (
+              <div style={{ padding: 12, background: '#FBF7EE', borderRadius: 8, border: '1px solid #E4DCC8', marginBottom: 12 }}>
+                <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+                  <div style={{ flex: 2 }}><label>Symbol</label><input type="text" value={tradeForm.symbol} onChange={e => setTradeForm({ ...tradeForm, symbol: e.target.value.toUpperCase() })} placeholder="AAPL" /></div>
+                  <div style={{ flex: 1 }}>
+                    <label>Side</label>
+                    <div className="row" style={{ gap: 6, marginTop: 4 }}>
+                      <button className={`tap ${tradeForm.direction === 'L' ? 'active' : ''}`} style={{ flex: 1, padding: '6px 0' }} onClick={() => setTradeForm({ ...tradeForm, direction: 'L' })}>Long</button>
+                      <button className={`tap ${tradeForm.direction === 'S' ? 'active' : ''}`} style={{ flex: 1, padding: '6px 0' }} onClick={() => setTradeForm({ ...tradeForm, direction: 'S' })}>Short</button>
+                    </div>
+                  </div>
+                </div>
+                <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+                  <div style={{ flex: 1 }}><label>Entry $</label><input type="number" value={tradeForm.entry} onChange={e => setTradeForm({ ...tradeForm, entry: e.target.value })} placeholder="0.00" /></div>
+                  <div style={{ flex: 1 }}><label>Exit $</label><input type="number" value={tradeForm.exit} onChange={e => setTradeForm({ ...tradeForm, exit: e.target.value })} placeholder="0.00" /></div>
+                  <div style={{ flex: 1 }}><label>P&amp;L $</label><input type="number" value={tradeForm.pnl} onChange={e => setTradeForm({ ...tradeForm, pnl: e.target.value })} placeholder="0.00" /></div>
+                </div>
+                <label>Notes</label>
+                <input type="text" value={tradeForm.notes} onChange={e => setTradeForm({ ...tradeForm, notes: e.target.value })} placeholder="Setup, reason, lesson…" style={{ marginBottom: 10 }} />
+                <div className="row" style={{ gap: 8 }}>
+                  <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => setShowTradeForm(false)}>Cancel</button>
+                  <button className="btn" style={{ flex: 1 }} onClick={addTrade} disabled={!tradeForm.symbol}>
+                    <Plus size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />Add trade
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {trades.length === 0 && <p className="muted small">No trades logged today.</p>}
+            {trades.map((t: any) => (
+              <div key={t.id} className="card" style={{ padding: 10, marginBottom: 8, borderLeft: `3px solid ${parseFloat(t.pnl) >= 0 ? '#4A6741' : '#B8460E'}` }}>
+                <div className="between">
+                  <div>
+                    <div className="row" style={{ gap: 8 }}>
+                      <span className="small" style={{ fontWeight: 700 }}>{t.symbol}</span>
+                      <span className="mono tiny" style={{ color: t.direction === 'L' ? '#4A6741' : '#B8460E', background: t.direction === 'L' ? '#E8F0E6' : '#F5E1D5', padding: '1px 6px', borderRadius: 4 }}>{t.direction === 'L' ? 'LONG' : 'SHORT'}</span>
+                      {t.pnl && <span className="mono tiny" style={{ color: parseFloat(t.pnl) >= 0 ? '#4A6741' : '#B8460E', fontWeight: 600 }}>{parseFloat(t.pnl) >= 0 ? '+' : ''}{t.pnl}</span>}
+                    </div>
+                    {(t.entry || t.exit) && <div className="mono tiny muted" style={{ marginTop: 2 }}>{t.entry && `Entry ${t.entry}`}{t.exit && ` → Exit ${t.exit}`}</div>}
+                    {t.notes && <div className="muted tiny" style={{ marginTop: 4, fontStyle: 'italic' }}>{t.notes}</div>}
+                  </div>
+                  <button onClick={() => removeTrade(t.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 4 }}><Trash2 size={14} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {view === 'trades' && (
+        <>
+          {allTrades.length > 0 && (
+            <div className="card" style={{ padding: 14, marginBottom: 12, background: '#EEF8EC', border: '1px solid #C8E4C4' }}>
+              <div className="h3" style={{ marginBottom: 10 }}>Summary</div>
+              <div className="row" style={{ gap: 16, flexWrap: 'wrap' }}>
+                <div><div className="mono tiny muted">Total P&L</div><div className="mono small" style={{ fontWeight: 700, color: totalPnl >= 0 ? '#4A6741' : '#B8460E' }}>{totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(2)}</div></div>
+                <div><div className="mono tiny muted">Win rate</div><div className="mono small" style={{ fontWeight: 700 }}>{winRate}%</div></div>
+                <div><div className="mono tiny muted">Trades</div><div className="mono small" style={{ fontWeight: 700 }}>{allTrades.length}</div></div>
+                <div><div className="mono tiny muted">W / L</div><div className="mono small" style={{ fontWeight: 700, color: '#4A6741' }}>{winTrades.length}<span style={{ color: '#6B6457' }}>/</span><span style={{ color: '#B8460E' }}>{allTrades.length - winTrades.length}</span></div></div>
+              </div>
+            </div>
+          )}
+          {allTrades.length === 0 && <p className="muted small" style={{ marginBottom: 12 }}>No trades logged yet.</p>}
+          {allTrades.slice(0, 30).map((t: any, i: number) => (
+            <div key={i} className="card" style={{ padding: 10, marginBottom: 8, borderLeft: `3px solid ${parseFloat(t.pnl) >= 0 ? '#4A6741' : '#B8460E'}` }}>
+              <div className="between">
+                <div>
+                  <div className="row" style={{ gap: 8 }}>
+                    <span className="small" style={{ fontWeight: 700 }}>{t.symbol}</span>
+                    <span className="mono tiny" style={{ color: t.direction === 'L' ? '#4A6741' : '#B8460E' }}>{t.direction === 'L' ? 'LONG' : 'SHORT'}</span>
+                    {t.pnl && <span className="mono tiny" style={{ color: parseFloat(t.pnl) >= 0 ? '#4A6741' : '#B8460E', fontWeight: 600 }}>{parseFloat(t.pnl) >= 0 ? '+' : ''}{t.pnl}</span>}
+                    <span className="mono tiny muted">{fmtShortDate(t.date)}</span>
+                  </div>
+                  {t.notes && <div className="muted tiny" style={{ marginTop: 4, fontStyle: 'italic' }}>{t.notes}</div>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {view === 'history' && (
+        <>
+          {allDates.length === 0 && <p className="muted small">No journal entries yet.</p>}
+          {allDates.slice(0, 30).map((d: string) => {
+            const entry = journal[d];
+            const dayTrades = entry?.trades || [];
+            const dayPnl = dayTrades.reduce((s: number, t: any) => s + (parseFloat(t.pnl) || 0), 0);
+            return (
+              <div key={d} className="card" style={{ padding: 12, marginBottom: 8 }}>
+                <div className="between" style={{ marginBottom: 6 }}>
+                  <span className="small" style={{ fontWeight: 600 }}>{fmtDate(d)}</span>
+                  <div className="row" style={{ gap: 10 }}>
+                    {dayTrades.length > 0 && <span className="mono tiny" style={{ color: dayPnl >= 0 ? '#4A6741' : '#B8460E' }}>{dayTrades.length} trades {dayPnl >= 0 ? '+' : ''}{dayPnl.toFixed(0)}</span>}
+                    {entry?.note && <BookMarked size={12} color="#6B6457" />}
+                  </div>
+                </div>
+                {entry?.note && <p className="small muted" style={{ lineHeight: 1.5, maxHeight: 60, overflow: 'hidden', WebkitLineClamp: 3, display: '-webkit-box', WebkitBoxOrient: 'vertical' }}>{entry.note}</p>}
+              </div>
+            );
+          })}
+        </>
+      )}
+    </>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
 // WORKOUT TAB
 // ════════════════════════════════════════════════════════════════════════════════
 function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, settings }: any) {
   const today = dayOfWeek();
   const mode = workout.mode || 'sequence';
+  const location = workout.location || 'gym';
+  const activeSplit = location === 'home' ? (workout.homeSplit || HOME_WORKOUT_SPLIT) : (workout.split || DEFAULT_WORKOUT_SPLIT);
+
   let todayWorkout: any;
   let todayWorkoutIdx: number;
   if (mode === 'calendar') {
-    todayWorkout = workout.split.find((w: any) => w.day === today) || workout.split[0];
-    todayWorkoutIdx = workout.split.indexOf(todayWorkout);
+    todayWorkout = activeSplit.find((w: any) => w.day === today) || activeSplit[0];
+    todayWorkoutIdx = activeSplit.indexOf(todayWorkout);
   } else {
-    const nonRestDays = workout.split.filter((d: any) => !d.rest);
+    const nonRestDays = activeSplit.filter((d: any) => !d.rest);
     const seqPos = workout.sequencePosition || 1;
     const seqIdx = ((seqPos - 1) % nonRestDays.length);
     todayWorkout = nonRestDays[seqIdx];
-    todayWorkoutIdx = workout.split.indexOf(todayWorkout);
+    todayWorkoutIdx = activeSplit.indexOf(todayWorkout);
   }
   const todayLog = workout.logs[todayStr()];
 
@@ -1015,8 +1265,17 @@ function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, setting
     await onSaveWorkout({ ...workout, mode: newMode });
   };
 
+  const toggleLocation = async () => {
+    const newLoc = location === 'gym' ? 'home' : 'gym';
+    if (newLoc === 'home' && !workout.homeSplit) {
+      await onSaveWorkout({ ...workout, location: newLoc, homeSplit: HOME_WORKOUT_SPLIT });
+    } else {
+      await onSaveWorkout({ ...workout, location: newLoc });
+    }
+  };
+
   const advanceSequence = async () => {
-    const nonRestDays = workout.split.filter((d: any) => !d.rest);
+    const nonRestDays = activeSplit.filter((d: any) => !d.rest);
     const next = ((workout.sequencePosition || 1) % nonRestDays.length) + 1;
     await onSaveWorkout({ ...workout, sequencePosition: next });
   };
@@ -1024,13 +1283,17 @@ function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, setting
   return (
     <>
       <h1 className="h1" style={{ marginBottom: 6 }}>Today's lift.</h1>
-      <div className="between" style={{ marginBottom: 14 }}>
-        <span className="muted tiny" style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-          {mode === 'sequence' ? `Sequence mode · workout ${workout.sequencePosition || 1}` : 'Calendar mode'}
-        </span>
+      <div className="row" style={{ gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+        <button onClick={toggleLocation} className={`tap ${location === 'gym' ? 'active' : ''}`} style={{ padding: '6px 14px', fontSize: 12 }}>
+          <Building2 size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Gym
+        </button>
+        <button onClick={toggleLocation} className={`tap ${location === 'home' ? 'active' : ''}`} style={{ padding: '6px 14px', fontSize: 12 }}>
+          <TreePine size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Home
+        </button>
+        <div style={{ flex: 1 }} />
         <button onClick={toggleMode} className="tap" style={{ padding: '4px 10px', fontSize: 11 }}>
           <Repeat size={11} style={{ verticalAlign: 'middle', marginRight: 4 }} />
-          Switch to {mode === 'sequence' ? 'calendar' : 'sequence'}
+          {mode === 'sequence' ? 'Calendar' : 'Sequence'}
         </button>
       </div>
 
@@ -1458,17 +1721,49 @@ function LogTimeModal({ subject, settings, daily, onLog, onSet, onClose, editMod
   );
 }
 
-function BusyModal({ onConfirm, onClose }: any) {
+const BUSY_PRESET_DEFAULTS = ['Shopping', 'Work', 'Errands', 'Gym', 'Appointment', 'Commute', 'Family'];
+
+function BusyModal({ onConfirm, onClose, busyPresets, onSavePresets }: any) {
   const [mins, setMins] = useState(60);
+  const [reason, setReason] = useState('');
+  const [showSave, setShowSave] = useState(false);
+  const presets: string[] = busyPresets || BUSY_PRESET_DEFAULTS;
+
+  const confirm = async () => {
+    if (reason && showSave && !presets.includes(reason)) {
+      await onSavePresets([...presets, reason]);
+    }
+    onConfirm(mins, reason);
+  };
+
   return (
     <ModalShell title="Stepping out" onClose={onClose} icon={<Footprints size={18} color="#C8932E" />}>
-      <p className="muted small" style={{ marginBottom: 14 }}>I'll shift remaining blocks. Tap "I'm back" when you return.</p>
-      <label>Roughly how long?</label>
-      <input type="number" value={mins} onChange={(e) => setMins(parseInt(e.target.value) || 0)} style={{ marginBottom: 12 }} />
-      <div className="row" style={{ gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
+      <p className="muted small" style={{ marginBottom: 14 }}>Your schedule shifts automatically. Tap "I'm back" when you return.</p>
+
+      <label style={{ marginBottom: 6 }}>What are you doing?</label>
+      <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+        {presets.map((p: string) => (
+          <button key={p} className={`tap ${reason === p ? 'active' : ''}`} style={{ padding: '6px 12px', fontSize: 12 }} onClick={() => setReason(reason === p ? '' : p)}>{p}</button>
+        ))}
+      </div>
+      <div className="row" style={{ gap: 8, marginBottom: 14 }}>
+        <input type="text" placeholder="Or type something..." value={reason} onChange={(e) => { setReason(e.target.value); setShowSave(true); }} style={{ flex: 1 }} />
+        {reason && !presets.includes(reason) && (
+          <button className={`tap ${showSave ? 'active' : ''}`} style={{ padding: '6px 10px', fontSize: 11 }} onClick={() => setShowSave(!showSave)} title="Save for next time">
+            <Save size={12} />
+          </button>
+        )}
+      </div>
+
+      <label>How long?</label>
+      <div className="row" style={{ gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         {[30, 60, 90, 120, 180].map(m => <button key={m} className={`tap ${mins === m ? 'active' : ''}`} onClick={() => setMins(m)}>{m < 60 ? `${m}m` : `${m / 60}h`}</button>)}
       </div>
-      <button className="btn" style={{ width: '100%' }} onClick={() => onConfirm(mins)}>Set busy</button>
+      <input type="number" value={mins} onChange={(e) => setMins(parseInt(e.target.value) || 0)} style={{ marginBottom: 14 }} />
+      <button className="btn" style={{ width: '100%' }} onClick={confirm}>
+        <Footprints size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+        {reason ? `Out for ${reason} · ${mins < 60 ? mins + 'm' : mins / 60 + 'h'}` : `Set busy · ${mins < 60 ? mins + 'm' : mins / 60 + 'h'}`}
+      </button>
     </ModalShell>
   );
 }
@@ -1700,8 +1995,40 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
   const [mode, setMode] = useState('preset');
   const [newPreset, setNewPreset] = useState({ name: '', protein: '', carbs: '', fat: '', calories: '', source: '' });
   const [manual, setManual] = useState({ protein: '', carbs: '', fat: '', calories: '' });
+  const [scanState, setScanState] = useState<'idle'|'scanning'|'done'|'error'>('idle');
+  const [scanResult, setScanResult] = useState<any>(null);
+  const [scanError, setScanError] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
   const today = todayStr();
   const todayMacros = meals.log[today] || { protein: 0, carbs: 0, fat: 0, calories: 0 };
+
+  const scanImage = async (file: File) => {
+    setScanState('scanning');
+    setScanResult(null);
+    setScanError('');
+    try {
+      const reader = new FileReader();
+      const b64 = await new Promise<string>((res, rej) => {
+        reader.onload = () => res((reader.result as string).split(',')[1]);
+        reader.onerror = rej;
+        reader.readAsDataURL(file);
+      });
+      const resp = await fetch('/api/scan-food', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: b64 }),
+      });
+      if (!resp.ok) throw new Error('AI scan failed');
+      const data = await resp.json();
+      setScanResult(data);
+      setScanState('done');
+      setNewPreset({ name: data.name || '', protein: String(data.protein || ''), carbs: String(data.carbs || ''), fat: String(data.fat || ''), calories: String(data.calories || ''), source: data.source || 'AI scan' });
+      setMode('add');
+    } catch (e: any) {
+      setScanState('error');
+      setScanError('Could not read macros. Try a clearer photo or enter manually.');
+    }
+  };
 
   const logPreset = async (p: any) => {
     const next = { protein: todayMacros.protein + p.protein, carbs: todayMacros.carbs + p.carbs, fat: todayMacros.fat + p.fat, calories: todayMacros.calories + p.calories };
@@ -1733,8 +2060,33 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
       <div className="row" style={{ gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
         <button className={`tap ${mode === 'preset' ? 'active' : ''}`} onClick={() => setMode('preset')}>Presets</button>
         <button className={`tap ${mode === 'manual' ? 'active' : ''}`} onClick={() => setMode('manual')}>Manual</button>
-        <button className={`tap ${mode === 'add' ? 'active' : ''}`} onClick={() => setMode('add')}>+ New preset</button>
+        <button className={`tap ${mode === 'add' ? 'active' : ''}`} onClick={() => setMode('add')}>+ Save new</button>
+        <button className={`tap ${mode === 'scan' ? 'active' : ''}`} style={{ color: '#3B5C6B', borderColor: '#3B5C6B' }} onClick={() => setMode('scan')}>
+          <Camera size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Scan
+        </button>
       </div>
+
+      {mode === 'scan' && (
+        <>
+          <div className="card" style={{ padding: 14, marginBottom: 12, background: '#EEF2F8', border: '1px solid #C8D4E4', textAlign: 'center' }}>
+            <Camera size={28} color="#3B5C6B" style={{ marginBottom: 8 }} />
+            <p className="muted small" style={{ lineHeight: 1.5, marginBottom: 12 }}>
+              Take a photo of a nutrition label, cookbook page, or meal — AI will read the macros for you.
+            </p>
+            {scanState === 'scanning' && <p className="mono small" style={{ color: '#3B5C6B' }}>Reading image…</p>}
+            {scanState === 'error' && <p className="small" style={{ color: '#B8460E', marginBottom: 8 }}>{scanError}</p>}
+            {scanState !== 'scanning' && (
+              <>
+                <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) scanImage(f); }} />
+                <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={() => fileRef.current?.click()}>
+                  <Camera size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Take / choose photo
+                </button>
+              </>
+            )}
+          </div>
+          <p className="muted tiny" style={{ lineHeight: 1.5 }}>After scanning, review the values before saving. AI reads labels well but may estimate portions.</p>
+        </>
+      )}
 
       {mode === 'preset' && (
         <>
@@ -2055,31 +2407,117 @@ function WeeklyReviewModal({ settings, totals, body, workout, streaks, onAck, on
   );
 }
 
-function ChallengeModal({ settings, onSave, onClose }: any) {
+const CHALLENGE_PRESETS = [
+  { name: '60-Day V-Taper', days: 60, deloadWeek: 5 },
+  { name: '90-Day Recomp', days: 90, deloadWeek: 7 },
+  { name: '180-Day Transformation', days: 180, deloadWeek: 9 },
+  { name: 'Custom', days: 0, deloadWeek: 5 },
+];
+
+function ChallengeModal({ settings, challengeHistory, onSave, onSaveHistory, onClose }: any) {
   const ch = settings.challenge || { active: false, name: '60-Day V-Taper', startDate: null, days: 60, deloadWeek: 5 };
   const [draft, setDraft] = useState(ch);
+  const [view, setView] = useState<'active'|'archive'>('active');
+  const history: any[] = challengeHistory || [];
+
+  const completeCurrent = async () => {
+    if (!ch.active || !ch.startDate) return;
+    const completed = { ...ch, completedDate: todayStr(), active: false };
+    await onSaveHistory([completed, ...history]);
+    await onSave({ ...settings, challenge: { active: false, name: '', startDate: null, days: 60, deloadWeek: 5 } });
+  };
+
+  const daysDone = ch.startDate ? Math.max(0, diffDays(todayStr(), ch.startDate)) : 0;
+  const pct = ch.days > 0 ? Math.min(100, Math.round((daysDone / ch.days) * 100)) : 0;
+  const isInfinite = ch.days === 0;
 
   return (
-    <ModalShell title="60-Day Challenge" onClose={onClose} icon={<Zap size={18} color="#8E4585" />}>
-      <p className="muted small" style={{ marginBottom: 14, lineHeight: 1.5 }}>
-        A focused training block with a built-in deload week for recovery.
-      </p>
-      <label>Challenge name</label>
-      <input type="text" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} style={{ marginBottom: 12 }} />
-      <label>Start date</label>
-      <input type="date" value={draft.startDate || todayStr()} onChange={(e) => setDraft({ ...draft, startDate: e.target.value })} style={{ marginBottom: 12 }} />
-      <div className="row" style={{ gap: 8, marginBottom: 12 }}>
-        <div style={{ flex: 1 }}><label>Duration (days)</label><input type="number" value={draft.days} onChange={(e) => setDraft({ ...draft, days: parseInt(e.target.value) || 60 })} /></div>
-        <div style={{ flex: 1 }}><label>Deload week #</label><input type="number" min="1" max="10" value={draft.deloadWeek} onChange={(e) => setDraft({ ...draft, deloadWeek: parseInt(e.target.value) || 5 })} /></div>
-      </div>
-      <div className="row" style={{ gap: 8 }}>
-        <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => { onSave({ ...settings, challenge: { ...draft, active: false } }); onClose(); }}>
-          {draft.active ? 'Pause' : 'Save (inactive)'}
+    <ModalShell title="Challenge" onClose={onClose} icon={<Trophy size={18} color="#8E4585" />}>
+      <div className="row" style={{ gap: 6, marginBottom: 14 }}>
+        <button className={`tap ${view === 'active' ? 'active' : ''}`} onClick={() => setView('active')}>
+          <Zap size={11} style={{ verticalAlign: 'middle', marginRight: 4 }} />Active
         </button>
-        <button className="btn" style={{ flex: 1 }} onClick={() => { onSave({ ...settings, challenge: { ...draft, active: true, startDate: draft.startDate || todayStr() } }); onClose(); }}>
-          <Play size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Activate
+        <button className={`tap ${view === 'archive' ? 'active' : ''}`} onClick={() => setView('archive')}>
+          <Archive size={11} style={{ verticalAlign: 'middle', marginRight: 4 }} />Archive ({history.length})
         </button>
       </div>
+
+      {view === 'archive' && (
+        <>
+          {history.length === 0 && <p className="muted small">No completed challenges yet.</p>}
+          {history.map((h: any, i: number) => (
+            <div key={i} className="card" style={{ padding: 12, marginBottom: 8, borderLeft: '3px solid #C8932E' }}>
+              <div className="between">
+                <div>
+                  <div className="small" style={{ fontWeight: 600 }}><Trophy size={12} style={{ verticalAlign: 'middle', marginRight: 4, color: '#C8932E' }} />{h.name}</div>
+                  <div className="mono tiny muted">{fmtShortDate(h.startDate)} → {fmtShortDate(h.completedDate)} · {h.days}d</div>
+                </div>
+                <Award size={20} color="#C8932E" />
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {view === 'active' && (
+        <>
+          {ch.active && (
+            <div className="card" style={{ padding: 12, marginBottom: 14, background: '#F0EBF8', borderLeft: '3px solid #8E4585' }}>
+              <div className="between" style={{ marginBottom: 8 }}>
+                <span className="small" style={{ fontWeight: 600 }}>{ch.name}</span>
+                <span className="mono tiny" style={{ color: '#8E4585' }}>{isInfinite ? '∞' : `${pct}%`}</span>
+              </div>
+              <div className="mono tiny muted" style={{ marginBottom: 8 }}>
+                Day {daysDone} {isInfinite ? '· open-ended' : `of ${ch.days} · ${ch.days - daysDone} to go`}
+              </div>
+              {!isInfinite && (
+                <div style={{ height: 4, background: '#E4DCC8', borderRadius: 2, overflow: 'hidden', marginBottom: 10 }}>
+                  <div style={{ height: '100%', width: `${pct}%`, background: '#8E4585', borderRadius: 2, transition: 'width 0.5s' }} />
+                </div>
+              )}
+              <button className="tap" style={{ width: '100%', fontSize: 12 }} onClick={completeCurrent}>
+                <Trophy size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Complete & archive
+              </button>
+            </div>
+          )}
+
+          <div className="h3" style={{ marginBottom: 8 }}>Preset</div>
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+            {CHALLENGE_PRESETS.map(p => (
+              <button key={p.name} className={`tap ${draft.name === p.name ? 'active' : ''}`} style={{ fontSize: 11 }}
+                onClick={() => setDraft({ ...draft, name: p.name, days: p.days || draft.days, deloadWeek: p.deloadWeek })}>
+                {p.name}
+              </button>
+            ))}
+            <button className={`tap ${draft.days === 0 ? 'active' : ''}`} style={{ fontSize: 11 }} onClick={() => setDraft({ ...draft, days: 0 })}>
+              <Infinity size={11} style={{ verticalAlign: 'middle', marginRight: 4 }} />Open
+            </button>
+          </div>
+
+          <label>Challenge name</label>
+          <input type="text" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} style={{ marginBottom: 12 }} />
+          <label>Start date</label>
+          <input type="date" value={draft.startDate || todayStr()} onChange={(e) => setDraft({ ...draft, startDate: e.target.value })} style={{ marginBottom: 12 }} />
+          <div className="row" style={{ gap: 8, marginBottom: 16 }}>
+            <div style={{ flex: 1 }}>
+              <label>Duration (0 = open)</label>
+              <input type="number" value={draft.days} onChange={(e) => setDraft({ ...draft, days: parseInt(e.target.value) || 0 })} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label>Deload week #</label>
+              <input type="number" min="1" max="20" value={draft.deloadWeek} onChange={(e) => setDraft({ ...draft, deloadWeek: parseInt(e.target.value) || 5 })} />
+            </div>
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn btn-ghost" style={{ flex: 1 }} onClick={() => { onSave({ ...settings, challenge: { ...draft, active: false } }); onClose(); }}>
+              {draft.active ? 'Pause' : 'Save (inactive)'}
+            </button>
+            <button className="btn" style={{ flex: 1 }} onClick={() => { onSave({ ...settings, challenge: { ...draft, active: true, startDate: draft.startDate || todayStr() } }); onClose(); }}>
+              <Play size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Activate
+            </button>
+          </div>
+        </>
+      )}
     </ModalShell>
   );
 }
@@ -2316,6 +2754,9 @@ export default function App() {
   const [plans, setPlans] = useState<any>({});
   const [streaks, setStreaks] = useState<any>({});
   const [weeklyAck, setWeeklyAck] = useState<any>({ lastAck: null });
+  const [journal, setJournal] = useState<any>({});
+  const [challengeHistory, setChallengeHistory] = useState<any[]>([]);
+  const [busyPresets, setBusyPresets] = useState<string[]>(BUSY_PRESET_DEFAULTS);
   const [modal, setModal] = useState<any>(null);
 
   useEffect(() => {
@@ -2331,6 +2772,9 @@ export default function App() {
       const p = await safeGet(K.plans, {});
       const st = await safeGet(K.streaks, {});
       const wa = await safeGet(K.weeklyReview, { lastAck: null });
+      const jn = await safeGet(K.journal, {});
+      const ch = await safeGet(K.challengeHistory, []);
+      const bp = await safeGet(K.busyPresets, BUSY_PRESET_DEFAULTS);
       let d = await safeGet(K.daily, null);
       if (!d || d.date !== todayStr()) {
         const plan = p[todayStr()];
@@ -2359,6 +2803,9 @@ export default function App() {
       setPlans(p);
       setStreaks(st);
       setWeeklyAck(wa);
+      setJournal(jn);
+      setChallengeHistory(ch);
+      setBusyPresets(bp);
       setLoaded(true);
     })();
   }, []);
@@ -2371,6 +2818,9 @@ export default function App() {
   const saveMeals = async (next: any) => { setMeals(next); await safeSet(K.meals, next); };
   const savePlans = async (next: any) => { setPlans(next); await safeSet(K.plans, next); };
   const saveStreaks = async (next: any) => { setStreaks(next); await safeSet(K.streaks, next); };
+  const saveJournal = async (next: any) => { setJournal(next); await safeSet(K.journal, next); };
+  const saveChallengeHistory = async (next: any[]) => { setChallengeHistory(next); await safeSet(K.challengeHistory, next); };
+  const saveBusyPresets = async (next: string[]) => { setBusyPresets(next); await safeSet(K.busyPresets, next); };
 
   const setSubjectTime = async (subject: string, newMins: number) => {
     const oldMins = daily.completed[subject] || 0;
@@ -2486,6 +2936,9 @@ export default function App() {
             onPlanDay={(date: string) => setModal({ type: 'planDay', date })}
           />
         )}
+        {tab === 'journal' && (
+          <JournalTab journal={journal} onSave={saveJournal} />
+        )}
         {tab === 'history' && (
           <HistoryTab
             settings={settings} totals={totals} workout={workout} meals={meals} body={body}
@@ -2499,15 +2952,15 @@ export default function App() {
       {modal?.type === 'settings' && <SettingsModal settings={settings} onSave={saveSettings} onClose={() => setModal(null)} onEditSubject={(k: string) => setModal({ type: 'editSubject', key: k })} onAddSubject={() => setModal({ type: 'editSubject', key: null })} onChallenge={() => setModal({ type: 'challenge' })} onExportImport={() => setModal({ type: 'exportImport' })} />}
       {modal?.type === 'editSubject' && <EditSubjectModal subjectKey={modal.key} settings={settings} onSave={saveSettings} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'logTime' && <LogTimeModal subject={modal.subject} settings={settings} daily={daily} editMode={modal.editMode} onLog={(m: number) => { logTime(modal.subject, m); setModal(null); }} onSet={(m: number) => { setSubjectTime(modal.subject, m); setModal(null); }} onClose={() => setModal(null)} />}
-      {modal?.type === 'busy' && <BusyModal onConfirm={(m: number) => { saveDaily({ ...daily, status: 'busy', busyUntil: addMinutes(nowHHMM(), m) }); setModal(null); }} onClose={() => setModal(null)} />}
+      {modal?.type === 'busy' && <BusyModal busyPresets={busyPresets} onSavePresets={saveBusyPresets} onConfirm={(m: number, reason: string) => { saveDaily({ ...daily, status: 'busy', busyUntil: addMinutes(nowHHMM(), m), busyReason: reason }); setModal(null); }} onClose={() => setModal(null)} />}
       {modal?.type === 'addMeasurement' && <AddMeasurementModal onSave={async (entry: any) => { const next = { ...body, entries: [...body.entries, entry] }; const nextSettings = { ...settings, nextMeasurement: addMonth(todayStr(), 1) }; await saveBody(next); await saveSettings(nextSettings); setModal(null); }} onClose={() => setModal(null)} previous={body.entries[body.entries.length - 1]} />}
       {modal?.type === 'bodyGoals' && <BodyGoalsModal settings={settings} onSave={saveSettings} onClose={() => setModal(null)} />}
       {modal?.type === 'logWorkout' && <LogWorkoutModal dayIdx={modal.dayIdx} workout={workout} onSave={saveWorkout} onClose={() => setModal(null)} />}
       {modal?.type === 'editSplit' && <EditSplitModal workout={workout} onSave={saveWorkout} onClose={() => setModal(null)} />}
+      {modal?.type === 'challenge' && <ChallengeModal settings={settings} challengeHistory={challengeHistory} onSave={saveSettings} onSaveHistory={saveChallengeHistory} onClose={() => setModal(null)} />}
       {modal?.type === 'logMeal' && <LogMealModal meals={meals} settings={settings} onSave={saveMeals} onClose={() => setModal(null)} />}
       {modal?.type === 'planDay' && <PlanDayModal date={modal.date} plans={plans} onSave={savePlans} onClose={() => setModal(null)} />}
       {modal?.type === 'dayDetail' && <DayDetailModal date={modal.date} settings={settings} totals={totals} workout={workout} meals={meals} body={body} onClose={() => setModal(null)} />}
-      {modal?.type === 'challenge' && <ChallengeModal settings={settings} onSave={saveSettings} onClose={() => setModal(null)} />}
       {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, weeklyAck }} onImport={async (d: any) => {
         if (d.settings) { setSettings(d.settings); await safeSet(K.settings, d.settings); }
         if (d.totals) { setTotals(d.totals); await safeSet(K.totals, d.totals); }
