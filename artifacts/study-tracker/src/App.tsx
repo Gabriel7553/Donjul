@@ -3527,39 +3527,176 @@ function ChallengeModal({ settings, challengeHistory, onSave, onSaveHistory, onC
   );
 }
 
-function ResetDayModal({ onReset, onClose }: any) {
-  const [opts, setOpts] = useState({ subjects: true, macros: true, workout: false, status: false });
-  const [confirm, setConfirm] = useState(false);
-  const rows: { key: keyof typeof opts; label: string; desc: string }[] = [
-    { key: 'subjects', label: 'Study / subject time', desc: "Clears today's logged minutes and removes them from your totals." },
-    { key: 'macros', label: 'Macros / meals', desc: "Resets today's food log to zero." },
-    { key: 'workout', label: "Today's workout log", desc: 'Deletes the workout you logged today.' },
-    { key: 'status', label: 'Status (busy / wake / start)', desc: 'Resets back to a fresh morning.' },
-  ];
-  const any = Object.values(opts).some(Boolean);
+function Checkbox({ checked, onChange, accent = '#B8460E' }: { checked: boolean; onChange: () => void; accent?: string }) {
   return (
-    <ModalShell title="Reset today" onClose={onClose} icon={<RotateCcw size={18} color="#B8460E" />}>
-      <p className="muted small" style={{ marginBottom: 14, lineHeight: 1.5 }}>Pick what to clear for today. Past days are untouched, and you can Undo right after.</p>
-      {rows.map((r) => (
-        <div key={r.key} className="between" style={{ padding: '10px 0', borderBottom: '1px solid #E4DCC8', cursor: 'pointer' }} onClick={() => setOpts({ ...opts, [r.key]: !opts[r.key] })}>
-          <div style={{ flex: 1, paddingRight: 10 }}>
-            <div className="small" style={{ fontWeight: 600 }}>{r.label}</div>
-            <div className="muted tiny" style={{ lineHeight: 1.4 }}>{r.desc}</div>
-          </div>
-          <div style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${opts[r.key] ? '#B8460E' : '#D4CCB8'}`, background: opts[r.key] ? '#B8460E' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            {opts[r.key] && <Check size={13} color="#F5F0E6" />}
-          </div>
-        </div>
-      ))}
-      {!confirm ? (
-        <button className="btn" style={{ width: '100%', marginTop: 14, background: '#B8460E' }} disabled={!any} onClick={() => setConfirm(true)}>
-          <RotateCcw size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Reset selected
+    <div
+      onClick={onChange}
+      style={{
+        width: 22, height: 22, borderRadius: 6, border: `2px solid ${checked ? accent : '#D4CCB8'}`,
+        background: checked ? accent : 'transparent', display: 'flex', alignItems: 'center',
+        justifyContent: 'center', flexShrink: 0, cursor: 'pointer', transition: 'all 0.15s',
+      }}
+    >
+      {checked && <Check size={13} color="#F5F0E6" />}
+    </div>
+  );
+}
+
+function ResetDayModal({ onReset, onFullReset, onClose }: any) {
+  const [view, setView] = useState<'today' | 'full'>('today');
+
+  // ── Today's reset ──
+  const [opts, setOpts] = useState({ subjects: true, macros: true, workout: false, status: false, spending: false });
+  const [confirmDay, setConfirmDay] = useState(false);
+  const toggleDay = (k: keyof typeof opts) => setOpts(p => ({ ...p, [k]: !p[k] }));
+  const dayRows: { key: keyof typeof opts; label: string; desc: string }[] = [
+    { key: 'subjects',  label: 'Study / subject time',       desc: "Clears today's logged minutes and removes them from your totals." },
+    { key: 'macros',    label: 'Macros / nutrition',          desc: "Resets today's food log and meal entries to zero." },
+    { key: 'workout',   label: "Today's workout log",         desc: 'Deletes the workout you logged today.' },
+    { key: 'spending',  label: "Today's transactions",        desc: "Removes all money entries logged for today." },
+    { key: 'status',    label: 'Status (busy / wake / start)', desc: 'Resets back to a fresh morning.' },
+  ];
+  const anyDay = Object.values(opts).some(Boolean);
+
+  // ── Full (all-time) reset ──
+  const [full, setFull] = useState({ study: false, nutrition: false, body: false, workout: false, spending: false, journal: false, plans: false, settings: false });
+  const [confirmFull, setConfirmFull] = useState(false);
+  const toggleFull = (k: keyof typeof full) => setFull(p => ({ ...p, [k]: !p[k] }));
+  const fullRows: { key: keyof typeof full; label: string; desc: string; accent: string }[] = [
+    { key: 'study',     label: 'Study history & totals',    desc: 'All logged time, streaks, check-ins — gone.', accent: '#3B5C6B' },
+    { key: 'nutrition', label: 'Nutrition / meal log',      desc: 'Every food entry and preset removed.', accent: '#4A6741' },
+    { key: 'body',      label: 'Body measurements',         desc: 'All weight, body-fat, and measurement entries.', accent: '#8E4585' },
+    { key: 'workout',   label: 'Workout logs',              desc: 'All workout sessions across every day.', accent: '#B8460E' },
+    { key: 'spending',  label: 'Money / spending',          desc: 'All transactions, budget, and savings goals.', accent: '#C8932E' },
+    { key: 'journal',   label: 'Journal entries',           desc: 'All notes and trade logs.', accent: '#6E5C8E' },
+    { key: 'plans',     label: 'Scheduled plans',           desc: 'All day-level plan entries.', accent: '#5C6E8E' },
+    { key: 'settings',  label: 'Settings & subjects',       desc: 'Subjects, macro targets, micro targets — reverts to defaults.', accent: '#6B6457' },
+  ];
+  const anyFull = Object.values(full).some(Boolean);
+
+  return (
+    <ModalShell title="Reset" onClose={onClose} icon={<RotateCcw size={18} color="#B8460E" />}>
+      {/* Tab switcher */}
+      <div className="row" style={{ gap: 8, marginBottom: 16 }}>
+        <button
+          className="tap"
+          onClick={() => { setView('today'); setConfirmDay(false); setConfirmFull(false); }}
+          style={{ flex: 1, background: view === 'today' ? '#B8460E22' : 'transparent', borderColor: view === 'today' ? '#B8460E' : '#E4DCC8' }}
+        >
+          Reset today
         </button>
-      ) : (
+        <button
+          className="tap"
+          onClick={() => { setView('full'); setConfirmDay(false); setConfirmFull(false); }}
+          style={{ flex: 1, background: view === 'full' ? '#1A1A2E22' : 'transparent', borderColor: view === 'full' ? '#1A1A2E' : '#E4DCC8' }}
+        >
+          Full reset
+        </button>
+      </div>
+
+      {view === 'today' && (
         <>
-          <p className="small" style={{ margin: '14px 0 8px', color: '#B8460E', fontWeight: 600 }}>Reset the selected items for today?</p>
-          <button className="btn" style={{ width: '100%', background: '#B8460E' }} onClick={async () => { await onReset(opts); onClose(); }}>Yes, reset</button>
-          <button className="btn btn-ghost" style={{ width: '100%', marginTop: 8 }} onClick={() => setConfirm(false)}>Cancel</button>
+          <p className="muted small" style={{ marginBottom: 12, lineHeight: 1.5 }}>
+            Clears selected data for <strong>today only</strong>. Past days untouched. You can Undo right after.
+          </p>
+          {dayRows.map((r) => (
+            <div
+              key={r.key}
+              className="between"
+              style={{ padding: '10px 0', borderBottom: '1px solid #E4DCC8', cursor: 'pointer' }}
+              onClick={() => toggleDay(r.key)}
+            >
+              <div style={{ flex: 1, paddingRight: 10 }}>
+                <div className="small" style={{ fontWeight: 600 }}>{r.label}</div>
+                <div className="muted tiny" style={{ lineHeight: 1.4 }}>{r.desc}</div>
+              </div>
+              <Checkbox checked={opts[r.key]} onChange={() => toggleDay(r.key)} />
+            </div>
+          ))}
+          {!confirmDay ? (
+            <button
+              className="btn"
+              style={{ width: '100%', marginTop: 14, background: '#B8460E' }}
+              disabled={!anyDay}
+              onClick={() => setConfirmDay(true)}
+            >
+              <RotateCcw size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Reset selected
+            </button>
+          ) : (
+            <>
+              <p className="small" style={{ margin: '14px 0 8px', color: '#B8460E', fontWeight: 600 }}>Reset these items for today?</p>
+              <button className="btn" style={{ width: '100%', background: '#B8460E' }} onClick={async () => { await onReset(opts); onClose(); }}>
+                Yes, reset today
+              </button>
+              <button className="btn btn-ghost" style={{ width: '100%', marginTop: 8 }} onClick={() => setConfirmDay(false)}>Cancel</button>
+            </>
+          )}
+        </>
+      )}
+
+      {view === 'full' && (
+        <>
+          <div
+            className="row"
+            style={{ gap: 8, background: '#FDF1EC', border: '1px solid #F4C5AD', borderRadius: 8, padding: '10px 12px', marginBottom: 14 }}
+          >
+            <AlertTriangle size={14} color="#B8460E" style={{ flexShrink: 0, marginTop: 1 }} />
+            <p className="small" style={{ color: '#8A3010', lineHeight: 1.45 }}>
+              <strong>Permanent deletion.</strong> This erases all-time data for the categories you pick. There is no undo — export a backup first if you need it.
+            </p>
+          </div>
+          {fullRows.map((r) => (
+            <div
+              key={r.key}
+              className="between"
+              style={{ padding: '10px 0', borderBottom: '1px solid #E4DCC8', cursor: 'pointer' }}
+              onClick={() => toggleFull(r.key)}
+            >
+              <div style={{ flex: 1, paddingRight: 10 }}>
+                <div className="small" style={{ fontWeight: 600 }}>
+                  <span className="swatch" style={{ background: r.accent }} />
+                  {r.label}
+                </div>
+                <div className="muted tiny" style={{ lineHeight: 1.4 }}>{r.desc}</div>
+              </div>
+              <Checkbox checked={full[r.key]} onChange={() => toggleFull(r.key)} accent={r.accent} />
+            </div>
+          ))}
+
+          {/* Select all / none */}
+          <div className="row" style={{ gap: 8, marginTop: 10 }}>
+            <button className="tap" style={{ flex: 1, fontSize: 11 }} onClick={() => setFull({ study: true, nutrition: true, body: true, workout: true, spending: true, journal: true, plans: true, settings: true })}>
+              Select all
+            </button>
+            <button className="tap" style={{ flex: 1, fontSize: 11 }} onClick={() => setFull({ study: false, nutrition: false, body: false, workout: false, spending: false, journal: false, plans: false, settings: false })}>
+              Clear all
+            </button>
+          </div>
+
+          {!confirmFull ? (
+            <button
+              className="btn"
+              style={{ width: '100%', marginTop: 14, background: '#1A1A2E' }}
+              disabled={!anyFull}
+              onClick={() => setConfirmFull(true)}
+            >
+              <Trash2 size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Delete selected data
+            </button>
+          ) : (
+            <>
+              <p className="small" style={{ margin: '14px 0 8px', color: '#B8460E', fontWeight: 600, lineHeight: 1.4 }}>
+                This will permanently delete the selected data. Are you absolutely sure?
+              </p>
+              <button
+                className="btn"
+                style={{ width: '100%', background: '#B8460E' }}
+                onClick={async () => { await onFullReset(full); onClose(); }}
+              >
+                Yes, permanently delete
+              </button>
+              <button className="btn btn-ghost" style={{ width: '100%', marginTop: 8 }} onClick={() => setConfirmFull(false)}>Cancel</button>
+            </>
+          )}
         </>
       )}
     </ModalShell>
@@ -4650,8 +4787,8 @@ export default function App() {
     undoToast(`Logged ${minutes}m of ${name}`, async () => { await saveDaily(prevDaily); await saveTotals(prevTotals); await saveStreaks(prevStreaks); });
   };
 
-  const resetDay = async (opts: { subjects?: boolean; macros?: boolean; workout?: boolean; status?: boolean }) => {
-    const prevDaily = daily, prevTotals = totals, prevMeals = meals, prevWorkout = workout;
+  const resetDay = async (opts: { subjects?: boolean; macros?: boolean; workout?: boolean; status?: boolean; spending?: boolean }) => {
+    const prevDaily = daily, prevTotals = totals, prevMeals = meals, prevWorkout = workout, prevSpending = spending;
     const today = todayStr();
     let newDaily = { ...daily };
     let newTotals = totals;
@@ -4686,10 +4823,54 @@ export default function App() {
     if (opts.macros) await saveMeals(newMeals);
     if (opts.workout) await saveWorkout(newWorkout);
     if (opts.subjects || opts.status) await saveDaily(newDaily);
+    if (opts.spending) {
+      const next = { ...spending, entries: spending.entries.filter((e: any) => e.date !== today) };
+      await saveSpending(next);
+    }
 
     undoToast('Day reset', async () => {
       await saveDaily(prevDaily); await saveTotals(prevTotals); await saveMeals(prevMeals); await saveWorkout(prevWorkout);
+      if (opts.spending) await saveSpending(prevSpending);
     });
+  };
+
+  const fullReset = async (opts: { study?: boolean; nutrition?: boolean; body?: boolean; workout?: boolean; spending?: boolean; journal?: boolean; plans?: boolean; settings?: boolean }) => {
+    if (opts.study) {
+      const blank = Object.fromEntries(Object.keys(daily.completed || {}).map((k) => [k, 0]));
+      await saveDaily({ ...daily, completed: blank, bonus: blank });
+      await saveTotals({});
+      await safeSet(K.streaks, {});
+      setStreaks({});
+      await safeSet(K.checkins, {});
+      setCheckins({});
+      await safeSet(K.activity, {});
+      setActivity({});
+    }
+    if (opts.nutrition) {
+      const cleared = { presets: [], log: {}, entries: {}, presetsMicrosMigrated: true };
+      await saveMeals(cleared);
+    }
+    if (opts.body) {
+      await saveBody({ entries: [] });
+    }
+    if (opts.workout) {
+      const cleared = { ...workout, logs: {} };
+      await saveWorkout(cleared);
+    }
+    if (opts.spending) {
+      const cleared = { ...DEFAULT_SPENDING, categories: spending.categories };
+      await saveSpending(cleared);
+    }
+    if (opts.journal) {
+      await saveJournal({});
+    }
+    if (opts.plans) {
+      await savePlans({});
+    }
+    if (opts.settings) {
+      await saveSettings(DEFAULT_SETTINGS);
+    }
+    toast('Data cleared — reload if anything looks off.');
   };
 
   const startFocus = async (subject: string) => {
@@ -4834,7 +5015,7 @@ export default function App() {
       <BottomNav tab={tab} setTab={setTab} />
 
       {modal?.type === 'settings' && <SettingsModal settings={settings} body={body} onSave={saveSettings} onClose={() => setModal(null)} onEditSubject={(k: string) => setModal({ type: 'editSubject', key: k })} onAddSubject={() => setModal({ type: 'editSubject', key: null })} onChallenge={() => setModal({ type: 'challenge' })} onExportImport={() => setModal({ type: 'exportImport' })} onResetDay={() => setModal({ type: 'resetDay' })} />}
-      {modal?.type === 'resetDay' && <ResetDayModal onReset={resetDay} onClose={() => setModal({ type: 'settings' })} />}
+      {modal?.type === 'resetDay' && <ResetDayModal onReset={resetDay} onFullReset={fullReset} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'editSubject' && <EditSubjectModal subjectKey={modal.key} settings={settings} onSave={saveSettings} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'logTime' && <LogTimeModal subject={modal.subject} settings={settings} daily={daily} editMode={modal.editMode} onLog={(m: number) => { logTime(modal.subject, m); setModal(null); }} onSet={(m: number) => { setSubjectTime(modal.subject, m); setModal(null); }} onClose={() => setModal(null)} />}
       {modal?.type === 'busy' && <BusyModal isSwitch={modal.mode === 'switch'} busyPresets={busyPresets} onSavePresets={saveBusyPresets} onConfirm={(m: number | null, reason: string) => { if (modal.mode === 'switch') switchBusy(m, reason); else startBusy(m, reason); setModal(null); }} onClose={() => setModal(null)} />}
