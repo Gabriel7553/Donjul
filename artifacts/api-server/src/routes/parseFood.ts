@@ -17,15 +17,29 @@ router.post("/parse-food", async (req, res) => {
 
 Description: "${input.replace(/"/g, "'")}"
 
-Respond with ONLY a JSON object, no prose:
+Respond with ONLY a JSON object, no prose, exactly these keys:
 {
   "name": "short summary of the food",
   "protein": <grams, number>,
   "carbs": <grams, number>,
   "fat": <grams, number>,
-  "calories": <number>
+  "calories": <number>,
+  "fiber": <grams>,
+  "sugar": <grams>,
+  "saturatedFat": <grams>,
+  "cholesterol": <milligrams>,
+  "sodium": <milligrams>,
+  "potassium": <milligrams>,
+  "calcium": <milligrams>,
+  "iron": <milligrams>,
+  "magnesium": <milligrams>,
+  "zinc": <milligrams>,
+  "vitaminA": <micrograms RAE>,
+  "vitaminC": <milligrams>,
+  "vitaminD": <micrograms>,
+  "vitaminB12": <micrograms>
 }
-Use realistic estimates. Numbers only for macro values.`;
+Use realistic best-effort estimates for every key. Use 0 when truly negligible. Numbers only — no units in values.`;
 
   let out: string;
   try {
@@ -46,12 +60,30 @@ Use realistic estimates. Numbers only for macro values.`;
     return res.status(422).json({ error: "Couldn't read that. Try rephrasing, e.g. '2 eggs and a slice of toast'." });
   }
 
+  const micros = {
+    fiber: Number(data.fiber) || 0,
+    sugar: Number(data.sugar) || 0,
+    saturatedFat: Number(data.saturatedFat) || 0,
+    cholesterol: Number(data.cholesterol) || 0,
+    sodium: Number(data.sodium) || 0,
+    potassium: Number(data.potassium) || 0,
+    calcium: Number(data.calcium) || 0,
+    iron: Number(data.iron) || 0,
+    magnesium: Number(data.magnesium) || 0,
+    zinc: Number(data.zinc) || 0,
+    vitaminA: Number(data.vitaminA) || 0,
+    vitaminC: Number(data.vitaminC) || 0,
+    vitaminD: Number(data.vitaminD) || 0,
+    vitaminB12: Number(data.vitaminB12) || 0,
+  };
+
   return res.json({
     name: typeof data.name === "string" ? data.name : input.slice(0, 40),
     protein: Number(data.protein) || 0,
     carbs: Number(data.carbs) || 0,
     fat: Number(data.fat) || 0,
     calories: Number(data.calories) || 0,
+    ...micros,
     source: "Typed",
   });
 });

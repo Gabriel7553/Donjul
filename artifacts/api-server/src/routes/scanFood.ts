@@ -19,9 +19,23 @@ Respond with ONLY a JSON object (no markdown, no prose), exactly these keys:
   "carbs": <grams, number>,
   "fat": <grams, number>,
   "calories": <number>,
+  "fiber": <grams>,
+  "sugar": <grams>,
+  "saturatedFat": <grams>,
+  "cholesterol": <milligrams>,
+  "sodium": <milligrams>,
+  "potassium": <milligrams>,
+  "calcium": <milligrams>,
+  "iron": <milligrams>,
+  "magnesium": <milligrams>,
+  "zinc": <milligrams>,
+  "vitaminA": <micrograms RAE>,
+  "vitaminC": <milligrams>,
+  "vitaminD": <micrograms>,
+  "vitaminB12": <micrograms>,
   "source": "AI scan"
 }
-Use your best estimate for any value you cannot read exactly; never leave a key out.`;
+Use your best estimate for any value you cannot read exactly; never leave a key out. Numbers only — no units in values. Use 0 when truly negligible.`;
 
 router.post("/scan-food", async (req, res) => {
   const { image, mime } = req.body as { image?: string; mime?: string };
@@ -74,6 +88,20 @@ router.post("/scan-food", async (req, res) => {
     carbs: Number(data.carbs) || 0,
     fat: Number(data.fat) || 0,
     calories: Number(data.calories) || 0,
+    fiber: Number(data.fiber) || 0,
+    sugar: Number(data.sugar) || 0,
+    saturatedFat: Number(data.saturatedFat) || 0,
+    cholesterol: Number(data.cholesterol) || 0,
+    sodium: Number(data.sodium) || 0,
+    potassium: Number(data.potassium) || 0,
+    calcium: Number(data.calcium) || 0,
+    iron: Number(data.iron) || 0,
+    magnesium: Number(data.magnesium) || 0,
+    zinc: Number(data.zinc) || 0,
+    vitaminA: Number(data.vitaminA) || 0,
+    vitaminC: Number(data.vitaminC) || 0,
+    vitaminD: Number(data.vitaminD) || 0,
+    vitaminB12: Number(data.vitaminB12) || 0,
     source: "AI scan",
   });
 });

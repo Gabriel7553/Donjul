@@ -116,15 +116,46 @@ function isSunday(dateStr = todayStr()) { return new Date(dateStr + 'T00:00:00')
 function timeToMins(hhmm: string) { const [h, m] = (hhmm || '00:00').split(':').map(Number); return h * 60 + m; }
 function minsToHHMM(mins: number) { const h = Math.floor(mins / 60) % 24; const m = mins % 60; return `${pad(h)}:${pad(m)}`; }
 
-// Sum a day's meal entries into a macro total.
+// Keys we sum across a day's meal entries (macros + micros).
+const MICRO_KEYS = [
+  'fiber', 'sugar', 'sodium', 'potassium', 'calcium', 'iron',
+  'magnesium', 'zinc', 'vitaminA', 'vitaminC', 'vitaminD', 'vitaminB12',
+  'saturatedFat', 'cholesterol',
+] as const;
+
+// Sum a day's meal entries into a macro + micro total.
 function mealTotalsFromEntries(entries: any[]): any {
-  return (entries || []).reduce((acc, e) => ({
-    protein: acc.protein + (Number(e.protein) || 0),
-    carbs: acc.carbs + (Number(e.carbs) || 0),
-    fat: acc.fat + (Number(e.fat) || 0),
-    calories: acc.calories + (Number(e.calories) || 0),
-  }), { protein: 0, carbs: 0, fat: 0, calories: 0 });
+  const base: any = { protein: 0, carbs: 0, fat: 0, calories: 0 };
+  for (const k of MICRO_KEYS) base[k] = 0;
+  return (entries || []).reduce((acc: any, e: any) => {
+    acc.protein += Number(e.protein) || 0;
+    acc.carbs += Number(e.carbs) || 0;
+    acc.fat += Number(e.fat) || 0;
+    acc.calories += Number(e.calories) || 0;
+    for (const k of MICRO_KEYS) acc[k] += Number(e[k]) || 0;
+    return acc;
+  }, base);
 }
+
+// Display config for micros: label, unit, target type, color
+type MicroDef = { key: string; label: string; unit: string; defaultTarget: number; limit?: boolean; color: string; group: 'fiber' | 'minerals' | 'vitamins' | 'limits' };
+const MICRO_DEFS: MicroDef[] = [
+  { key: 'fiber',       label: 'Fiber',       unit: 'g',   defaultTarget: 30,   color: '#4A6741', group: 'fiber' },
+  { key: 'potassium',   label: 'Potassium',   unit: 'mg',  defaultTarget: 3500, color: '#3B5C6B', group: 'minerals' },
+  { key: 'calcium',     label: 'Calcium',     unit: 'mg',  defaultTarget: 1000, color: '#3B5C6B', group: 'minerals' },
+  { key: 'iron',        label: 'Iron',        unit: 'mg',  defaultTarget: 18,   color: '#B8460E', group: 'minerals' },
+  { key: 'magnesium',   label: 'Magnesium',   unit: 'mg',  defaultTarget: 400,  color: '#3B5C6B', group: 'minerals' },
+  { key: 'zinc',        label: 'Zinc',        unit: 'mg',  defaultTarget: 11,   color: '#3B5C6B', group: 'minerals' },
+  { key: 'vitaminA',    label: 'Vitamin A',   unit: 'µg',  defaultTarget: 900,  color: '#C8932E', group: 'vitamins' },
+  { key: 'vitaminC',    label: 'Vitamin C',   unit: 'mg',  defaultTarget: 90,   color: '#C8932E', group: 'vitamins' },
+  { key: 'vitaminD',    label: 'Vitamin D',   unit: 'µg',  defaultTarget: 20,   color: '#C8932E', group: 'vitamins' },
+  { key: 'vitaminB12',  label: 'Vitamin B12', unit: 'µg',  defaultTarget: 2.4,  color: '#C8932E', group: 'vitamins' },
+  { key: 'sodium',      label: 'Sodium',      unit: 'mg',  defaultTarget: 2300, limit: true, color: '#B8460E', group: 'limits' },
+  { key: 'sugar',       label: 'Sugar',       unit: 'g',   defaultTarget: 50,   limit: true, color: '#B8460E', group: 'limits' },
+  { key: 'saturatedFat',label: 'Sat fat',     unit: 'g',   defaultTarget: 22,   limit: true, color: '#B8460E', group: 'limits' },
+  { key: 'cholesterol', label: 'Cholesterol', unit: 'mg',  defaultTarget: 300,  limit: true, color: '#B8460E', group: 'limits' },
+];
+const DEFAULT_MICRO_TARGETS: Record<string, number> = Object.fromEntries(MICRO_DEFS.map(d => [d.key, d.defaultTarget]));
 
 // Add a meal entry to a date and keep the cached daily total in sync.
 function addMealEntry(meals: any, date: string, entry: any): any {
@@ -302,6 +333,13 @@ const DEFAULT_SETTINGS: Record<string, any> = {
   scheduleStartOffsetMin: 30,
   blockBreakMin: 15,
   macroTargets: { protein: 170, carbs: 230, fat: 75, calories: 2300 },
+  microTargets: DEFAULT_MICRO_TARGETS,
+  microsEnabled: true,
+  journal: {
+    tradesEnabled: true,
+    tradesLabel: 'Trades',
+    notesPlaceholder: "What's on your mind? Progress, setbacks, ideas, reflections…",
+  },
   bodyGoals: {
     weight: { direction: 'down', target: null },
     waist: { direction: 'down', target: null, weight: 2 },
@@ -634,6 +672,9 @@ function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, 
           <Progress settings={settings} totals={totals} daily={daily} streaks={streaks} subjectKeys={subjectKeys} onLogExtra={onLogTime} checkins={checkins} onMarkDone={onMarkDone} onFocusStart={onFocusStart} focus={daily.focus} />
           <ChallengeCard settings={settings} workout={workout} />
           <MacrosCard targets={settings.macroTargets} totals={todayMacros} onLog={onLogMeal} onReset={onResetMacros} onCoach={onCoach} />
+          {settings.microsEnabled !== false && (
+            <MicrosCard targets={settings.microTargets} totals={todayMacros} />
+          )}
           <WeeklySummary settings={settings} totals={totals} daily={daily} meals={meals} workout={workout} />
         </>
       )}
@@ -1075,6 +1116,75 @@ function MacrosCard({ targets, totals, onLog, onReset, onCoach }: any) {
   );
 }
 
+function MicrosCard({ targets, totals }: any) {
+  const [open, setOpen] = useState(false);
+  const t = { ...DEFAULT_MICRO_TARGETS, ...(targets || {}) };
+  const groups: Array<{ title: string; group: MicroDef['group'] }> = [
+    { title: 'Fiber', group: 'fiber' },
+    { title: 'Minerals', group: 'minerals' },
+    { title: 'Vitamins', group: 'vitamins' },
+    { title: 'Limits', group: 'limits' },
+  ];
+  const fmtVal = (v: number) => v < 10 ? Math.round(v * 10) / 10 : Math.round(v);
+  // Headline coverage = avg % of essential micros hit (excluding limits).
+  const essentials = MICRO_DEFS.filter(d => !d.limit);
+  const coverage = Math.round(
+    essentials.reduce((acc, d) => acc + Math.min(100, ((totals[d.key] || 0) / Math.max(t[d.key] || 1, 1)) * 100), 0) / essentials.length
+  );
+  return (
+    <div className="card" style={{ marginTop: 12 }}>
+      <button onClick={() => setOpen(!open)} className="between" style={{ width: '100%', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
+        <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+          <Apple size={16} color="#4A6741" />
+          <div style={{ textAlign: 'left' }}>
+            <div className="h2" style={{ marginBottom: 2 }}>Today's micros</div>
+            <div className="mono tiny muted">{coverage}% essentials covered · tap to {open ? 'hide' : 'see'} details</div>
+          </div>
+        </div>
+        {open ? <ChevronUp size={16} color="#6B6457" /> : <ChevronDown size={16} color="#6B6457" />}
+      </button>
+      {open && (
+        <div style={{ marginTop: 12 }}>
+          {groups.map(g => {
+            const defs = MICRO_DEFS.filter(d => d.group === g.group);
+            return (
+              <div key={g.group} style={{ marginBottom: 12 }}>
+                <div className="mono tiny muted" style={{ marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>{g.title}</div>
+                {defs.map(d => {
+                  const tgt = t[d.key] || d.defaultTarget;
+                  const c = totals[d.key] || 0;
+                  const pct = Math.min(100, (c / Math.max(tgt, 1)) * 100);
+                  const over = c > tgt;
+                  // For limits: green when under, orange when over. For essentials: gray when low, green when hit.
+                  const barColor = d.limit
+                    ? (over ? '#B8460E' : '#4A6741')
+                    : (pct >= 100 ? '#4A6741' : d.color);
+                  return (
+                    <div key={d.key} style={{ marginBottom: 8 }}>
+                      <div className="between" style={{ marginBottom: 3 }}>
+                        <span className="small">{d.label}{d.limit && <span className="muted tiny" style={{ marginLeft: 6 }}>(limit)</span>}</span>
+                        <span className="mono tiny" style={{ color: d.limit ? (over ? '#B8460E' : '#6B6457') : (pct >= 100 ? '#4A6741' : '#6B6457') }}>
+                          {fmtVal(c)} / {fmtVal(tgt)} {d.unit}
+                        </span>
+                      </div>
+                      <div className="progress-bar" style={{ height: 3 }}>
+                        <div className="progress-fill" style={{ width: `${pct}%`, background: barColor }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+          <p className="muted tiny" style={{ lineHeight: 1.4, marginTop: 4 }}>
+            Micros are estimated from your logged foods. Use the AI scan or "type food" for the most accurate readings — they include vitamins, minerals, and limits.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NutritionCoachModal({ settings, meals, body, onLogItem, onClose }: any) {
   const [state, setState] = useState<'loading' | 'done' | 'error'>('loading');
   const [err, setErr] = useState('');
@@ -1398,8 +1508,9 @@ function BodyTab({ settings, body, workout, onAddEntry, onEditGoals }: any) {
 // ════════════════════════════════════════════════════════════════════════════════
 // JOURNAL TAB
 // ════════════════════════════════════════════════════════════════════════════════
-function JournalTab({ journal, onSave }: any) {
+function JournalTab({ journal, onSave, settings }: any) {
   const today = todayStr();
+  const cfg = settings?.journal || { tradesEnabled: true, tradesLabel: 'Trades', notesPlaceholder: "What's on your mind? Progress, setbacks, ideas, reflections…" };
   const todayEntry = journal[today] || { note: '', trades: [] };
   const [note, setNote] = useState(todayEntry.note || '');
   const [trades, setTrades] = useState<any[]>(todayEntry.trades || []);
@@ -1441,9 +1552,11 @@ function JournalTab({ journal, onSave }: any) {
       <h1 className="h1" style={{ marginBottom: 6 }}>Journal.</h1>
       <div className="row" style={{ gap: 6, marginBottom: 16 }}>
         <button className={`tap ${view === 'today' ? 'active' : ''}`} onClick={() => setView('today')}>Today</button>
-        <button className={`tap ${view === 'trades' ? 'active' : ''}`} onClick={() => setView('trades')}>
-          <DollarSign size={11} style={{ verticalAlign: 'middle', marginRight: 3 }} />Trades
-        </button>
+        {cfg.tradesEnabled && (
+          <button className={`tap ${view === 'trades' ? 'active' : ''}`} onClick={() => setView('trades')}>
+            <DollarSign size={11} style={{ verticalAlign: 'middle', marginRight: 3 }} />{cfg.tradesLabel || 'Trades'}
+          </button>
+        )}
         <button className={`tap ${view === 'history' ? 'active' : ''}`} onClick={() => setView('history')}>History</button>
       </div>
 
@@ -1460,7 +1573,7 @@ function JournalTab({ journal, onSave }: any) {
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="What's on your mind? Progress, setbacks, ideas, reflections…"
+              placeholder={cfg.notesPlaceholder || "What's on your mind? Progress, setbacks, ideas, reflections…"}
               style={{ width: '100%', minHeight: 140, fontFamily: 'Fraunces, serif', fontSize: 15, padding: 10, border: '1px solid #E4DCC8', borderRadius: 8, background: '#FBF7EE', color: '#1A1A2E', resize: 'vertical', lineHeight: 1.6 }}
             />
             <button className="btn" style={{ width: '100%', marginTop: 10 }} onClick={saveNote}>
@@ -1468,9 +1581,10 @@ function JournalTab({ journal, onSave }: any) {
             </button>
           </div>
 
+          {cfg.tradesEnabled && (
           <div className="card" style={{ padding: 14 }}>
             <div className="between" style={{ marginBottom: 10 }}>
-              <span className="h3">Today's trades</span>
+              <span className="h3">Today's {(cfg.tradesLabel || 'trades').toLowerCase()}</span>
               <button className="tap" style={{ padding: '4px 10px', fontSize: 11 }} onClick={() => setShowTradeForm(!showTradeForm)}>
                 <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 3 }} />Add
               </button>
@@ -1504,7 +1618,7 @@ function JournalTab({ journal, onSave }: any) {
               </div>
             )}
 
-            {trades.length === 0 && <p className="muted small">No trades logged today.</p>}
+            {trades.length === 0 && <p className="muted small">No {(cfg.tradesLabel || 'trades').toLowerCase()} logged today.</p>}
             {trades.map((t: any) => (
               <div key={t.id} className="card" style={{ padding: 10, marginBottom: 8, borderLeft: `3px solid ${parseFloat(t.pnl) >= 0 ? '#4A6741' : '#B8460E'}` }}>
                 <div className="between">
@@ -1522,6 +1636,7 @@ function JournalTab({ journal, onSave }: any) {
               </div>
             ))}
           </div>
+          )}
         </>
       )}
 
@@ -2503,13 +2618,40 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
   const barcodeRef = useRef<HTMLInputElement>(null);
   const today = todayStr();
   const todayEntries = meals.entries?.[today] || [];
-  const scaled = (m: any, q: number) => ({ protein: Math.round((m.protein || 0) * q), carbs: Math.round((m.carbs || 0) * q), fat: Math.round((m.fat || 0) * q), calories: Math.round((m.calories || 0) * q) });
+  const scaled = (m: any, q: number) => {
+    const out: any = {
+      protein: Math.round((m.protein || 0) * q),
+      carbs: Math.round((m.carbs || 0) * q),
+      fat: Math.round((m.fat || 0) * q),
+      calories: Math.round((m.calories || 0) * q),
+    };
+    // Preserve all micros, keeping one decimal place for small values.
+    for (const k of MICRO_KEYS) {
+      const v = (Number(m[k]) || 0) * q;
+      out[k] = v < 10 ? Math.round(v * 10) / 10 : Math.round(v);
+    }
+    return out;
+  };
 
   const logItem = async (item: any, q = 1) => {
     const s = scaled(item, q);
     const name = q !== 1 ? `${item.name} ×${q}` : item.name;
     await onSave(addMealEntry(meals, today, { name, source: item.source || '', qty: q, ...s }));
     onClose();
+  };
+
+  // Build a preset/entry from a raw food item, preserving all micros.
+  const pickFood = (item: any) => {
+    const base: any = {
+      name: item.name || '',
+      protein: Number(item.protein) || 0,
+      carbs: Number(item.carbs) || 0,
+      fat: Number(item.fat) || 0,
+      calories: Number(item.calories) || 0,
+      source: item.source || '',
+    };
+    for (const k of MICRO_KEYS) base[k] = Number(item[k]) || 0;
+    return base;
   };
   const removeEntry = async (id: string) => { await onSave(removeMealEntry(meals, today, id)); };
 
@@ -2585,7 +2727,7 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
       <button className="btn" style={{ width: '100%', marginBottom: 6 }} onClick={() => logItem(review, qty)}>
         <Plus size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Log to today
       </button>
-      <button className="tap" style={{ width: '100%' }} onClick={async () => { await onSave({ ...meals, presets: [...meals.presets, { id: 'p' + Date.now(), name: review.name, protein: review.protein || 0, carbs: review.carbs || 0, fat: review.fat || 0, calories: review.calories || 0, source: review.source || '' }] }); setReview(null); setMode('preset'); }}>
+      <button className="tap" style={{ width: '100%' }} onClick={async () => { await onSave({ ...meals, presets: [...meals.presets, { id: 'p' + Date.now(), ...pickFood(review) }] }); setReview(null); setMode('preset'); }}>
         Save as preset
       </button>
     </div>
@@ -2892,6 +3034,87 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
       ) : (
         <p className="muted tiny" style={{ marginBottom: 16, lineHeight: 1.4 }}>Add a body weight entry to auto-calculate macro targets from your goal.</p>
       )}
+
+      <div className="between" style={{ marginBottom: 8, marginTop: 8 }}>
+        <div className="h2">Micros (vitamins &amp; minerals)</div>
+        <button
+          className="tap"
+          style={{ padding: '4px 10px', fontSize: 11 }}
+          onClick={() => update({ microsEnabled: draft.microsEnabled === false })}
+        >
+          {draft.microsEnabled === false ? 'Off' : 'On'}
+        </button>
+      </div>
+      {draft.microsEnabled !== false && (
+        <>
+          <p className="muted tiny" style={{ marginBottom: 10, lineHeight: 1.4 }}>
+            Targets follow general adult guidance. Adjust freely. Limits (sodium, sugar, etc.) are upper caps.
+          </p>
+          {MICRO_DEFS.map((d) => {
+            const t = { ...DEFAULT_MICRO_TARGETS, ...(draft.microTargets || {}) };
+            return (
+              <div key={d.key} className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                <span className="small" style={{ flex: 1 }}>
+                  {d.label}{d.limit && <span className="muted tiny" style={{ marginLeft: 6 }}>(limit)</span>}
+                </span>
+                <input
+                  type="number"
+                  step="any"
+                  value={t[d.key] ?? d.defaultTarget}
+                  onChange={(e) =>
+                    update({
+                      microTargets: {
+                        ...t,
+                        [d.key]: parseFloat(e.target.value) || 0,
+                      },
+                    })
+                  }
+                  style={{ width: 90 }}
+                />
+                <span className="mono tiny muted" style={{ width: 28 }}>{d.unit}</span>
+              </div>
+            );
+          })}
+          <button
+            className="tap"
+            style={{ width: '100%', marginTop: 8, marginBottom: 16, fontSize: 12 }}
+            onClick={() => update({ microTargets: { ...DEFAULT_MICRO_TARGETS } })}
+          >
+            <RotateCcw size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Reset micro targets to defaults
+          </button>
+        </>
+      )}
+
+      <div className="h2" style={{ marginBottom: 8, marginTop: 8 }}>Journal</div>
+      <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 10 }}>
+        <span className="small" style={{ flex: 1 }}>Show "{(draft.journal?.tradesLabel || 'Trades')}" section</span>
+        <button
+          className="tap"
+          style={{ padding: '4px 10px', fontSize: 11 }}
+          onClick={() => update({ journal: { ...(draft.journal || {}), tradesEnabled: !(draft.journal?.tradesEnabled !== false) } })}
+        >
+          {draft.journal?.tradesEnabled !== false ? 'On' : 'Off'}
+        </button>
+      </div>
+      {(draft.journal?.tradesEnabled !== false) && (
+        <div style={{ marginBottom: 10 }}>
+          <label>Section name (rename "Trades" to anything)</label>
+          <input
+            type="text"
+            value={draft.journal?.tradesLabel ?? 'Trades'}
+            onChange={(e) => update({ journal: { ...(draft.journal || {}), tradesLabel: e.target.value } })}
+            placeholder="Trades, Wins, Deals, Logs…"
+          />
+        </div>
+      )}
+      <div style={{ marginBottom: 16 }}>
+        <label>Notes placeholder</label>
+        <input
+          type="text"
+          value={draft.journal?.notesPlaceholder ?? "What's on your mind?"}
+          onChange={(e) => update({ journal: { ...(draft.journal || {}), notesPlaceholder: e.target.value } })}
+        />
+      </div>
 
       <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={() => { onSave(draft); onClose(); }}>
         <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save settings
@@ -3534,7 +3757,14 @@ export default function App() {
   useEffect(() => {
     (async () => {
       const s = await safeGet(K.settings, DEFAULT_SETTINGS);
-      const merged = { ...DEFAULT_SETTINGS, ...s, subjects: { ...DEFAULT_SETTINGS.subjects, ...(s.subjects || {}) }, macroTargets: { ...DEFAULT_SETTINGS.macroTargets, ...(s.macroTargets || {}) } };
+      const merged = {
+        ...DEFAULT_SETTINGS,
+        ...s,
+        subjects: { ...DEFAULT_SETTINGS.subjects, ...(s.subjects || {}) },
+        macroTargets: { ...DEFAULT_SETTINGS.macroTargets, ...(s.macroTargets || {}) },
+        microTargets: { ...DEFAULT_SETTINGS.microTargets, ...(s.microTargets || {}) },
+        journal: { ...DEFAULT_SETTINGS.journal, ...(s.journal || {}) },
+      };
       // Normalize subjects to the flexible model and purge soft-deletes older than 15 days.
       for (const k of Object.keys(merged.subjects)) {
         const sub = normalizeSubject(merged.subjects[k]);
@@ -3895,7 +4125,7 @@ export default function App() {
           />
         )}
         {tab === 'journal' && (
-          <JournalTab journal={journal} onSave={saveJournal} />
+          <JournalTab journal={journal} onSave={saveJournal} settings={settings} />
         )}
         {tab === 'history' && (
           <HistoryTab
