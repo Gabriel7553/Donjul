@@ -2,13 +2,14 @@ import OpenAI from "openai";
 import { logger } from "./logger";
 
 const OPENAI_BASE_URL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-const OPENAI_API_KEY = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+const OPENAI_API_KEY =
+  process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
 
 export const hasOpenAI = Boolean(OPENAI_API_KEY);
 
 if (!hasOpenAI) {
   logger.warn(
-    "AI_INTEGRATIONS_OPENAI_API_KEY is not set — AI routes (scan, coach, parse) will return 503 until the OpenAI integration is configured.",
+    "No OpenAI API key found — AI routes (scan, coach, parse) will return 503. Set OPENAI_API_KEY in secrets.",
   );
 }
 
@@ -16,7 +17,10 @@ if (!hasOpenAI) {
 let client: OpenAI | null = null;
 export function getOpenAI(): OpenAI {
   if (!client) {
-    client = new OpenAI({ baseURL: OPENAI_BASE_URL, apiKey: OPENAI_API_KEY });
+    client = new OpenAI({
+      ...(OPENAI_BASE_URL ? { baseURL: OPENAI_BASE_URL } : {}),
+      apiKey: OPENAI_API_KEY,
+    });
   }
   return client;
 }
