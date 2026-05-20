@@ -3546,17 +3546,21 @@ function ResetDayModal({ onReset, onFullReset, onClose }: any) {
   const [view, setView] = useState<'today' | 'full'>('today');
 
   // ── Today's reset ──
-  const [opts, setOpts] = useState({ subjects: true, macros: true, workout: false, status: false, spending: false });
+  const ALL_DAY = { subjects: true, macros: true, body: true, workout: true, spending: true, status: true };
+  const NONE_DAY = { subjects: false, macros: false, body: false, workout: false, spending: false, status: false };
+  const [opts, setOpts] = useState({ subjects: true, macros: true, body: false, workout: false, status: false, spending: false });
   const [confirmDay, setConfirmDay] = useState(false);
   const toggleDay = (k: keyof typeof opts) => setOpts(p => ({ ...p, [k]: !p[k] }));
   const dayRows: { key: keyof typeof opts; label: string; desc: string }[] = [
-    { key: 'subjects',  label: 'Study / subject time',       desc: "Clears today's logged minutes and removes them from your totals." },
-    { key: 'macros',    label: 'Macros / nutrition',          desc: "Resets today's food log and meal entries to zero." },
-    { key: 'workout',   label: "Today's workout log",         desc: 'Deletes the workout you logged today.' },
-    { key: 'spending',  label: "Today's transactions",        desc: "Removes all money entries logged for today." },
+    { key: 'subjects',  label: 'Study / subject time',        desc: "Clears today's logged minutes and removes them from your totals." },
+    { key: 'macros',    label: 'Macros / nutrition',           desc: "Resets today's food log and meal entries to zero." },
+    { key: 'body',      label: "Today's body measurement",    desc: "Removes any weight or measurement entry logged today." },
+    { key: 'workout',   label: "Today's workout log",          desc: 'Deletes the workout you logged today.' },
+    { key: 'spending',  label: "Today's transactions",         desc: "Removes all money entries logged for today." },
     { key: 'status',    label: 'Status (busy / wake / start)', desc: 'Resets back to a fresh morning.' },
   ];
   const anyDay = Object.values(opts).some(Boolean);
+  const allDay = Object.values(opts).every(Boolean);
 
   // ── Full (all-time) reset ──
   const [full, setFull] = useState({ study: false, nutrition: false, body: false, workout: false, spending: false, journal: false, plans: false, settings: false });
@@ -3596,9 +3600,26 @@ function ResetDayModal({ onReset, onFullReset, onClose }: any) {
 
       {view === 'today' && (
         <>
-          <p className="muted small" style={{ marginBottom: 12, lineHeight: 1.5 }}>
+          <p className="muted small" style={{ marginBottom: 10, lineHeight: 1.5 }}>
             Clears selected data for <strong>today only</strong>. Past days untouched. You can Undo right after.
           </p>
+          {/* Select all / none */}
+          <div className="row" style={{ gap: 8, marginBottom: 10 }}>
+            <button
+              className="tap"
+              style={{ flex: 1, fontSize: 11, background: allDay ? '#B8460E22' : 'transparent', borderColor: allDay ? '#B8460E' : '#E4DCC8' }}
+              onClick={() => { setOpts(ALL_DAY); setConfirmDay(false); }}
+            >
+              Select all
+            </button>
+            <button
+              className="tap"
+              style={{ flex: 1, fontSize: 11 }}
+              onClick={() => { setOpts(NONE_DAY); setConfirmDay(false); }}
+            >
+              Clear all
+            </button>
+          </div>
           {dayRows.map((r) => (
             <div
               key={r.key}
@@ -4787,8 +4808,8 @@ export default function App() {
     undoToast(`Logged ${minutes}m of ${name}`, async () => { await saveDaily(prevDaily); await saveTotals(prevTotals); await saveStreaks(prevStreaks); });
   };
 
-  const resetDay = async (opts: { subjects?: boolean; macros?: boolean; workout?: boolean; status?: boolean; spending?: boolean }) => {
-    const prevDaily = daily, prevTotals = totals, prevMeals = meals, prevWorkout = workout, prevSpending = spending;
+  const resetDay = async (opts: { subjects?: boolean; macros?: boolean; body?: boolean; workout?: boolean; status?: boolean; spending?: boolean }) => {
+    const prevDaily = daily, prevTotals = totals, prevMeals = meals, prevWorkout = workout, prevSpending = spending, prevBody = body;
     const today = todayStr();
     let newDaily = { ...daily };
     let newTotals = totals;
@@ -4827,10 +4848,15 @@ export default function App() {
       const next = { ...spending, entries: spending.entries.filter((e: any) => e.date !== today) };
       await saveSpending(next);
     }
+    if (opts.body) {
+      const next = { ...body, entries: body.entries.filter((e: any) => e.date !== today) };
+      await saveBody(next);
+    }
 
     undoToast('Day reset', async () => {
       await saveDaily(prevDaily); await saveTotals(prevTotals); await saveMeals(prevMeals); await saveWorkout(prevWorkout);
       if (opts.spending) await saveSpending(prevSpending);
+      if (opts.body) await saveBody(prevBody);
     });
   };
 
