@@ -4,8 +4,18 @@ import {
   Award, Save, Calendar as CalIcon, Activity, Dumbbell, Apple, ListChecks, ChevronRight, ChevronDown, ChevronLeft,
   TrendingUp, TrendingDown, Edit3, Trash2, Flame, ArrowUp, ArrowDown, Minus, Target, BookOpen, Clock, Moon, Coffee,
   Download, Upload, History, Repeat, Zap, Play, AlertTriangle, RotateCcw, MapPin, Building2, TreePine,
-  Camera, BookMarked, TrendingUp as Journal, DollarSign, ShoppingCart, Briefcase, Car, ChevronUp, Trophy, Archive, Infinity
+  Camera, BookMarked, TrendingUp as Journal, DollarSign, ShoppingCart, Briefcase, Car, ChevronUp, Trophy, Archive, Infinity, Mic
 } from 'lucide-react';
+import { Toaster, toast } from 'sonner';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import confetti from 'canvas-confetti';
+import { motion } from 'framer-motion';
+
+function haptic(ms = 12) { try { (navigator as any).vibrate?.(ms); } catch {} }
+function celebrate() {
+  try { confetti({ particleCount: 90, spread: 72, origin: { y: 0.7 }, colors: ['#B8460E', '#4A6741', '#3B5C6B', '#C8932E', '#8E4585'] }); } catch {}
+  haptic(25);
+}
 
 // ════════════════════════════════════════════════════════════════════════════════
 // STORAGE — localStorage-backed persistence
@@ -23,7 +33,15 @@ const K = {
   journal: 'st:journal',
   challengeHistory: 'st:challengeHistory',
   busyPresets: 'st:busyPresets',
+  activity: 'st:activity',
+  checkins: 'st:checkins',
+  backups: 'st:backups',
+  achievements: 'st:achievements',
 };
+
+// Keys included in a full data snapshot (for auto-backup + export/restore).
+const BACKUP_KEYS = ['settings', 'totals', 'body', 'workout', 'meals', 'plans', 'streaks', 'journal', 'challengeHistory', 'busyPresets', 'activity', 'checkins'] as const;
+const MAX_BACKUPS = 10;
 
 async function safeGet(key: string, fallback: any): Promise<any> {
   try {
@@ -36,6 +54,23 @@ async function safeGet(key: string, fallback: any): Promise<any> {
 async function safeSet(key: string, value: any): Promise<void> {
   try {
     localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+// Capture all data into a single timestamped backup; keep the most recent MAX_BACKUPS.
+async function createBackup(): Promise<void> {
+  try {
+    const data: Record<string, any> = {};
+    for (const name of BACKUP_KEYS) {
+      const raw = localStorage.getItem((K as any)[name]);
+      if (raw != null) data[name] = JSON.parse(raw);
+    }
+    if (Object.keys(data).length === 0) return;
+    const list = await safeGet(K.backups, []);
+    const next = [{ ts: Date.now(), data }, ...list].slice(0, MAX_BACKUPS);
+    await safeSet(K.backups, next);
   } catch (e) {
     console.error(e);
   }
@@ -79,6 +114,75 @@ function isSunday(dateStr = todayStr()) { return new Date(dateStr + 'T00:00:00')
 function timeToMins(hhmm: string) { const [h, m] = (hhmm || '00:00').split(':').map(Number); return h * 60 + m; }
 function minsToHHMM(mins: number) { const h = Math.floor(mins / 60) % 24; const m = mins % 60; return `${pad(h)}:${pad(m)}`; }
 
+// Sum a day's meal entries into a macro total.
+function mealTotalsFromEntries(entries: any[]): any {
+  return (entries || []).reduce((acc, e) => ({
+    protein: acc.protein + (Number(e.protein) || 0),
+    carbs: acc.carbs + (Number(e.carbs) || 0),
+    fat: acc.fat + (Number(e.fat) || 0),
+    calories: acc.calories + (Number(e.calories) || 0),
+  }), { protein: 0, carbs: 0, fat: 0, calories: 0 });
+}
+
+// Add a meal entry to a date and keep the cached daily total in sync.
+function addMealEntry(meals: any, date: string, entry: any): any {
+  const entries = { ...(meals.entries || {}) };
+  const dayList = [...(entries[date] || []), { id: 'm' + Date.now() + Math.random().toString(36).slice(2, 6), time: nowHHMM(), ...entry }];
+  entries[date] = dayList;
+  return { ...meals, entries, log: { ...meals.log, [date]: mealTotalsFromEntries(dayList) } };
+}
+
+function removeMealEntry(meals: any, date: string, id: string): any {
+  const entries = { ...(meals.entries || {}) };
+  const dayList = (entries[date] || []).filter((e: any) => e.id !== id);
+  entries[date] = dayList;
+  return { ...meals, entries, log: { ...meals.log, [date]: mealTotalsFromEntries(dayList) } };
+}
+
+// One-time migration: turn legacy daily totals into a single editable entry.
+function migrateMeals(meals: any): any {
+  const m = { presets: meals.presets || [], log: meals.log || {}, entries: meals.entries || {} };
+  for (const date of Object.keys(m.log)) {
+    if (!m.entries[date]) {
+      const t = m.log[date];
+      if (t && (t.protein || t.carbs || t.fat || t.calories)) {
+        m.entries[date] = [{ id: 'legacy_' + date, time: '', name: 'Logged earlier', source: '', qty: 1, ...t }];
+      } else {
+        m.entries[date] = [];
+      }
+    }
+  }
+  return m;
+}
+
+// Resize an image client-side so the upload stays small but label text stays legible.
+async function fileToResizedBase64(file: File, maxEdge = 1500, quality = 0.9): Promise<{ image: string; mime: string }> {
+  const dataUrl: string = await new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result as string);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+  const img: HTMLImageElement = await new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i);
+    i.onerror = rej;
+    i.src = dataUrl;
+  });
+  const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+  if (scale >= 1) {
+    return { image: dataUrl.split(',')[1], mime: file.type || 'image/jpeg' };
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(img.height * scale);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return { image: dataUrl.split(',')[1], mime: file.type || 'image/jpeg' };
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const out = canvas.toDataURL('image/jpeg', quality);
+  return { image: out.split(',')[1], mime: 'image/jpeg' };
+}
+
 function useCurrentTime() {
   const [now, setNow] = useState(nowHHMM());
   useEffect(() => {
@@ -88,9 +192,79 @@ function useCurrentTime() {
   return now;
 }
 
+// Flexible subject model: fill in safe defaults for older saved subjects.
+function normalizeSubject(s: any) {
+  return {
+    trackingMode: 'time',
+    description: '',
+    tools: '',
+    target: 30,
+    weeklyDays: 5,
+    deadline: null,
+    countTotal: null,
+    archived: false,
+    deletedAt: null,
+    ...s,
+  };
+}
+function subjectGoalKind(s: any): 'deadline' | 'count' | 'none' {
+  if (s.countTotal) return 'count';
+  if (s.deadline) return 'deadline';
+  return 'none';
+}
+// Sunday-based week start, matching the app's existing Sunday rest/review convention.
+function weekStartStr(dateStr = todayStr()) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() - d.getDay());
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function doneThisWeek(subjectKey: string, checkins: any) {
+  const ws = weekStartStr();
+  const list: string[] = checkins?.[subjectKey] || [];
+  return list.filter((d) => d >= ws).length;
+}
+function doneTotal(subjectKey: string, checkins: any) {
+  return (checkins?.[subjectKey] || []).length;
+}
+
+// Derive earned/locked achievement badges from existing data (no separate tracking needed).
+function computeAchievements(totals: any, streaks: any, workout: any, body: any, meals: any) {
+  const totalMins = (Object.values(totals || {}) as any[]).reduce((a: number, b: any) => a + (Number(b) || 0), 0);
+  const bestStreak = Math.max(0, ...Object.values(streaks || {}).map((s: any) => s?.longest || s?.current || 0));
+  const workoutCount = Object.keys(workout?.logs || {}).length;
+  const mealDays = Object.keys(meals?.log || {}).filter((d) => { const t = meals.log[d]; return t && (t.protein || t.calories); }).length;
+  const bodyCount = (body?.entries || []).length;
+  const defs = [
+    { id: 'first_hour', label: 'First Hour', desc: 'Log your first 60 min', earned: totalMins >= 60 },
+    { id: 'ten_hours', label: '10 Hours', desc: '10 hours of focused work', earned: totalMins >= 600 },
+    { id: 'fifty_hours', label: '50 Hours', desc: '50 hours total', earned: totalMins >= 3000 },
+    { id: 'week_streak', label: 'Week Warrior', desc: '7-day streak', earned: bestStreak >= 7 },
+    { id: 'month_streak', label: 'Unbreakable', desc: '30-day streak', earned: bestStreak >= 30 },
+    { id: 'lift_12', label: 'Consistent', desc: '12 workouts logged', earned: workoutCount >= 12 },
+    { id: 'lift_40', label: 'Iron Will', desc: '40 workouts logged', earned: workoutCount >= 40 },
+    { id: 'fuel_7', label: 'Dialed In', desc: 'Track meals 7 days', earned: mealDays >= 7 },
+    { id: 'measured', label: 'Measured Up', desc: 'Log 2+ body check-ins', earned: bodyCount >= 2 },
+  ];
+  return defs;
+}
+
+// Suggest macro targets from latest bodyweight + goal direction (lb-based heuristic;
+// no height/age stored, so we use kcal-per-lb rules of thumb).
+function suggestMacros(latestBody: any, bodyGoals: any) {
+  const wLb = Number(latestBody?.weight);
+  if (!wLb) return null;
+  const dir = bodyGoals?.weight?.direction || 'down';
+  const calPerLb = dir === 'down' ? 12 : dir === 'up' ? 17 : 15;
+  const calories = Math.round((wLb * calPerLb) / 10) * 10;
+  const protein = Math.round(wLb);
+  const fat = Math.round(wLb * 0.4);
+  const carbs = Math.max(0, Math.round((calories - protein * 4 - fat * 9) / 4));
+  return { protein, carbs, fat, calories };
+}
+
 function projectedDate(subjectKey: string, settings: any, totals: any, daily: any) {
   const s = settings.subjects[subjectKey];
-  if (!s) return null;
+  if (!s || !s.deadline) return null;
   const totalDone = (totals[subjectKey] || 0) + (daily?.completed[subjectKey] || 0);
   const target = targetTotalByDeadline(subjectKey, settings);
   const daysElapsed = Math.max(1, diffDays(todayStr(), settings.startDate) + 1);
@@ -108,10 +282,10 @@ function projectedDate(subjectKey: string, settings: any, totals: any, daily: an
 // DEFAULTS
 // ════════════════════════════════════════════════════════════════════════════════
 const SUBJECTS_DEFAULT: Record<string, any> = {
-  spanish: { name: 'Spanish', icon: 'languages', accent: '#B8460E', tools: 'Duolingo + Babbel + Input', target: 95, weeklyDays: 6, deadline: '2026-12-31', archived: false },
-  guitar: { name: 'Guitar', icon: 'music', accent: '#4A6741', tools: 'Simply Guitar', target: 30, weeklyDays: 5, deadline: '2026-12-31', archived: false },
-  cysa: { name: 'CySA+', icon: 'shield', accent: '#3B5C6B', tools: 'Jason Dion · Udemy', target: 45, weeklyDays: 7, deadline: '2026-06-16', archived: false },
-  running: { name: 'Running', icon: 'activity', accent: '#8E4585', tools: 'Easy pace, 25-30 min', target: 28, weeklyDays: 3, deadline: '2026-12-31', archived: false },
+  spanish: { name: 'Spanish', icon: 'languages', accent: '#B8460E', tools: 'Duolingo + Babbel + Input', description: '', trackingMode: 'time', target: 95, weeklyDays: 6, deadline: '2026-12-31', countTotal: null, archived: false, deletedAt: null },
+  guitar: { name: 'Guitar', icon: 'music', accent: '#4A6741', tools: 'Simply Guitar', description: '', trackingMode: 'time', target: 30, weeklyDays: 5, deadline: '2026-12-31', countTotal: null, archived: false, deletedAt: null },
+  cysa: { name: 'CySA+', icon: 'shield', accent: '#3B5C6B', tools: 'Jason Dion · Udemy', description: '', trackingMode: 'time', target: 45, weeklyDays: 7, deadline: '2026-06-16', countTotal: null, archived: false, deletedAt: null },
+  running: { name: 'Running', icon: 'activity', accent: '#8E4585', tools: 'Easy pace, 25-30 min', description: '', trackingMode: 'time', target: 28, weeklyDays: 3, deadline: '2026-12-31', countTotal: null, archived: false, deletedAt: null },
 };
 
 const ICON_MAP: Record<string, any> = { languages: Languages, music: Music, shield: Shield, book: BookOpen, target: Target, dumbbell: Dumbbell, activity: Activity, run: Activity };
@@ -288,7 +462,7 @@ function expectedTotal(subjectKey: string, settings: any) {
 }
 function targetTotalByDeadline(subjectKey: string, settings: any) {
   const s = settings.subjects[subjectKey];
-  if (!s) return 0;
+  if (!s || !s.deadline) return 0;
   const totalDays = Math.max(1, diffDays(s.deadline, settings.startDate) + 1);
   return Math.round(totalDays * s.target * (s.weeklyDays / 7));
 }
@@ -412,15 +586,21 @@ function BottomNav({ tab, setTab }: { tab: string; setTab: (t: string) => void }
 // ════════════════════════════════════════════════════════════════════════════════
 // TODAY TAB
 // ════════════════════════════════════════════════════════════════════════════════
-function TodayTab({ settings, daily, totals, streaks, meals, workout, onWake, onStatus, onLogTime, onBusy, onLogMeal, onScheduleStart, onResetMacros }: any) {
+function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, onWake, onStatus, onLogTime, onBusy, onBack, onSwitch, onLogMeal, onScheduleStart, onResetMacros, onMarkDone, onFocusStart, onFocusStop, onCoach }: any) {
   const now = useCurrentTime();
   const nowMins = timeToMins(now);
-  const subjectKeys = settings.subjectOrder.filter((k: string) => settings.subjects[k] && !settings.subjects[k].archived);
+  const subjectKeys = settings.subjectOrder.filter((k: string) => settings.subjects[k] && !settings.subjects[k].archived && !settings.subjects[k].deletedAt);
   const todayMacros = meals.log[todayStr()] || { protein: 0, carbs: 0, fat: 0, calories: 0 };
   const sleepMins = timeToMins(settings.sleepTime || '23:00');
   const minsToSleep = sleepMins - nowMins;
   const sleepWarning = minsToSleep > 0 && minsToSleep <= 120 && daily.scheduleStarted;
-  const incompleteCount = subjectKeys.filter((k: string) => (daily.completed[k] || 0) < settings.subjects[k].target).length;
+  const isDoneToday = (k: string) => {
+    const s = settings.subjects[k];
+    if (doneThisWeek(k, checkins) >= (s.weeklyDays || 7)) return true;
+    if (s.trackingMode === 'checkoff') return (checkins[k] || []).includes(todayStr());
+    return (daily.completed[k] || 0) >= (s.target || 0) && (s.target || 0) > 0;
+  };
+  const incompleteCount = subjectKeys.filter((k: string) => !isDoneToday(k)).length;
 
   return (
     <>
@@ -446,11 +626,12 @@ function TodayTab({ settings, daily, totals, streaks, meals, workout, onWake, on
         <ScheduleStartCard daily={daily} defaultOffset={settings.scheduleStartOffsetMin} onStart={onScheduleStart} />
       ) : (
         <>
-          <StatusBar daily={daily} onBusy={onBusy} onHome={() => onStatus('home', null)} nowMins={nowMins} now={now} sleepTime={settings.sleepTime} />
-          <Schedule settings={settings} daily={daily} onLog={onLogTime} subjectKeys={subjectKeys} nowMins={nowMins} />
-          <Progress settings={settings} totals={totals} daily={daily} streaks={streaks} subjectKeys={subjectKeys} onLogExtra={onLogTime} />
+          <StatusBar daily={daily} onBusy={onBusy} onBack={onBack} onSwitch={onSwitch} nowMins={nowMins} now={now} sleepTime={settings.sleepTime} />
+          {daily.focus && <FocusTimerCard focus={daily.focus} subject={settings.subjects[daily.focus.subject]} onStop={onFocusStop} />}
+          <Schedule settings={settings} daily={daily} onLog={onLogTime} subjectKeys={subjectKeys} nowMins={nowMins} checkins={checkins} />
+          <Progress settings={settings} totals={totals} daily={daily} streaks={streaks} subjectKeys={subjectKeys} onLogExtra={onLogTime} checkins={checkins} onMarkDone={onMarkDone} onFocusStart={onFocusStart} focus={daily.focus} />
           <ChallengeCard settings={settings} workout={workout} />
-          <MacrosCard targets={settings.macroTargets} totals={todayMacros} onLog={onLogMeal} onReset={onResetMacros} />
+          <MacrosCard targets={settings.macroTargets} totals={todayMacros} onLog={onLogMeal} onReset={onResetMacros} onCoach={onCoach} />
           <WeeklySummary settings={settings} totals={totals} daily={daily} meals={meals} workout={workout} />
         </>
       )}
@@ -508,8 +689,12 @@ function ScheduleStartCard({ daily, defaultOffset, onStart }: any) {
   );
 }
 
-function StatusBar({ daily, onBusy, onHome, nowMins, now, sleepTime }: any) {
+function StatusBar({ daily, onBusy, onBack, onSwitch, nowMins, now, sleepTime }: any) {
   const isBusy = daily.status === 'busy';
+  const seg = daily.busy?.segments?.[daily.busy.segments.length - 1];
+  const reason = seg?.reason || daily.busyReason;
+  const plannedUntil = daily.busy?.plannedUntil || daily.busyUntil;
+  const elapsed = seg?.start ? Math.max(0, nowMins - timeToMins(seg.start)) : 0;
   const sleepMins = timeToMins(sleepTime || '23:00');
   const minsLeft = sleepMins - nowMins;
   const timeColor = minsLeft <= 60 ? '#B8460E' : minsLeft <= 120 ? '#C8932E' : '#6B6457';
@@ -521,9 +706,14 @@ function StatusBar({ daily, onBusy, onHome, nowMins, now, sleepTime }: any) {
           <div className="row" style={{ gap: 8 }}>
             {isBusy ? <Footprints size={16} color="#C8932E" /> : <Home size={16} color="#4A6741" />}
             <span style={{ fontSize: 15, fontWeight: 500 }}>
-              {isBusy ? `Busy until ${fmtTime(daily.busyUntil)}` : 'Home & available'}
+              {isBusy ? (reason || 'Busy') : 'Home & available'}
             </span>
           </div>
+          {isBusy && (
+            <div className="mono tiny muted" style={{ marginTop: 2 }}>
+              {elapsed}m so far{plannedUntil ? ` · planned till ${fmtTime(plannedUntil)}` : ' · open-ended'}
+            </div>
+          )}
         </div>
         <div style={{ textAlign: 'right' }}>
           <div className="mono small" style={{ fontWeight: 600, color: '#1A1A2E', fontSize: 18 }}>{fmtTime(now)}</div>
@@ -535,13 +725,45 @@ function StatusBar({ daily, onBusy, onHome, nowMins, now, sleepTime }: any) {
         </div>
       </div>
       <div style={{ borderTop: '1px solid #E4DCC8', marginTop: 10, paddingTop: 10 }}>
-        {isBusy ? <button className="tap active" onClick={onHome} style={{ width: '100%' }}>I'm back</button> : <button className="tap" onClick={onBusy} style={{ width: '100%' }}>I'm stepping out</button>}
+        {isBusy ? (
+          <div className="row" style={{ gap: 6 }}>
+            <button className="tap" onClick={onSwitch} style={{ flex: 1 }}><Repeat size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Switch</button>
+            <button className="tap active" onClick={onBack} style={{ flex: 1 }}>I'm back</button>
+          </div>
+        ) : (
+          <button className="tap" onClick={onBusy} style={{ width: '100%' }}>I'm stepping out</button>
+        )}
       </div>
     </div>
   );
 }
 
-function buildSchedule(settings: any, daily: any, subjectKeys: string[]) {
+function FocusTimerCard({ focus, subject, onStop }: any) {
+  const [, tick] = useState(0);
+  useEffect(() => { const id = setInterval(() => tick((t) => t + 1), 1000); return () => clearInterval(id); }, []);
+  const elapsedMs = Date.now() - focus.start;
+  const mins = Math.floor(elapsedMs / 60000);
+  const secs = Math.floor((elapsedMs % 60000) / 1000);
+  const Icon = ICON_MAP[subject?.icon] || Target;
+  return (
+    <div className="card" style={{ borderLeft: `3px solid ${subject?.accent || '#4A6741'}`, marginBottom: 14, background: '#FDF6EE' }}>
+      <div className="between">
+        <div className="row" style={{ gap: 10 }}>
+          <div className="icon-wrap" style={{ background: subject?.accent || '#4A6741', width: 34, height: 34 }}><Icon size={18} /></div>
+          <div>
+            <div className="small" style={{ fontWeight: 600 }}>Focusing · {subject?.name || 'Session'}</div>
+            <div className="mono" style={{ fontSize: 22, fontWeight: 700 }}>{pad(mins)}:{pad(secs)}</div>
+          </div>
+        </div>
+        <button className="btn" style={{ background: '#B8460E' }} onClick={onStop}>
+          <Check size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Stop & log
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function buildSchedule(settings: any, daily: any, subjectKeys: string[], checkins: any = {}) {
   if (!daily?.scheduleStartTime) return [];
   const breakMin = settings.blockBreakMin ?? 15;
   let cursor = daily.scheduleStartTime;
@@ -553,10 +775,13 @@ function buildSchedule(settings: any, daily: any, subjectKeys: string[]) {
 
   for (const k of order) {
     const s = settings.subjects[k];
-    if (!s || s.archived) continue;
+    if (!s || s.archived || s.deletedAt) continue;
+    // Check-off habits aren't time-blocked, and weekly-met goals drop off until next week.
+    if (s.trackingMode === 'checkoff') continue;
+    if (doneThisWeek(k, checkins) >= (s.weeklyDays || 7)) continue;
     const isRest = (s.weeklyDays < 7) && (dow === 0);
     if (isRest) continue;
-    const remaining = Math.max(0, s.target - (daily.completed[k] || 0));
+    const remaining = Math.max(0, (s.target || 0) - (daily.completed[k] || 0));
     if (remaining <= 0) continue;
 
     if (k === 'spanish' && remaining >= 60) {
@@ -592,8 +817,8 @@ function splitSpanish(total: number) {
   return [duo, babbel, input];
 }
 
-function Schedule({ settings, daily, onLog, subjectKeys, nowMins }: any) {
-  const blocks = useMemo(() => buildSchedule(settings, daily, subjectKeys), [settings, daily, subjectKeys]);
+function Schedule({ settings, daily, onLog, subjectKeys, nowMins, checkins }: any) {
+  const blocks = useMemo(() => buildSchedule(settings, daily, subjectKeys, checkins), [settings, daily, subjectKeys, checkins]);
 
   if (blocks.length === 0) {
     return (
@@ -669,46 +894,60 @@ function Schedule({ settings, daily, onLog, subjectKeys, nowMins }: any) {
   );
 }
 
-function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra }: any) {
+function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, checkins, onMarkDone, onFocusStart, focus }: any) {
   return (
     <div className="card">
       <div className="h2" style={{ marginBottom: 14 }}>Progress</div>
       {subjectKeys.map((k: string) => {
         const subj = settings.subjects[k];
         const Icon = ICON_MAP[subj.icon] || Languages;
-        const totalDone = (totals[k] || 0) + (daily.completed[k] || 0);
+        const goalKind = subjectGoalKind(subj);
+        const isCheckoff = subj.trackingMode === 'checkoff';
+        const weeklyDays = subj.weeklyDays || 7;
+        const weekDone = doneThisWeek(k, checkins);
+        const weeklyMet = weekDone >= weeklyDays;
+        const streak = streaks[k]?.current || 0;
+        const todayDone = daily.completed[k] || 0;
+        const todayBonus = (daily.bonus?.[k]) || 0;
+        const checkedToday = (checkins[k] || []).includes(todayStr());
+        const isFocusing = focus?.subject === k;
+        const sessionsDone = doneTotal(k, checkins);
+        const countComplete = goalKind === 'count' && sessionsDone >= (subj.countTotal || 0);
+
+        // On-pace metrics only meaningful for timed subjects with a deadline.
+        const totalDone = (totals[k] || 0) + todayDone;
         const expected = expectedTotal(k, settings);
         const target = targetTotalByDeadline(k, settings);
         const pct = Math.min(100, (totalDone / Math.max(target, 1)) * 100);
         const expectedPct = Math.min(100, (expected / Math.max(target, 1)) * 100);
         const diff = totalDone - expected;
-        const perDayAvg = subj.target * (subj.weeklyDays / 7);
+        const perDayAvg = (subj.target || 0) * (weeklyDays / 7);
         const daysOff = Math.abs(diff) / Math.max(perDayAvg, 1);
         const proj = projectedDate(k, settings, totals, daily);
+        const showPace = goalKind === 'deadline' && !isCheckoff && !weeklyMet;
 
-        let status, sColor, sBg;
-        if (Math.abs(diff) < perDayAvg * 0.5) { status = 'on pace'; sColor = '#4A6741'; sBg = '#E8EBE0'; }
-        else if (diff > 0) { status = `${daysOff.toFixed(1)}d ahead`; sColor = '#4A6741'; sBg = '#E8EBE0'; }
-        else { status = `${daysOff.toFixed(1)}d behind`; sColor = '#B8460E'; sBg = '#F5E1D5'; }
-
-        const streak = streaks[k]?.current || 0;
-        const todayDone = daily.completed[k] || 0;
-        const todayBonus = (daily.bonus?.[k]) || 0;
-        const isComplete = todayDone >= subj.target;
+        let status = '', sColor = '#6B6457', sBg = '#EEEAE0';
+        if (weeklyMet) { status = `Done this week · ${weekDone}/${weeklyDays}`; sColor = '#4A6741'; sBg = '#E8EBE0'; }
+        else if (countComplete) { status = 'Complete'; sColor = '#4A6741'; sBg = '#E8EBE0'; }
+        else if (showPace) {
+          if (Math.abs(diff) < perDayAvg * 0.5) { status = 'on pace'; sColor = '#4A6741'; sBg = '#E8EBE0'; }
+          else if (diff > 0) { status = `${daysOff.toFixed(1)}d ahead`; sColor = '#4A6741'; sBg = '#E8EBE0'; }
+          else { status = `${daysOff.toFixed(1)}d behind`; sColor = '#B8460E'; sBg = '#F5E1D5'; }
+        } else { status = `${weekDone}/${weeklyDays} this week`; }
 
         return (
-          <div key={k} style={{ marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid #E4DCC8' }}>
+          <div key={k} style={{ marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid #E4DCC8', opacity: weeklyMet || countComplete ? 0.65 : 1 }}>
             <div className="between" style={{ marginBottom: 4 }}>
               <div className="row" style={{ gap: 8 }}>
                 <Icon size={14} color={subj.accent} />
                 <span className="h3">{subj.name}</span>
-                {isComplete && <Check size={14} color="#4A6741" />}
+                {(weeklyMet || countComplete || checkedToday) && <Check size={14} color="#4A6741" />}
                 {streak > 1 && <span className="streak-flame"><Flame size={11} /> {streak}d</span>}
               </div>
               <span className="pill" style={{ background: sBg, color: sColor }}>{status}</span>
             </div>
-            {/* Deadline row */}
-            {proj && (
+
+            {showPace && proj && (
               <div className="row" style={{ gap: 6, marginBottom: 6 }}>
                 <CalIcon size={11} color="#6B6457" />
                 <span className="mono tiny muted">
@@ -721,34 +960,63 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra }:
                 </span>
               </div>
             )}
-            <div className="progress-bar">
-              <div className="progress-fill" style={{ width: `${pct}%`, background: subj.accent }} />
-              <div className="progress-marker" style={{ left: `${expectedPct}%` }} />
-            </div>
+
+            {showPace ? (
+              <div className="progress-bar">
+                <div className="progress-fill" style={{ width: `${pct}%`, background: subj.accent }} />
+                <div className="progress-marker" style={{ left: `${expectedPct}%` }} />
+              </div>
+            ) : goalKind === 'count' ? (
+              <div className="progress-bar">
+                <div className="progress-fill" style={{ width: `${Math.min(100, (sessionsDone / Math.max(subj.countTotal || 1, 1)) * 100)}%`, background: subj.accent }} />
+              </div>
+            ) : (
+              <div className="row" style={{ gap: 4, marginTop: 2 }}>
+                {Array.from({ length: weeklyDays }).map((_, i) => (
+                  <div key={i} style={{ flex: 1, height: 6, borderRadius: 3, background: i < weekDone ? subj.accent : '#E4DCC8' }} />
+                ))}
+              </div>
+            )}
+
             <div className="between" style={{ marginTop: 6 }}>
               <span className="mono muted tiny">
-                Today {todayDone}m{todayBonus > 0 && <span style={{ color: '#4A6741' }}> +{todayBonus}m bonus</span>} · {Math.round(totalDone / 60 * 10) / 10}h total
+                {goalKind === 'count'
+                  ? `${sessionsDone}/${subj.countTotal} sessions`
+                  : isCheckoff
+                    ? (checkedToday ? 'Done today' : 'Not done today')
+                    : <>Today {todayDone}m{todayBonus > 0 && <span style={{ color: '#4A6741' }}> +{todayBonus}m bonus</span>}</>}
               </span>
               <div className="row" style={{ gap: 4 }}>
-                <button onClick={() => onLogExtra(k, 'edit')} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', color: '#6B6457' }} title="Edit/reset today's time">
-                  <Edit3 size={11} />
-                </button>
-                <button onClick={() => onLogExtra(k)} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', borderColor: subj.accent, color: subj.accent }}>
-                  + log
-                </button>
+                {isCheckoff ? (
+                  <button onClick={() => onMarkDone(k)} className={`tap ${checkedToday ? 'active' : ''}`} style={{ padding: '3px 12px', fontSize: 11, fontFamily: 'JetBrains Mono', borderColor: subj.accent, color: checkedToday ? '#F5F0E6' : subj.accent, background: checkedToday ? subj.accent : 'transparent' }}>
+                    {checkedToday ? <><Check size={11} style={{ verticalAlign: 'middle' }} /> done</> : 'Mark done'}
+                  </button>
+                ) : (
+                  <>
+                    <button onClick={() => onFocusStart(k)} disabled={!!focus} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', color: isFocusing ? '#4A6741' : '#6B6457' }} title="Start a focus timer">
+                      <Play size={11} />
+                    </button>
+                    <button onClick={() => onLogExtra(k, 'edit')} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', color: '#6B6457' }} title="Edit/reset today's time">
+                      <Edit3 size={11} />
+                    </button>
+                    <button onClick={() => onLogExtra(k)} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', borderColor: subj.accent, color: subj.accent }}>
+                      + log
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
         );
       })}
       <div className="muted tiny" style={{ lineHeight: 1.4, marginTop: 4 }}>
-        Notch = where you should be today. Pencil = edit today's logged time.
+        Play = start a focus timer. Pencil = edit today's time. Habits hide once you hit your weekly count.
       </div>
     </div>
   );
 }
 
-function MacrosCard({ targets, totals, onLog, onReset }: any) {
+function MacrosCard({ targets, totals, onLog, onReset, onCoach }: any) {
   const [confirmReset, setConfirmReset] = useState(false);
   const items = [
     { key: 'protein', label: 'Protein', unit: 'g', primary: true, color: '#B8460E' },
@@ -797,8 +1065,83 @@ function MacrosCard({ targets, totals, onLog, onReset }: any) {
           </div>
         );
       })}
-      <div className="muted tiny" style={{ lineHeight: 1.4, marginTop: 4 }}>★ Protein is your priority. Hit that first. Rotate arrow to reset.</div>
+      <button className="tap" onClick={onCoach} style={{ width: '100%', marginTop: 8, color: '#8E4585', borderColor: '#8E4585' }}>
+        <Zap size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Ask the nutrition coach
+      </button>
+      <div className="muted tiny" style={{ lineHeight: 1.4, marginTop: 8 }}>★ Protein is your priority. Hit that first. Rotate arrow to reset.</div>
     </div>
+  );
+}
+
+function NutritionCoachModal({ settings, meals, body, onLogItem, onClose }: any) {
+  const [state, setState] = useState<'loading' | 'done' | 'error'>('loading');
+  const [err, setErr] = useState('');
+  const [data, setData] = useState<any>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const today = meals.log?.[todayStr()] || { protein: 0, carbs: 0, fat: 0, calories: 0 };
+        const targets = settings.macroTargets;
+        const remaining = { protein: Math.max(0, targets.protein - today.protein), carbs: Math.max(0, targets.carbs - today.carbs), fat: Math.max(0, targets.fat - today.fat), calories: Math.max(0, targets.calories - today.calories) };
+        // 7-day averages from the meal log
+        const days: string[] = [];
+        for (let i = 6; i >= 0; i--) { const d = new Date(todayStr() + 'T00:00:00'); d.setDate(d.getDate() - i); days.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`); }
+        const logged = days.map((d) => meals.log?.[d]).filter((x: any) => x && (x.protein || x.calories));
+        const avg = (k: string) => logged.length ? Math.round(logged.reduce((a: number, b: any) => a + (b[k] || 0), 0) / logged.length) : 0;
+        const weekAvg = { protein: avg('protein'), carbs: avg('carbs'), fat: avg('fat'), calories: avg('calories') };
+        const latest = body.entries?.[body.entries.length - 1] || null;
+        const resp = await fetch('/api/nutrition-coach', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ today, targets, remaining, weekAvg, bodyGoal: settings.bodyGoals, latestBody: latest }) });
+        if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || 'Coach unavailable.'); }
+        setData(await resp.json()); setState('done');
+      } catch (e: any) { setErr(e?.message || 'Coach unavailable.'); setState('error'); }
+    })();
+  }, []);
+
+  const Suggestion = ({ item, label }: any) => (
+    <div className="card" style={{ padding: 12, marginBottom: 8 }}>
+      <div className="mono tiny muted" style={{ textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 2 }}>{label}</div>
+      <div className="small" style={{ fontWeight: 600 }}>{item.name}</div>
+      <div className="mono tiny muted" style={{ margin: '4px 0' }}>{item.protein}p · {item.carbs}c · {item.fat}f · {item.calories}cal</div>
+      {item.why && <div className="muted tiny" style={{ lineHeight: 1.4, marginBottom: 8 }}>{item.why}</div>}
+      <button className="tap" style={{ width: '100%' }} onClick={() => onLogItem({ name: item.name, source: 'Coach', protein: item.protein, carbs: item.carbs, fat: item.fat, calories: item.calories })}>
+        <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Log this
+      </button>
+    </div>
+  );
+
+  return (
+    <ModalShell title="Nutrition coach" onClose={onClose} icon={<Zap size={18} color="#8E4585" />}>
+      {state === 'loading' && <p className="muted small">Analyzing your day…</p>}
+      {state === 'error' && <p className="small" style={{ color: '#B8460E' }}>{err}</p>}
+      {state === 'done' && data && (
+        <>
+          {data.analysis?.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <div className="h3" style={{ marginBottom: 6 }}>Where you're at</div>
+              {data.analysis.map((a: string, i: number) => <div key={i} className="small" style={{ marginBottom: 4, lineHeight: 1.45 }}>• {a}</div>)}
+            </div>
+          )}
+          <div className="row" style={{ gap: 10, marginBottom: 12 }}>
+            {data.start?.length > 0 && (
+              <div style={{ flex: 1 }}>
+                <div className="mono tiny" style={{ color: '#4A6741', fontWeight: 600, marginBottom: 4 }}>EAT MORE</div>
+                {data.start.map((s: string, i: number) => <div key={i} className="tiny" style={{ marginBottom: 2 }}>+ {s}</div>)}
+              </div>
+            )}
+            {data.stop?.length > 0 && (
+              <div style={{ flex: 1 }}>
+                <div className="mono tiny" style={{ color: '#B8460E', fontWeight: 600, marginBottom: 4 }}>CUT BACK</div>
+                {data.stop.map((s: string, i: number) => <div key={i} className="tiny" style={{ marginBottom: 2 }}>− {s}</div>)}
+              </div>
+            )}
+          </div>
+          <div className="h3" style={{ marginBottom: 8 }}>To finish your day</div>
+          {data.snack?.name && <Suggestion item={data.snack} label="Snack" />}
+          {data.meal?.name && <Suggestion item={data.meal} label="Meal" />}
+        </>
+      )}
+    </ModalShell>
   );
 }
 
@@ -975,6 +1318,20 @@ function BodyTab({ settings, body, workout, onAddEntry, onEditGoals }: any) {
             </div>
           )}
 
+          {entries.filter((e: any) => e.weight != null).length >= 2 && (
+            <div className="card">
+              <div className="h2" style={{ marginBottom: 10 }}>Weight trend</div>
+              <ResponsiveContainer width="100%" height={160}>
+                <LineChart data={entries.filter((e: any) => e.weight != null).map((e: any) => ({ date: fmtShortDate(e.date), weight: e.weight }))} margin={{ top: 5, right: 8, left: -20, bottom: 0 }}>
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} />
+                  <YAxis domain={['dataMin - 2', 'dataMax + 2']} tick={{ fontSize: 10, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} />
+                  <Tooltip contentStyle={{ fontFamily: 'JetBrains Mono', fontSize: 12, borderRadius: 8 }} />
+                  <Line type="monotone" dataKey="weight" stroke="#B8460E" strokeWidth={2} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
           <div className="card">
             <div className="between" style={{ marginBottom: 14 }}>
               <div className="h2">Measurement detail</div>
@@ -1093,7 +1450,10 @@ function JournalTab({ journal, onSave }: any) {
           <div className="card" style={{ padding: 14, marginBottom: 12 }}>
             <div className="between" style={{ marginBottom: 8 }}>
               <span className="h3">Daily notes</span>
-              <span className="mono tiny muted">{fmtDate(today)}</span>
+              <div className="row" style={{ gap: 6 }}>
+                <VoiceButton onResult={(t: string) => setNote((prev: string) => prev ? `${prev} ${t}` : t)} />
+                <span className="mono tiny muted">{fmtShortDate(today)}</span>
+              </div>
             </div>
             <textarea
               value={note}
@@ -1373,11 +1733,11 @@ function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, setting
             <Edit3 size={16} />
           </button>
         </div>
-        {workout.split.map((day: any, i: number) => (
-          <div key={i} className="between" style={{ padding: '8px 0', borderBottom: i < workout.split.length - 1 ? '1px solid #E4DCC8' : 'none', opacity: (mode === 'calendar' && day.day === today) || (mode === 'sequence' && day === todayWorkout) ? 1 : 0.7 }}>
+        {activeSplit.map((day: any, i: number) => (
+          <div key={i} className="between" style={{ padding: '8px 0', borderBottom: i < activeSplit.length - 1 ? '1px solid #E4DCC8' : 'none', opacity: (mode === 'calendar' && day.day === today) || (mode === 'sequence' && day === todayWorkout) ? 1 : 0.7 }}>
             <div className="row" style={{ gap: 10 }}>
               <span className="mono tiny muted">
-                {mode === 'calendar' ? ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day.day] : day.rest ? 'REST' : `D${workout.split.filter((d: any) => !d.rest).indexOf(day) + 1}`}
+                {mode === 'calendar' ? ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day.day] : day.rest ? 'REST' : `D${activeSplit.filter((d: any) => !d.rest).indexOf(day) + 1}`}
               </span>
               <span className="small" style={{ fontWeight: ((mode === 'calendar' && day.day === today) || (mode === 'sequence' && day === todayWorkout)) ? 600 : 400 }}>{day.name}</span>
             </div>
@@ -1460,7 +1820,7 @@ function PlanRow({ date, plans, onClick, highlight }: any) {
 // ════════════════════════════════════════════════════════════════════════════════
 // HISTORY TAB
 // ════════════════════════════════════════════════════════════════════════════════
-function HistoryTab({ settings, totals, workout, meals, body, onSelectDay }: any) {
+function HistoryTab({ settings, totals, workout, meals, body, activity, streaks, onSelectDay }: any) {
   const [month, setMonth] = useState(() => {
     const d = new Date(todayStr() + 'T00:00:00');
     return { year: d.getFullYear(), month: d.getMonth() };
@@ -1512,6 +1872,7 @@ function HistoryTab({ settings, totals, workout, meals, body, onSelectDay }: any
             const hasWorkout = !!workout.logs?.[d];
             const hasMeal = !!meals.log?.[d];
             const hasMeasurement = body.entries?.some((e: any) => e.date === d);
+            const hasActivity = !!(activity?.[d]?.length);
             const isToday = d === todayStr();
             const isFuture = diffDays(d) > 0;
             return (
@@ -1521,7 +1882,7 @@ function HistoryTab({ settings, totals, workout, meals, body, onSelectDay }: any
                 disabled={isFuture}
                 style={{
                   padding: '6px 0',
-                  background: isToday ? '#1A1A2E' : (hasWorkout || hasMeal || hasMeasurement) ? '#FBF7EE' : 'transparent',
+                  background: isToday ? '#1A1A2E' : (hasWorkout || hasMeal || hasMeasurement || hasActivity) ? '#FBF7EE' : 'transparent',
                   border: '1px solid #E4DCC8',
                   borderRadius: 6,
                   cursor: isFuture ? 'default' : 'pointer',
@@ -1535,6 +1896,7 @@ function HistoryTab({ settings, totals, workout, meals, body, onSelectDay }: any
                   {hasWorkout && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#3B5C6B' }} />}
                   {hasMeal && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#4A6741' }} />}
                   {hasMeasurement && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#B8460E' }} />}
+                  {hasActivity && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#C8932E' }} />}
                 </div>
               </button>
             );
@@ -1545,8 +1907,29 @@ function HistoryTab({ settings, totals, workout, meals, body, onSelectDay }: any
           <span className="tiny muted"><span className="swatch" style={{ background: '#3B5C6B' }} />Workout</span>
           <span className="tiny muted"><span className="swatch" style={{ background: '#4A6741' }} />Meals</span>
           <span className="tiny muted"><span className="swatch" style={{ background: '#B8460E' }} />Measurement</span>
+          <span className="tiny muted"><span className="swatch" style={{ background: '#C8932E' }} />Activity</span>
         </div>
       </div>
+
+      {(() => {
+        const days: any[] = [];
+        for (let i = 13; i >= 0; i--) { const d = new Date(todayStr() + 'T00:00:00'); d.setDate(d.getDate() - i); const ds = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; days.push({ label: `${d.getMonth() + 1}/${d.getDate()}`, protein: Math.round(meals.log?.[ds]?.protein || 0) }); }
+        if (!days.some((d) => d.protein > 0)) return null;
+        return (
+          <div className="card">
+            <div className="h2" style={{ marginBottom: 10 }}>Protein · last 14 days</div>
+            <ResponsiveContainer width="100%" height={150}>
+              <BarChart data={days} margin={{ top: 5, right: 8, left: -22, bottom: 0 }}>
+                <XAxis dataKey="label" tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} interval={1} />
+                <YAxis tick={{ fontSize: 10, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} />
+                <Tooltip contentStyle={{ fontFamily: 'JetBrains Mono', fontSize: 12, borderRadius: 8 }} />
+                <Bar dataKey="protein" fill="#B8460E" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+            <div className="mono tiny muted" style={{ textAlign: 'center' }}>Target: {settings.macroTargets.protein}g/day</div>
+          </div>
+        );
+      })()}
 
       <div className="card">
         <div className="h2" style={{ marginBottom: 12 }}>This month</div>
@@ -1564,6 +1947,28 @@ function HistoryTab({ settings, totals, workout, meals, body, onSelectDay }: any
         </div>
       </div>
 
+      {(() => {
+        const badges = computeAchievements(totals, streaks, workout, body, meals);
+        const earned = badges.filter((b) => b.earned).length;
+        return (
+          <div className="card">
+            <div className="between" style={{ marginBottom: 12 }}>
+              <div className="h2">Achievements</div>
+              <span className="mono small muted">{earned}/{badges.length}</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              {badges.map((b) => (
+                <div key={b.id} title={b.desc} style={{ textAlign: 'center', padding: '10px 4px', borderRadius: 10, background: b.earned ? '#FBF7EE' : '#F2EEE4', border: `1px solid ${b.earned ? '#C8932E' : '#E4DCC8'}`, opacity: b.earned ? 1 : 0.5 }}>
+                  <Trophy size={18} color={b.earned ? '#C8932E' : '#A0A898'} />
+                  <div className="tiny" style={{ fontWeight: 600, marginTop: 4 }}>{b.label}</div>
+                  <div className="tiny muted" style={{ lineHeight: 1.3 }}>{b.desc}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       <p className="muted tiny" style={{ textAlign: 'center', marginTop: 8 }}>Tap any past day for the full breakdown.</p>
     </>
   );
@@ -1574,8 +1979,8 @@ function HistoryTab({ settings, totals, workout, meals, body, onSelectDay }: any
 // ════════════════════════════════════════════════════════════════════════════════
 function ModalShell({ title, onClose, children, icon = null, color = '#1A1A2E' }: any) {
   return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <motion.div className="modal-bg" onClick={onClose} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }}>
+      <motion.div className="modal" onClick={(e: any) => e.stopPropagation()} initial={{ opacity: 0, scale: 0.96, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} transition={{ duration: 0.18, ease: 'easeOut' }}>
         <div className="between" style={{ marginBottom: 18 }}>
           <div className="row" style={{ gap: 10 }}>
             {icon}
@@ -1586,20 +1991,35 @@ function ModalShell({ title, onClose, children, icon = null, color = '#1A1A2E' }
           </button>
         </div>
         {children}
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
-function DayDetailModal({ date, settings, totals, workout, meals, body, onClose }: any) {
+function DayDetailModal({ date, settings, totals, workout, meals, body, activity, onClose }: any) {
   const dayMeals = meals.log?.[date];
+  const dayEntries = meals.entries?.[date] || [];
   const dayWorkout = workout.logs?.[date];
   const dayMeasurement = body.entries?.find((e: any) => e.date === date);
+  const dayActivities = activity?.[date] || [];
 
   return (
     <ModalShell title={fmtDate(date)} onClose={onClose} icon={<History size={18} color="#6B6457" />}>
+      {dayActivities.length > 0 && (
+        <>
+          <div className="h2" style={{ marginBottom: 8 }}>Activities</div>
+          <div className="card" style={{ padding: 12, marginBottom: 14 }}>
+            {dayActivities.map((a: any, i: number) => (
+              <div key={i} className="between" style={{ padding: '4px 0' }}>
+                <span className="small">{a.reason}</span>
+                <span className="mono tiny muted">{fmtTime(a.start)}–{fmtTime(a.end)} · {a.mins}m</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
       <div className="h2" style={{ marginBottom: 8 }}>Nutrition</div>
-      {dayMeals ? (
+      {dayMeals && (dayMeals.protein || dayMeals.calories || dayMeals.carbs || dayMeals.fat) ? (
         <div className="card" style={{ padding: 12, marginBottom: 14 }}>
           <div className="row" style={{ gap: 16, flexWrap: 'wrap' }}>
             <div><div className="mono tiny muted">PROTEIN</div><div className="h3" style={{ color: '#B8460E' }}>{Math.round(dayMeals.protein || 0)}g</div></div>
@@ -1607,6 +2027,16 @@ function DayDetailModal({ date, settings, totals, workout, meals, body, onClose 
             <div><div className="mono tiny muted">CARBS</div><div className="h3">{Math.round(dayMeals.carbs || 0)}g</div></div>
             <div><div className="mono tiny muted">FAT</div><div className="h3">{Math.round(dayMeals.fat || 0)}g</div></div>
           </div>
+          {dayEntries.length > 0 && (
+            <div style={{ marginTop: 10, borderTop: '1px solid #E4DCC8', paddingTop: 8 }}>
+              {dayEntries.map((e: any) => (
+                <div key={e.id} className="between" style={{ padding: '3px 0' }}>
+                  <span className="small">{e.name}</span>
+                  <span className="mono tiny muted">{e.protein}p · {e.carbs}c · {e.fat}f · {e.calories}cal</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         <p className="muted small" style={{ marginBottom: 14 }}>No meals logged this day.</p>
@@ -1723,22 +2153,25 @@ function LogTimeModal({ subject, settings, daily, onLog, onSet, onClose, editMod
 
 const BUSY_PRESET_DEFAULTS = ['Shopping', 'Work', 'Errands', 'Gym', 'Appointment', 'Commute', 'Family'];
 
-function BusyModal({ onConfirm, onClose, busyPresets, onSavePresets }: any) {
-  const [mins, setMins] = useState(60);
+function BusyModal({ onConfirm, onClose, busyPresets, onSavePresets, isSwitch }: any) {
   const [reason, setReason] = useState('');
   const [showSave, setShowSave] = useState(false);
+  const [timed, setTimed] = useState(false);
+  const [mins, setMins] = useState(60);
   const presets: string[] = busyPresets || BUSY_PRESET_DEFAULTS;
 
   const confirm = async () => {
     if (reason && showSave && !presets.includes(reason)) {
       await onSavePresets([...presets, reason]);
     }
-    onConfirm(mins, reason);
+    onConfirm(timed ? mins : null, reason);
   };
 
   return (
-    <ModalShell title="Stepping out" onClose={onClose} icon={<Footprints size={18} color="#C8932E" />}>
-      <p className="muted small" style={{ marginBottom: 14 }}>Your schedule shifts automatically. Tap "I'm back" when you return.</p>
+    <ModalShell title={isSwitch ? 'Switch activity' : 'Stepping out'} onClose={onClose} icon={<Footprints size={18} color="#C8932E" />}>
+      <p className="muted small" style={{ marginBottom: 14 }}>
+        {isSwitch ? 'Stops the current activity timer and starts a new one.' : 'Pick a duration, or leave it open-ended and tap "I\'m back" when you return.'}
+      </p>
 
       <label style={{ marginBottom: 6 }}>What are you doing?</label>
       <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
@@ -1755,15 +2188,44 @@ function BusyModal({ onConfirm, onClose, busyPresets, onSavePresets }: any) {
         )}
       </div>
 
-      <label>How long?</label>
-      <div className="row" style={{ gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-        {[30, 60, 90, 120, 180].map(m => <button key={m} className={`tap ${mins === m ? 'active' : ''}`} onClick={() => setMins(m)}>{m < 60 ? `${m}m` : `${m / 60}h`}</button>)}
+      <div className="row" style={{ gap: 6, marginBottom: 10 }}>
+        <button className={`tap ${!timed ? 'active' : ''}`} style={{ flex: 1 }} onClick={() => setTimed(false)}>Open-ended</button>
+        <button className={`tap ${timed ? 'active' : ''}`} style={{ flex: 1 }} onClick={() => setTimed(true)}>Set a time</button>
       </div>
-      <input type="number" value={mins} onChange={(e) => setMins(parseInt(e.target.value) || 0)} style={{ marginBottom: 14 }} />
+      {timed && (
+        <>
+          <div className="row" style={{ gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+            {[30, 60, 90, 120, 180].map(m => <button key={m} className={`tap ${mins === m ? 'active' : ''}`} onClick={() => setMins(m)}>{m < 60 ? `${m}m` : `${m / 60}h`}</button>)}
+          </div>
+          <input type="number" value={mins} onChange={(e) => setMins(parseInt(e.target.value) || 0)} style={{ marginBottom: 14 }} />
+        </>
+      )}
       <button className="btn" style={{ width: '100%' }} onClick={confirm}>
         <Footprints size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-        {reason ? `Out for ${reason} · ${mins < 60 ? mins + 'm' : mins / 60 + 'h'}` : `Set busy · ${mins < 60 ? mins + 'm' : mins / 60 + 'h'}`}
+        {reason || 'Set busy'}{timed ? ` · ${mins < 60 ? mins + 'm' : mins / 60 + 'h'}` : ''}
       </button>
+    </ModalShell>
+  );
+}
+
+function BusyBackModal({ daily, onConfirm, onClose }: any) {
+  const segs = (daily.busy?.segments || []).map((s: any) => ({ ...s, end: s.end || nowHHMM() }));
+  return (
+    <ModalShell title="Welcome back" onClose={onClose} icon={<Home size={18} color="#4A6741" />}>
+      <p className="muted small" style={{ marginBottom: 12, lineHeight: 1.5 }}>Add what you did to today's log?</p>
+      {segs.map((s: any, i: number) => {
+        const m = Math.max(0, timeToMins(s.end) - timeToMins(s.start));
+        return (
+          <div key={i} className="between" style={{ padding: '6px 0' }}>
+            <span className="small">{s.reason || 'Busy'}</span>
+            <span className="mono tiny muted">{fmtTime(s.start)}–{fmtTime(s.end)} · {m}m</span>
+          </div>
+        );
+      })}
+      <button className="btn" style={{ width: '100%', marginTop: 12, marginBottom: 8 }} onClick={() => onConfirm(true)}>
+        <Check size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Yes, log to my day
+      </button>
+      <button className="tap" style={{ width: '100%' }} onClick={() => onConfirm(false)}>No, just clear</button>
     </ModalShell>
   );
 }
@@ -1991,59 +2453,116 @@ function EditSplitModal({ workout, onSave, onClose }: any) {
   );
 }
 
+function VoiceButton({ onResult, style }: any) {
+  const [listening, setListening] = useState(false);
+  const recRef = useRef<any>(null);
+  const SR = (typeof window !== 'undefined') && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+  if (!SR) return null;
+  const toggle = () => {
+    if (listening) { recRef.current?.stop(); return; }
+    const rec = new SR();
+    recRef.current = rec;
+    rec.lang = 'en-US'; rec.interimResults = false; rec.maxAlternatives = 1;
+    rec.onresult = (e: any) => { onResult(e.results[0][0].transcript); };
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    rec.start();
+    setListening(true);
+  };
+  return (
+    <button className={`tap ${listening ? 'active' : ''}`} onClick={toggle} title="Voice input" style={{ padding: '6px 10px', ...style }}>
+      <Mic size={14} style={{ verticalAlign: 'middle' }} />{listening ? ' …' : ''}
+    </button>
+  );
+}
+
+function QtyStepper({ qty, setQty }: any) {
+  return (
+    <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 10 }}>
+      <span className="small" style={{ fontWeight: 600 }}>Servings</span>
+      <button className="tap" style={{ padding: '4px 12px' }} onClick={() => setQty(Math.max(0.25, Math.round((qty - 0.5) * 4) / 4))}>−</button>
+      <input type="number" step="0.25" min="0.25" value={qty} onChange={(e) => setQty(Math.max(0.25, parseFloat(e.target.value) || 0.25))} style={{ width: 70, textAlign: 'center' }} />
+      <button className="tap" style={{ padding: '4px 12px' }} onClick={() => setQty(Math.round((qty + 0.5) * 4) / 4)}>+</button>
+    </div>
+  );
+}
+
 function LogMealModal({ meals, settings, onSave, onClose }: any) {
   const [mode, setMode] = useState('preset');
   const [newPreset, setNewPreset] = useState({ name: '', protein: '', carbs: '', fat: '', calories: '', source: '' });
-  const [manual, setManual] = useState({ protein: '', carbs: '', fat: '', calories: '' });
+  const [manual, setManual] = useState({ name: '', protein: '', carbs: '', fat: '', calories: '' });
+  const [qty, setQty] = useState(1);
   const [scanState, setScanState] = useState<'idle'|'scanning'|'done'|'error'>('idle');
-  const [scanResult, setScanResult] = useState<any>(null);
   const [scanError, setScanError] = useState('');
+  const [review, setReview] = useState<any>(null); // parsed item awaiting log/save (scan/type/barcode)
+  const [typeText, setTypeText] = useState('');
+  const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const barcodeRef = useRef<HTMLInputElement>(null);
   const today = todayStr();
-  const todayMacros = meals.log[today] || { protein: 0, carbs: 0, fat: 0, calories: 0 };
+  const todayEntries = meals.entries?.[today] || [];
+  const scaled = (m: any, q: number) => ({ protein: Math.round((m.protein || 0) * q), carbs: Math.round((m.carbs || 0) * q), fat: Math.round((m.fat || 0) * q), calories: Math.round((m.calories || 0) * q) });
+
+  const logItem = async (item: any, q = 1) => {
+    const s = scaled(item, q);
+    const name = q !== 1 ? `${item.name} ×${q}` : item.name;
+    await onSave(addMealEntry(meals, today, { name, source: item.source || '', qty: q, ...s }));
+    onClose();
+  };
+  const removeEntry = async (id: string) => { await onSave(removeMealEntry(meals, today, id)); };
 
   const scanImage = async (file: File) => {
-    setScanState('scanning');
-    setScanResult(null);
-    setScanError('');
+    setScanState('scanning'); setReview(null); setScanError('');
     try {
-      const reader = new FileReader();
-      const b64 = await new Promise<string>((res, rej) => {
-        reader.onload = () => res((reader.result as string).split(',')[1]);
-        reader.onerror = rej;
-        reader.readAsDataURL(file);
-      });
-      const resp = await fetch('/api/scan-food', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: b64 }),
-      });
-      if (!resp.ok) throw new Error('AI scan failed');
+      const { image, mime } = await fileToResizedBase64(file);
+      const resp = await fetch('/api/scan-food', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image, mime }) });
+      if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err.error || 'Could not read macros.'); }
       const data = await resp.json();
-      setScanResult(data);
-      setScanState('done');
-      setNewPreset({ name: data.name || '', protein: String(data.protein || ''), carbs: String(data.carbs || ''), fat: String(data.fat || ''), calories: String(data.calories || ''), source: data.source || 'AI scan' });
-      setMode('add');
-    } catch (e: any) {
-      setScanState('error');
-      setScanError('Could not read macros. Try a clearer photo or enter manually.');
-    }
+      setReview({ ...data, source: data.serving ? `Scan · ${data.serving}` : 'AI scan' });
+      setQty(1); setScanState('done');
+    } catch (e: any) { setScanState('error'); setScanError(e?.message || 'Could not read macros.'); }
   };
 
-  const logPreset = async (p: any) => {
-    const next = { protein: todayMacros.protein + p.protein, carbs: todayMacros.carbs + p.carbs, fat: todayMacros.fat + p.fat, calories: todayMacros.calories + p.calories };
-    await onSave({ ...meals, log: { ...meals.log, [today]: next } });
-    onClose();
+  const scanBarcode = async (file: File) => {
+    setScanState('scanning'); setReview(null); setScanError('');
+    try {
+      if (!('BarcodeDetector' in window)) throw new Error('Barcode scanning needs a newer phone browser. Use photo scan instead.');
+      const bitmap = await createImageBitmap(file);
+      // @ts-ignore - BarcodeDetector is not yet in TS DOM lib
+      const detector = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] });
+      const codes = await detector.detect(bitmap);
+      if (!codes.length) throw new Error('No barcode found. Try again, square on the code.');
+      const code = codes[0].rawValue;
+      const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,nutriments,serving_size`);
+      const j = await r.json();
+      if (j.status !== 1 || !j.product) throw new Error('Product not found in the food database.');
+      const n = j.product.nutriments || {};
+      const perServing = n['energy-kcal_serving'] != null;
+      const pick = (base: string) => Number(perServing ? n[`${base}_serving`] : n[`${base}_100g`]) || 0;
+      setReview({
+        name: j.product.product_name || 'Scanned product',
+        protein: pick('proteins'), carbs: pick('carbohydrates'), fat: pick('fat'),
+        calories: Number(perServing ? n['energy-kcal_serving'] : n['energy-kcal_100g']) || 0,
+        source: perServing ? `Barcode · ${j.product.serving_size || 'per serving'}` : 'Barcode · per 100g',
+      });
+      setQty(1); setScanState('done');
+    } catch (e: any) { setScanState('error'); setScanError(e?.message || 'Barcode scan failed.'); }
   };
+
+  const parseTyped = async () => {
+    if (!typeText.trim()) return;
+    setBusy(true); setScanError(''); setReview(null);
+    try {
+      const resp = await fetch('/api/parse-food', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: typeText }) });
+      if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err.error || 'Could not read that.'); }
+      const data = await resp.json();
+      setReview(data); setQty(1);
+    } catch (e: any) { setScanError(e?.message || 'Could not read that.'); }
+    finally { setBusy(false); }
+  };
+
   const logManual = async () => {
-    const next = {
-      protein: todayMacros.protein + (parseFloat(manual.protein) || 0),
-      carbs: todayMacros.carbs + (parseFloat(manual.carbs) || 0),
-      fat: todayMacros.fat + (parseFloat(manual.fat) || 0),
-      calories: todayMacros.calories + (parseFloat(manual.calories) || 0),
-    };
-    await onSave({ ...meals, log: { ...meals.log, [today]: next } });
-    onClose();
+    await logItem({ name: manual.name || 'Manual entry', source: 'Manual', protein: parseFloat(manual.protein) || 0, carbs: parseFloat(manual.carbs) || 0, fat: parseFloat(manual.fat) || 0, calories: parseFloat(manual.calories) || 0 }, qty);
   };
   const addPreset = async () => {
     const p = { id: 'p' + Date.now(), name: newPreset.name, protein: parseFloat(newPreset.protein) || 0, carbs: parseFloat(newPreset.carbs) || 0, fat: parseFloat(newPreset.fat) || 0, calories: parseFloat(newPreset.calories) || 0, source: newPreset.source };
@@ -2051,56 +2570,89 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
     setMode('preset');
     setNewPreset({ name: '', protein: '', carbs: '', fat: '', calories: '', source: '' });
   };
-  const removePreset = async (id: string) => {
-    await onSave({ ...meals, presets: meals.presets.filter((p: any) => p.id !== id) });
-  };
+  const removePreset = async (id: string) => { await onSave({ ...meals, presets: meals.presets.filter((p: any) => p.id !== id) }); };
+
+  const ReviewPanel = review && (
+    <div className="card" style={{ padding: 14, marginBottom: 12, background: '#F0F5ED', border: '1px solid #C8D9C0' }}>
+      <div className="small" style={{ fontWeight: 600, marginBottom: 2 }}>{review.name}</div>
+      {review.source && <div className="muted tiny" style={{ marginBottom: 8 }}>{review.source}</div>}
+      <QtyStepper qty={qty} setQty={setQty} />
+      <div className="mono tiny muted" style={{ marginBottom: 10 }}>
+        {(() => { const s = scaled(review, qty); return `${s.protein}p · ${s.carbs}c · ${s.fat}f · ${s.calories}cal`; })()}
+      </div>
+      <button className="btn" style={{ width: '100%', marginBottom: 6 }} onClick={() => logItem(review, qty)}>
+        <Plus size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Log to today
+      </button>
+      <button className="tap" style={{ width: '100%' }} onClick={async () => { await onSave({ ...meals, presets: [...meals.presets, { id: 'p' + Date.now(), name: review.name, protein: review.protein || 0, carbs: review.carbs || 0, fat: review.fat || 0, calories: review.calories || 0, source: review.source || '' }] }); setReview(null); setMode('preset'); }}>
+        Save as preset
+      </button>
+    </div>
+  );
 
   return (
     <ModalShell title="Log meal" onClose={onClose} icon={<Apple size={18} color="#4A6741" />}>
       <div className="row" style={{ gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
         <button className={`tap ${mode === 'preset' ? 'active' : ''}`} onClick={() => setMode('preset')}>Presets</button>
-        <button className={`tap ${mode === 'manual' ? 'active' : ''}`} onClick={() => setMode('manual')}>Manual</button>
-        <button className={`tap ${mode === 'add' ? 'active' : ''}`} onClick={() => setMode('add')}>+ Save new</button>
-        <button className={`tap ${mode === 'scan' ? 'active' : ''}`} style={{ color: '#3B5C6B', borderColor: '#3B5C6B' }} onClick={() => setMode('scan')}>
+        <button className={`tap ${mode === 'type' ? 'active' : ''}`} onClick={() => { setMode('type'); setReview(null); }}>Type</button>
+        <button className={`tap ${mode === 'scan' ? 'active' : ''}`} style={{ color: '#3B5C6B', borderColor: '#3B5C6B' }} onClick={() => { setMode('scan'); setReview(null); setScanState('idle'); }}>
           <Camera size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Scan
         </button>
+        <button className={`tap ${mode === 'manual' ? 'active' : ''}`} onClick={() => setMode('manual')}>Manual</button>
+        <button className={`tap ${mode === 'add' ? 'active' : ''}`} onClick={() => setMode('add')}>+ Save</button>
       </div>
+
+      {mode === 'type' && (
+        <>
+          <div className="between" style={{ marginBottom: 6 }}>
+            <label style={{ margin: 0 }}>Describe what you ate</label>
+            <VoiceButton onResult={(t: string) => setTypeText((prev) => prev ? `${prev} ${t}` : t)} />
+          </div>
+          <textarea value={typeText} onChange={(e) => setTypeText(e.target.value)} placeholder="e.g. 2 scrambled eggs, a slice of buttered toast, and a banana" style={{ height: 70, marginBottom: 10, width: '100%', resize: 'vertical' }} />
+          {scanError && <p className="small" style={{ color: '#B8460E', marginBottom: 8 }}>{scanError}</p>}
+          {ReviewPanel}
+          <button className="btn" style={{ width: '100%' }} onClick={parseTyped} disabled={busy || !typeText.trim()}>
+            {busy ? 'Estimating…' : <><Zap size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Estimate with AI</>}
+          </button>
+        </>
+      )}
 
       {mode === 'scan' && (
         <>
           <div className="card" style={{ padding: 14, marginBottom: 12, background: '#EEF2F8', border: '1px solid #C8D4E4', textAlign: 'center' }}>
             <Camera size={28} color="#3B5C6B" style={{ marginBottom: 8 }} />
-            <p className="muted small" style={{ lineHeight: 1.5, marginBottom: 12 }}>
-              Take a photo of a nutrition label, cookbook page, or meal — AI will read the macros for you.
-            </p>
-            {scanState === 'scanning' && <p className="mono small" style={{ color: '#3B5C6B' }}>Reading image…</p>}
+            <p className="muted small" style={{ lineHeight: 1.5, marginBottom: 12 }}>Photo a nutrition label, cookbook page, or meal — or scan a product barcode.</p>
+            {scanState === 'scanning' && <p className="mono small" style={{ color: '#3B5C6B' }}>Reading…</p>}
             {scanState === 'error' && <p className="small" style={{ color: '#B8460E', marginBottom: 8 }}>{scanError}</p>}
             {scanState !== 'scanning' && (
               <>
                 <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) scanImage(f); }} />
+                <input ref={barcodeRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) scanBarcode(f); }} />
                 <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={() => fileRef.current?.click()}>
-                  <Camera size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Take / choose photo
+                  <Camera size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Photo (label / food)
+                </button>
+                <button className="tap" style={{ width: '100%' }} onClick={() => barcodeRef.current?.click()}>
+                  Scan barcode
                 </button>
               </>
             )}
           </div>
-          <p className="muted tiny" style={{ lineHeight: 1.5 }}>After scanning, review the values before saving. AI reads labels well but may estimate portions.</p>
+          {ReviewPanel}
+          <p className="muted tiny" style={{ lineHeight: 1.5 }}>Review the values and set servings before logging. AI reads labels well but may estimate portions.</p>
         </>
       )}
 
       {mode === 'preset' && (
         <>
-          <div className="muted tiny" style={{ marginBottom: 10 }}>Tap a meal to log it.</div>
-          {meals.presets.length === 0 && <p className="muted small" style={{ marginBottom: 10 }}>No presets yet — tap "+ New preset" to add some.</p>}
+          <div className="muted tiny" style={{ marginBottom: 10 }}>Set servings, then tap a meal to log it.</div>
+          <QtyStepper qty={qty} setQty={setQty} />
+          {meals.presets.length === 0 && <p className="muted small" style={{ marginBottom: 10 }}>No presets yet — tap "+ Save" to add some.</p>}
           {meals.presets.map((p: any) => (
-            <div key={p.id} className="card" style={{ padding: 12, marginBottom: 8, cursor: 'pointer' }} onClick={() => logPreset(p)}>
+            <div key={p.id} className="card" style={{ padding: 12, marginBottom: 8, cursor: 'pointer' }} onClick={() => logItem(p, qty)}>
               <div className="between">
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="small" style={{ fontWeight: 600 }}>{p.name}</div>
                   {p.source && <div className="muted tiny">{p.source}</div>}
-                  <div className="mono tiny muted" style={{ marginTop: 4 }}>
-                    {p.protein}p · {p.carbs}c · {p.fat}f · {p.calories}cal
-                  </div>
+                  <div className="mono tiny muted" style={{ marginTop: 4 }}>{p.protein}p · {p.carbs}c · {p.fat}f · {p.calories}cal{qty !== 1 ? ` (×${qty})` : ''}</div>
                 </div>
                 <button onClick={(e) => { e.stopPropagation(); removePreset(p.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 4 }}>
                   <Trash2 size={14} />
@@ -2113,14 +2665,16 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
 
       {mode === 'manual' && (
         <>
-          <label>Protein (g)</label>
-          <input type="number" value={manual.protein} onChange={(e) => setManual({ ...manual, protein: e.target.value })} style={{ marginBottom: 10 }} />
-          <label>Carbs (g)</label>
-          <input type="number" value={manual.carbs} onChange={(e) => setManual({ ...manual, carbs: e.target.value })} style={{ marginBottom: 10 }} />
-          <label>Fat (g)</label>
-          <input type="number" value={manual.fat} onChange={(e) => setManual({ ...manual, fat: e.target.value })} style={{ marginBottom: 10 }} />
-          <label>Calories</label>
-          <input type="number" value={manual.calories} onChange={(e) => setManual({ ...manual, calories: e.target.value })} style={{ marginBottom: 14 }} />
+          <label>Name (optional)</label>
+          <input type="text" value={manual.name} onChange={(e) => setManual({ ...manual, name: e.target.value })} placeholder="e.g. Lunch" style={{ marginBottom: 10 }} />
+          <div className="row" style={{ gap: 8 }}>
+            <div style={{ flex: 1 }}><label>Protein (g)</label><input type="number" value={manual.protein} onChange={(e) => setManual({ ...manual, protein: e.target.value })} /></div>
+            <div style={{ flex: 1 }}><label>Carbs (g)</label><input type="number" value={manual.carbs} onChange={(e) => setManual({ ...manual, carbs: e.target.value })} /></div>
+          </div>
+          <div className="row" style={{ gap: 8, marginTop: 10, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}><label>Fat (g)</label><input type="number" value={manual.fat} onChange={(e) => setManual({ ...manual, fat: e.target.value })} /></div>
+            <div style={{ flex: 1 }}><label>Calories</label><input type="number" value={manual.calories} onChange={(e) => setManual({ ...manual, calories: e.target.value })} /></div>
+          </div>
           <button className="btn" style={{ width: '100%' }} onClick={logManual}>
             <Plus size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Add to today
           </button>
@@ -2145,6 +2699,21 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
             <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save preset
           </button>
         </>
+      )}
+
+      {todayEntries.length > 0 && (
+        <div style={{ marginTop: 16, borderTop: '1px solid #E4DCC8', paddingTop: 12 }}>
+          <div className="h3" style={{ marginBottom: 8 }}>Today's meals</div>
+          {todayEntries.map((e: any) => (
+            <div key={e.id} className="between" style={{ padding: '6px 0' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="small">{e.name}</div>
+                <div className="mono tiny muted">{e.protein}p · {e.carbs}c · {e.fat}f · {e.calories}cal</div>
+              </div>
+              <button onClick={() => removeEntry(e.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 4 }}><Trash2 size={13} /></button>
+            </div>
+          ))}
+        </div>
       )}
     </ModalShell>
   );
@@ -2208,9 +2777,30 @@ function PlanDayModal({ date, plans, onSave, onClose }: any) {
   );
 }
 
-function SettingsModal({ settings, onSave, onClose, onEditSubject, onAddSubject, onChallenge, onExportImport }: any) {
+function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSubject, onChallenge, onExportImport, onResetDay }: any) {
   const [draft, setDraft] = useState(settings);
+  const [subTab, setSubTab] = useState<'active' | 'archived' | 'deleted'>('active');
+  const latestBody = body?.entries?.[body.entries.length - 1];
+  const suggested = suggestMacros(latestBody, draft.bodyGoals);
   const update = (patch: any) => setDraft({ ...draft, ...patch });
+
+  // Subject actions persist immediately (and preserve any in-progress schedule/macro edits).
+  const applySubjectChange = (key: string, patch: any) => {
+    const nd = { ...draft, subjects: { ...draft.subjects, [key]: { ...draft.subjects[key], ...patch } } };
+    setDraft(nd); onSave(nd);
+  };
+  const fullDelete = (key: string) => {
+    if (!confirm('Permanently delete this subject? This cannot be undone.')) return;
+    const subjects = { ...draft.subjects }; delete subjects[key];
+    const nd = { ...draft, subjects, subjectOrder: draft.subjectOrder.filter((x: string) => x !== key) };
+    setDraft(nd); onSave(nd);
+  };
+
+  const allKeys: string[] = draft.subjectOrder.filter((k: string) => draft.subjects[k]);
+  const activeKeys = allKeys.filter((k) => !draft.subjects[k].archived && !draft.subjects[k].deletedAt);
+  const archivedKeys = allKeys.filter((k) => draft.subjects[k].archived && !draft.subjects[k].deletedAt);
+  const deletedKeys = allKeys.filter((k) => draft.subjects[k].deletedAt);
+  const shownKeys = subTab === 'active' ? activeKeys : subTab === 'archived' ? archivedKeys : deletedKeys;
 
   return (
     <ModalShell title="Settings" onClose={onClose}>
@@ -2235,25 +2825,51 @@ function SettingsModal({ settings, onSave, onClose, onEditSubject, onAddSubject,
       </div>
 
       <div className="h2" style={{ marginBottom: 8, marginTop: 16 }}>Subjects</div>
-      {draft.subjectOrder.map((k: string) => {
+      <div className="row" style={{ gap: 6, marginBottom: 10 }}>
+        <button className={`tap ${subTab === 'active' ? 'active' : ''}`} style={{ flex: 1, fontSize: 12 }} onClick={() => setSubTab('active')}>Active ({activeKeys.length})</button>
+        <button className={`tap ${subTab === 'archived' ? 'active' : ''}`} style={{ flex: 1, fontSize: 12 }} onClick={() => setSubTab('archived')}>Archived ({archivedKeys.length})</button>
+        <button className={`tap ${subTab === 'deleted' ? 'active' : ''}`} style={{ flex: 1, fontSize: 12 }} onClick={() => setSubTab('deleted')}>Deleted ({deletedKeys.length})</button>
+      </div>
+      {shownKeys.length === 0 && <p className="muted small" style={{ padding: '8px 0' }}>{subTab === 'active' ? 'No active subjects.' : subTab === 'archived' ? 'Nothing archived.' : 'Nothing deleted.'}</p>}
+      {shownKeys.map((k: string) => {
         const s = draft.subjects[k];
-        if (!s) return null;
         const Icon = ICON_MAP[s.icon] || Languages;
+        const kind = subjectGoalKind(s);
+        const meta = s.trackingMode === 'checkoff' ? `Check-off · ${s.weeklyDays}x/wk` : `${s.target}min/day · ${s.weeklyDays}x/wk`;
+        const daysLeft = s.deletedAt ? Math.max(0, 15 - diffDays(todayStr(), s.deletedAt)) : 0;
         return (
           <div key={k} className="between" style={{ padding: '10px 0', borderBottom: '1px solid #E4DCC8' }}>
-            <div className="row" style={{ gap: 10 }}>
+            <div className="row" style={{ gap: 10, flex: 1, minWidth: 0 }}>
               <div className="icon-wrap" style={{ background: s.accent, width: 28, height: 28 }}><Icon size={14} /></div>
-              <div>
-                <div className="small" style={{ fontWeight: 600, opacity: s.archived ? 0.5 : 1 }}>{s.name}</div>
-                <div className="mono tiny muted">{s.target}min/day · {s.weeklyDays}x/wk{s.archived ? ' · archived' : ''}</div>
+              <div style={{ minWidth: 0 }}>
+                <div className="small" style={{ fontWeight: 600, opacity: subTab === 'active' ? 1 : 0.6 }}>{s.name}</div>
+                <div className="mono tiny muted">{meta}{kind === 'deadline' ? ` · ${fmtShortDate(s.deadline)}` : kind === 'count' ? ` · ${s.countTotal} sessions` : ''}{s.deletedAt ? ` · deletes in ${daysLeft}d` : ''}</div>
               </div>
             </div>
-            <button onClick={() => onEditSubject(k)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6457' }}>
-              <Edit3 size={14} />
-            </button>
+            <div className="row" style={{ gap: 4 }}>
+              {subTab === 'active' && (
+                <>
+                  <button onClick={() => onEditSubject(k)} className="tap" style={{ padding: '4px 8px' }} title="Edit"><Edit3 size={13} /></button>
+                  <button onClick={() => applySubjectChange(k, { archived: true })} className="tap" style={{ padding: '4px 8px' }} title="Archive"><Archive size={13} /></button>
+                </>
+              )}
+              {subTab === 'archived' && (
+                <>
+                  <button onClick={() => applySubjectChange(k, { archived: false })} className="tap" style={{ padding: '4px 10px', fontSize: 11 }}>Unarchive</button>
+                  <button onClick={() => applySubjectChange(k, { deletedAt: todayStr() })} className="tap" style={{ padding: '4px 8px', color: '#B8460E' }} title="Delete"><Trash2 size={13} /></button>
+                </>
+              )}
+              {subTab === 'deleted' && (
+                <>
+                  <button onClick={() => applySubjectChange(k, { deletedAt: null })} className="tap" style={{ padding: '4px 10px', fontSize: 11 }}>Restore</button>
+                  <button onClick={() => fullDelete(k)} className="tap" style={{ padding: '4px 8px', color: '#B8460E' }} title="Delete now"><Trash2 size={13} /></button>
+                </>
+              )}
+            </div>
           </div>
         );
       })}
+      {subTab === 'deleted' && deletedKeys.length > 0 && <p className="muted tiny" style={{ marginTop: 8, lineHeight: 1.5 }}>Deleted subjects auto-remove after 15 days. "Delete now" removes permanently.</p>}
       <button className="tap" onClick={onAddSubject} style={{ width: '100%', marginTop: 10, marginBottom: 16 }}>
         <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Add subject
       </button>
@@ -2263,10 +2879,17 @@ function SettingsModal({ settings, onSave, onClose, onEditSubject, onAddSubject,
         <div style={{ flex: 1 }}><label>Protein (g)</label><input type="number" value={draft.macroTargets.protein} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, protein: parseInt(e.target.value) || 0 } })} /></div>
         <div style={{ flex: 1 }}><label>Calories</label><input type="number" value={draft.macroTargets.calories} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, calories: parseInt(e.target.value) || 0 } })} /></div>
       </div>
-      <div className="row" style={{ gap: 8, marginBottom: 16 }}>
+      <div className="row" style={{ gap: 8, marginBottom: 10 }}>
         <div style={{ flex: 1 }}><label>Carbs (g)</label><input type="number" value={draft.macroTargets.carbs} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, carbs: parseInt(e.target.value) || 0 } })} /></div>
         <div style={{ flex: 1 }}><label>Fat (g)</label><input type="number" value={draft.macroTargets.fat} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, fat: parseInt(e.target.value) || 0 } })} /></div>
       </div>
+      {suggested ? (
+        <button className="tap" style={{ width: '100%', marginBottom: 16, fontSize: 12 }} onClick={() => update({ macroTargets: suggested })}>
+          <Zap size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Auto from body + goal ({suggested.protein}p · {suggested.carbs}c · {suggested.fat}f · {suggested.calories}cal)
+        </button>
+      ) : (
+        <p className="muted tiny" style={{ marginBottom: 16, lineHeight: 1.4 }}>Add a body weight entry to auto-calculate macro targets from your goal.</p>
+      )}
 
       <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={() => { onSave(draft); onClose(); }}>
         <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save settings
@@ -2277,9 +2900,14 @@ function SettingsModal({ settings, onSave, onClose, onEditSubject, onAddSubject,
         <span style={{ flex: 1 }}>60-day challenge{settings.challenge?.active && <span className="mono tiny muted" style={{ marginLeft: 6 }}>· active</span>}</span>
         <ChevronRight size={14} color="#6B6457" />
       </button>
-      <button className="tap" onClick={onExportImport} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
+      <button className="tap" onClick={onExportImport} style={{ width: '100%', marginBottom: 8, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
         <Download size={14} color="#3B5C6B" />
         <span style={{ flex: 1 }}>Backup / restore data</span>
+        <ChevronRight size={14} color="#6B6457" />
+      </button>
+      <button className="tap" onClick={onResetDay} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <RotateCcw size={14} color="#B8460E" />
+        <span style={{ flex: 1 }}>Reset today</span>
         <ChevronRight size={14} color="#6B6457" />
       </button>
     </ModalShell>
@@ -2288,39 +2916,54 @@ function SettingsModal({ settings, onSave, onClose, onEditSubject, onAddSubject,
 
 function EditSubjectModal({ subjectKey, settings, onSave, onClose }: any) {
   const isNew = !subjectKey;
-  const existing = isNew ? null : settings.subjects[subjectKey];
-  const [draft, setDraft] = useState(existing || { name: '', icon: 'target', accent: '#B8460E', tools: '', target: 30, weeklyDays: 5, deadline: '2026-12-31', archived: false });
+  const existing = isNew ? null : normalizeSubject(settings.subjects[subjectKey]);
+  const [draft, setDraft] = useState<any>(existing || normalizeSubject({ name: '', icon: 'target', accent: '#B8460E', trackingMode: 'time', target: 30, weeklyDays: 5, deadline: null, countTotal: null }));
+  const [goalSel, setGoalSel] = useState<'none' | 'deadline' | 'count'>(subjectGoalKind(draft));
+  const [showDetails, setShowDetails] = useState(!isNew);
+  const set = (patch: any) => setDraft({ ...draft, ...patch });
 
   const handleSave = () => {
+    const clean = { ...draft };
+    if (goalSel === 'deadline') { clean.countTotal = null; if (!clean.deadline) clean.deadline = addMonth(todayStr(), 3); }
+    else if (goalSel === 'count') { clean.deadline = null; clean.countTotal = Math.max(1, parseInt(clean.countTotal) || 10); }
+    else { clean.deadline = null; clean.countTotal = null; }
+    if (clean.trackingMode === 'checkoff') clean.target = 0;
     const key = subjectKey || draft.name.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 20) + '_' + Date.now().toString(36);
-    const next = { ...settings, subjects: { ...settings.subjects, [key]: draft } };
+    const next = { ...settings, subjects: { ...settings.subjects, [key]: clean } };
     if (isNew) next.subjectOrder = [...settings.subjectOrder, key];
     onSave(next);
     onClose();
   };
 
-  const handleDelete = () => {
-    if (!subjectKey) return;
-    const next = { ...settings, subjects: { ...settings.subjects, [subjectKey]: { ...existing, archived: !existing.archived } } };
-    onSave(next);
-    onClose();
-  };
-
-  const ICONS = ['languages', 'music', 'shield', 'book', 'target', 'dumbbell'];
+  const ICONS = ['languages', 'music', 'shield', 'book', 'target', 'dumbbell', 'activity'];
   const COLORS = ['#B8460E', '#4A6741', '#3B5C6B', '#C8932E', '#8E4585', '#1A1A2E'];
+  const goals: { key: typeof goalSel; label: string }[] = [
+    { key: 'none', label: 'No deadline' },
+    { key: 'deadline', label: 'Deadline' },
+    { key: 'count', label: 'Finish after N' },
+  ];
 
   return (
     <ModalShell title={isNew ? 'New subject' : 'Edit subject'} onClose={onClose}>
       <label>Name</label>
-      <input type="text" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. CompTIA Security+" style={{ marginBottom: 12 }} />
-      <label>Tools / source</label>
-      <input type="text" value={draft.tools} onChange={(e) => setDraft({ ...draft, tools: e.target.value })} placeholder="e.g. Jason Dion · Udemy" style={{ marginBottom: 12 }} />
+      <input type="text" value={draft.name} onChange={(e) => set({ name: e.target.value })} placeholder="e.g. CompTIA Security+" style={{ marginBottom: 12 }} />
+
+      <label>How do you track it?</label>
+      <div className="row" style={{ gap: 6, marginBottom: 12 }}>
+        <button className={`tap ${draft.trackingMode === 'time' ? 'active' : ''}`} style={{ flex: 1 }} onClick={() => set({ trackingMode: 'time' })}>
+          <Clock size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Log time
+        </button>
+        <button className={`tap ${draft.trackingMode === 'checkoff' ? 'active' : ''}`} style={{ flex: 1 }} onClick={() => set({ trackingMode: 'checkoff' })}>
+          <Check size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Just mark done
+        </button>
+      </div>
+
       <label>Icon</label>
       <div className="row" style={{ gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
         {ICONS.map(ic => {
           const I = ICON_MAP[ic];
           return (
-            <button key={ic} className={`tap ${draft.icon === ic ? 'active' : ''}`} onClick={() => setDraft({ ...draft, icon: ic })} style={{ padding: 8 }}>
+            <button key={ic} className={`tap ${draft.icon === ic ? 'active' : ''}`} onClick={() => set({ icon: ic })} style={{ padding: 8 }}>
               <I size={16} />
             </button>
           );
@@ -2329,34 +2972,94 @@ function EditSubjectModal({ subjectKey, settings, onSave, onClose }: any) {
       <label>Color</label>
       <div className="row" style={{ gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
         {COLORS.map(c => (
-          <button key={c} onClick={() => setDraft({ ...draft, accent: c })} style={{ width: 32, height: 32, borderRadius: 8, background: c, border: draft.accent === c ? '3px solid #1A1A2E' : '1px solid #D4CCB8', cursor: 'pointer' }} />
+          <button key={c} onClick={() => set({ accent: c })} style={{ width: 32, height: 32, borderRadius: 8, background: c, border: draft.accent === c ? '3px solid #1A1A2E' : '1px solid #D4CCB8', cursor: 'pointer' }} />
         ))}
       </div>
-      <div className="row" style={{ gap: 8, marginBottom: 12 }}>
-        <div style={{ flex: 1 }}><label>Daily (min)</label><input type="number" value={draft.target} onChange={(e) => setDraft({ ...draft, target: parseInt(e.target.value) || 0 })} /></div>
-        <div style={{ flex: 1 }}><label>Days/week</label><input type="number" min="1" max="7" value={draft.weeklyDays} onChange={(e) => setDraft({ ...draft, weeklyDays: parseInt(e.target.value) || 1 })} /></div>
-      </div>
-      <label>Deadline</label>
-      <input type="date" value={draft.deadline} onChange={(e) => setDraft({ ...draft, deadline: e.target.value })} style={{ marginBottom: 14 }} />
-      <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={handleSave} disabled={!draft.name}>
+
+      {!showDetails ? (
+        <button className="tap" style={{ width: '100%', marginBottom: 14 }} onClick={() => setShowDetails(true)}>
+          <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Add details (deadline, description, days/week…)
+        </button>
+      ) : (
+        <div style={{ marginBottom: 6 }}>
+          <label>Description (optional)</label>
+          <input type="text" value={draft.tools} onChange={(e) => set({ tools: e.target.value })} placeholder="e.g. Jason Dion · Udemy" style={{ marginBottom: 12 }} />
+
+          <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+            {draft.trackingMode === 'time' && (
+              <div style={{ flex: 1 }}><label>Daily (min)</label><input type="number" value={draft.target} onChange={(e) => set({ target: parseInt(e.target.value) || 0 })} /></div>
+            )}
+            <div style={{ flex: 1 }}><label>Days/week</label><input type="number" min="1" max="7" value={draft.weeklyDays} onChange={(e) => set({ weeklyDays: Math.min(7, Math.max(1, parseInt(e.target.value) || 1)) })} /></div>
+          </div>
+
+          <label>Finish goal</label>
+          <div className="row" style={{ gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+            {goals.map(g => (
+              <button key={g.key} className={`tap ${goalSel === g.key ? 'active' : ''}`} style={{ flex: 1, fontSize: 12 }} onClick={() => setGoalSel(g.key)}>{g.label}</button>
+            ))}
+          </div>
+          {goalSel === 'deadline' && (
+            <input type="date" value={draft.deadline || addMonth(todayStr(), 3)} onChange={(e) => set({ deadline: e.target.value })} style={{ marginBottom: 8 }} />
+          )}
+          {goalSel === 'count' && (
+            <>
+              <label>Finish after how many sessions/days?</label>
+              <input type="number" min="1" value={draft.countTotal || ''} onChange={(e) => set({ countTotal: parseInt(e.target.value) || 0 })} placeholder="e.g. 20" style={{ marginBottom: 8 }} />
+            </>
+          )}
+          {goalSel === 'none' && <p className="muted tiny" style={{ marginBottom: 8, lineHeight: 1.5 }}>No deadline — just keep doing it. Once you hit your weekly count it hides until next week.</p>}
+        </div>
+      )}
+
+      <button className="btn" style={{ width: '100%', marginTop: 8 }} onClick={handleSave} disabled={!draft.name}>
         <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save subject
       </button>
-      {!isNew && (
-        <button className="btn btn-ghost" style={{ width: '100%' }} onClick={handleDelete}>
-          {existing?.archived ? 'Unarchive' : 'Archive subject'}
-        </button>
-      )}
     </ModalShell>
   );
 }
 
-function WeeklyReviewModal({ settings, totals, body, workout, streaks, onAck, onSkip }: any) {
+function WeeklyReviewModal({ settings, totals, body, workout, meals, streaks, onAck, onSkip }: any) {
   const subjects = settings.subjectOrder.filter((k: string) => settings.subjects[k] && !settings.subjects[k].archived);
+  const [aiState, setAiState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+  const [ai, setAi] = useState<any>(null);
+  const [aiErr, setAiErr] = useState('');
+
+  const runAiReview = async () => {
+    setAiState('loading'); setAiErr('');
+    try {
+      const week: string[] = [];
+      for (let i = 0; i < 7; i++) { const d = new Date(todayStr() + 'T00:00:00'); d.setDate(d.getDate() - i); week.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`); }
+      const proteinDays = week.map((d) => meals?.log?.[d]?.protein).filter((x: any) => x > 0);
+      const avgProtein = proteinDays.length ? Math.round(proteinDays.reduce((a: number, b: number) => a + b, 0) / proteinDays.length) : 0;
+      const subjSummary = subjects.map((k: string) => { const s = settings.subjects[k]; const diff = (totals[k] || 0) - expectedTotal(k, settings); return { name: s.name, status: s.deadline ? (diff >= 0 ? 'ahead/on-pace' : 'behind') : 'no deadline', streak: streaks[k]?.current || 0 }; });
+      const first = body.entries?.[0], last = body.entries?.[body.entries.length - 1];
+      const bodyTrend = first && last && first.weight && last.weight ? { weightChange: Math.round((last.weight - first.weight) * 10) / 10 } : {};
+      const resp = await fetch('/api/weekly-review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subjects: subjSummary, workoutsThisWeek: week.filter((d) => workout.logs[d]).length, avgProtein, proteinTarget: settings.macroTargets.protein, bodyTrend, streaks }) });
+      if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || 'Review unavailable.'); }
+      setAi(await resp.json()); setAiState('done');
+    } catch (e: any) { setAiErr(e?.message || 'Review unavailable.'); setAiState('error'); }
+  };
+
   return (
     <ModalShell title="Sunday review" onClose={onSkip} icon={<ListChecks size={18} color="#4A6741" />}>
       <p className="muted small" style={{ marginBottom: 16, lineHeight: 1.5 }}>
         Quick weekly checkpoint. Where are you, and what to push next week.
       </p>
+
+      {aiState === 'idle' && (
+        <button className="tap" style={{ width: '100%', marginBottom: 14, color: '#8E4585', borderColor: '#8E4585' }} onClick={runAiReview}>
+          <Zap size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Get AI review of my week
+        </button>
+      )}
+      {aiState === 'loading' && <p className="muted small" style={{ marginBottom: 14 }}>Reviewing your week…</p>}
+      {aiState === 'error' && <p className="small" style={{ color: '#B8460E', marginBottom: 14 }}>{aiErr}</p>}
+      {aiState === 'done' && ai && (
+        <div className="card" style={{ background: '#F3EEF6', border: '1px solid #DCCDE6', marginBottom: 16 }}>
+          {ai.summary && <p className="small" style={{ fontWeight: 600, marginBottom: 8, lineHeight: 1.5 }}>{ai.summary}</p>}
+          {ai.wins?.length > 0 && <><div className="mono tiny" style={{ color: '#4A6741', fontWeight: 600, marginBottom: 4 }}>WINS</div>{ai.wins.map((w: string, i: number) => <div key={i} className="small" style={{ marginBottom: 3 }}>• {w}</div>)}</>}
+          {ai.focus?.length > 0 && <><div className="mono tiny" style={{ color: '#8E4585', fontWeight: 600, margin: '8px 0 4px' }}>NEXT WEEK</div>{ai.focus.map((w: string, i: number) => <div key={i} className="small" style={{ marginBottom: 3 }}>→ {w}</div>)}</>}
+        </div>
+      )}
       {subjects.map((k: string) => {
         const s = settings.subjects[k];
         const totalDone = totals[k] || 0;
@@ -2522,11 +3225,53 @@ function ChallengeModal({ settings, challengeHistory, onSave, onSaveHistory, onC
   );
 }
 
+function ResetDayModal({ onReset, onClose }: any) {
+  const [opts, setOpts] = useState({ subjects: true, macros: true, workout: false, status: false });
+  const [confirm, setConfirm] = useState(false);
+  const rows: { key: keyof typeof opts; label: string; desc: string }[] = [
+    { key: 'subjects', label: 'Study / subject time', desc: "Clears today's logged minutes and removes them from your totals." },
+    { key: 'macros', label: 'Macros / meals', desc: "Resets today's food log to zero." },
+    { key: 'workout', label: "Today's workout log", desc: 'Deletes the workout you logged today.' },
+    { key: 'status', label: 'Status (busy / wake / start)', desc: 'Resets back to a fresh morning.' },
+  ];
+  const any = Object.values(opts).some(Boolean);
+  return (
+    <ModalShell title="Reset today" onClose={onClose} icon={<RotateCcw size={18} color="#B8460E" />}>
+      <p className="muted small" style={{ marginBottom: 14, lineHeight: 1.5 }}>Pick what to clear for today. Past days are untouched, and you can Undo right after.</p>
+      {rows.map((r) => (
+        <div key={r.key} className="between" style={{ padding: '10px 0', borderBottom: '1px solid #E4DCC8', cursor: 'pointer' }} onClick={() => setOpts({ ...opts, [r.key]: !opts[r.key] })}>
+          <div style={{ flex: 1, paddingRight: 10 }}>
+            <div className="small" style={{ fontWeight: 600 }}>{r.label}</div>
+            <div className="muted tiny" style={{ lineHeight: 1.4 }}>{r.desc}</div>
+          </div>
+          <div style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${opts[r.key] ? '#B8460E' : '#D4CCB8'}`, background: opts[r.key] ? '#B8460E' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            {opts[r.key] && <Check size={13} color="#F5F0E6" />}
+          </div>
+        </div>
+      ))}
+      {!confirm ? (
+        <button className="btn" style={{ width: '100%', marginTop: 14, background: '#B8460E' }} disabled={!any} onClick={() => setConfirm(true)}>
+          <RotateCcw size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Reset selected
+        </button>
+      ) : (
+        <>
+          <p className="small" style={{ margin: '14px 0 8px', color: '#B8460E', fontWeight: 600 }}>Reset the selected items for today?</p>
+          <button className="btn" style={{ width: '100%', background: '#B8460E' }} onClick={async () => { await onReset(opts); onClose(); }}>Yes, reset</button>
+          <button className="btn btn-ghost" style={{ width: '100%', marginTop: 8 }} onClick={() => setConfirm(false)}>Cancel</button>
+        </>
+      )}
+    </ModalShell>
+  );
+}
+
 function ExportImportModal({ data, onImport, onClose }: any) {
   const [mode, setMode] = useState('export');
   const [importText, setImportText] = useState('');
   const [copied, setCopied] = useState(false);
+  const [backups, setBackups] = useState<any[]>([]);
   const exportJson = JSON.stringify(data, null, 2);
+
+  useEffect(() => { (async () => setBackups(await safeGet(K.backups, [])))(); }, []);
 
   const handleCopy = async () => {
     try {
@@ -2547,16 +3292,38 @@ function ExportImportModal({ data, onImport, onClose }: any) {
 
   return (
     <ModalShell title="Backup data" onClose={onClose} icon={<Download size={18} color="#3B5C6B" />}>
-      <div className="row" style={{ gap: 6, marginBottom: 14 }}>
+      <div className="row" style={{ gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
         <button className={`tap ${mode === 'export' ? 'active' : ''}`} onClick={() => setMode('export')}>
           <Download size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Export
         </button>
         <button className={`tap ${mode === 'import' ? 'active' : ''}`} onClick={() => setMode('import')}>
           <Upload size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Import
         </button>
+        <button className={`tap ${mode === 'backups' ? 'active' : ''}`} onClick={() => setMode('backups')}>
+          <RotateCcw size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Auto-backups
+        </button>
       </div>
 
-      {mode === 'export' ? (
+      <p className="muted tiny" style={{ marginBottom: 12, lineHeight: 1.5, color: '#B8460E' }}>
+        Heads up: your data lives only in this browser. Export it somewhere safe, or it can be lost if you clear the browser or switch devices.
+      </p>
+
+      {mode === 'backups' && (
+        <>
+          <p className="muted small" style={{ marginBottom: 12, lineHeight: 1.5 }}>
+            Automatic snapshots taken while you use the app. Restore one to roll back. This <strong>replaces</strong> current data.
+          </p>
+          {backups.length === 0 && <p className="muted small">No backups yet — they're created automatically as you use the app.</p>}
+          {backups.map((b: any) => (
+            <div key={b.ts} className="between" style={{ padding: '10px 0', borderBottom: '1px solid #E4DCC8' }}>
+              <span className="small">{new Date(b.ts).toLocaleString()}</span>
+              <button className="tap" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => { if (confirm('Restore this backup? Current data will be replaced.')) onImport(b.data); }}>Restore</button>
+            </div>
+          ))}
+        </>
+      )}
+
+      {mode === 'export' && (
         <>
           <p className="muted small" style={{ marginBottom: 12, lineHeight: 1.5 }}>
             Copy this and save it anywhere. If you ever clear local storage, paste it back to restore everything.
@@ -2566,7 +3333,8 @@ function ExportImportModal({ data, onImport, onClose }: any) {
             {copied ? <><Check size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Copied!</> : 'Copy to clipboard'}
           </button>
         </>
-      ) : (
+      )}
+      {mode === 'import' && (
         <>
           <p className="muted small" style={{ marginBottom: 12, lineHeight: 1.5 }}>
             Paste a previously exported backup here. This <strong>replaces</strong> all current data.
@@ -2757,24 +3525,38 @@ export default function App() {
   const [journal, setJournal] = useState<any>({});
   const [challengeHistory, setChallengeHistory] = useState<any[]>([]);
   const [busyPresets, setBusyPresets] = useState<string[]>(BUSY_PRESET_DEFAULTS);
+  const [checkins, setCheckins] = useState<any>({});
+  const [activity, setActivity] = useState<any>({});
   const [modal, setModal] = useState<any>(null);
 
   useEffect(() => {
     (async () => {
       const s = await safeGet(K.settings, DEFAULT_SETTINGS);
       const merged = { ...DEFAULT_SETTINGS, ...s, subjects: { ...DEFAULT_SETTINGS.subjects, ...(s.subjects || {}) }, macroTargets: { ...DEFAULT_SETTINGS.macroTargets, ...(s.macroTargets || {}) } };
+      // Normalize subjects to the flexible model and purge soft-deletes older than 15 days.
+      for (const k of Object.keys(merged.subjects)) {
+        const sub = normalizeSubject(merged.subjects[k]);
+        if (sub.deletedAt && diffDays(todayStr(), sub.deletedAt) > 15) {
+          delete merged.subjects[k];
+          merged.subjectOrder = (merged.subjectOrder || []).filter((x: string) => x !== k);
+        } else {
+          merged.subjects[k] = sub;
+        }
+      }
       const t = await safeGet(K.totals, {});
       const b = await safeGet(K.body, { entries: [] });
       const w = await safeGet(K.workout, { split: DEFAULT_WORKOUT_SPLIT, logs: {}, mode: 'sequence', sequencePosition: 1 });
       if (!w.mode) w.mode = 'sequence';
       if (w.sequencePosition == null) w.sequencePosition = 1;
-      const m = await safeGet(K.meals, { presets: SAMPLE_PRESETS, log: {} });
+      const m = migrateMeals(await safeGet(K.meals, { presets: SAMPLE_PRESETS, log: {}, entries: {} }));
       const p = await safeGet(K.plans, {});
       const st = await safeGet(K.streaks, {});
       const wa = await safeGet(K.weeklyReview, { lastAck: null });
       const jn = await safeGet(K.journal, {});
       const ch = await safeGet(K.challengeHistory, []);
       const bp = await safeGet(K.busyPresets, BUSY_PRESET_DEFAULTS);
+      const ci = await safeGet(K.checkins, {});
+      const ac = await safeGet(K.activity, {});
       let d = await safeGet(K.daily, null);
       if (!d || d.date !== todayStr()) {
         const plan = p[todayStr()];
@@ -2806,9 +3588,36 @@ export default function App() {
       setJournal(jn);
       setChallengeHistory(ch);
       setBusyPresets(bp);
+      setCheckins(ci);
+      setActivity(ac);
       setLoaded(true);
     })();
   }, []);
+
+  // Auto-backup: snapshot once after load, then periodically, so data survives accidental loss.
+  useEffect(() => {
+    if (!loaded) return;
+    void createBackup();
+    const id = setInterval(() => { void createBackup(); }, 10 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [loaded]);
+
+  // Celebrate newly-earned achievements (silent on first load so we don't dump them all at once).
+  useEffect(() => {
+    if (!loaded) return;
+    (async () => {
+      const badges = computeAchievements(totals, streaks, workout, body, meals);
+      const earnedIds = badges.filter((b) => b.earned).map((b) => b.id);
+      const seen = await safeGet(K.achievements, null);
+      if (seen === null) { await safeSet(K.achievements, earnedIds); return; }
+      const fresh = badges.filter((b) => b.earned && !seen.includes(b.id));
+      if (fresh.length) {
+        fresh.forEach((b) => toast(`Achievement unlocked: ${b.label}`, { icon: <Trophy size={16} color="#C8932E" /> }));
+        celebrate();
+        await safeSet(K.achievements, earnedIds);
+      }
+    })();
+  }, [loaded, totals, streaks, workout, body, meals]);
 
   const saveSettings = async (next: any) => { setSettings(next); await safeSet(K.settings, next); };
   const saveDaily = async (next: any) => { setDaily(next); await safeSet(K.daily, next); };
@@ -2821,8 +3630,41 @@ export default function App() {
   const saveJournal = async (next: any) => { setJournal(next); await safeSet(K.journal, next); };
   const saveChallengeHistory = async (next: any[]) => { setChallengeHistory(next); await safeSet(K.challengeHistory, next); };
   const saveBusyPresets = async (next: string[]) => { setBusyPresets(next); await safeSet(K.busyPresets, next); };
+  const saveCheckins = async (next: any) => { setCheckins(next); await safeSet(K.checkins, next); };
+  const saveActivity = async (next: any) => { setActivity(next); await safeSet(K.activity, next); };
+
+  const undoToast = (label: string, restore: () => void | Promise<void>) => {
+    toast(label, { action: { label: 'Undo', onClick: () => { void restore(); } }, duration: 6000 });
+  };
+
+  // Record (or remove) a "done today" check-in for a subject's weekly/count goals.
+  const recordCheckin = async (subject: string, doneToday: boolean) => {
+    const today = todayStr();
+    const list: string[] = checkins[subject] || [];
+    const has = list.includes(today);
+    if (doneToday === has) return;
+    const nextList = doneToday ? [...list, today] : list.filter((d) => d !== today);
+    await saveCheckins({ ...checkins, [subject]: nextList });
+  };
+
+  // Check-off subjects: toggle today's completion.
+  const markDone = async (subject: string) => {
+    const prev = checkins;
+    const today = todayStr();
+    const list: string[] = checkins[subject] || [];
+    const has = list.includes(today);
+    const nextList = has ? list.filter((d) => d !== today) : [...list, today];
+    await saveCheckins({ ...checkins, [subject]: nextList });
+    if (!has) {
+      const weeklyDays = settings.subjects[subject]?.weeklyDays || 7;
+      if (doneThisWeek(subject, { [subject]: nextList }) >= weeklyDays) celebrate(); else haptic();
+    }
+    const name = settings.subjects[subject]?.name || 'task';
+    undoToast(has ? `${name} unmarked` : `${name} done`, () => saveCheckins(prev));
+  };
 
   const setSubjectTime = async (subject: string, newMins: number) => {
+    const prevDaily = daily, prevTotals = totals, prevStreaks = streaks;
     const oldMins = daily.completed[subject] || 0;
     const diff = newMins - oldMins;
     const newTotals = { ...totals, [subject]: Math.max(0, (totals[subject] || 0) + diff) };
@@ -2845,14 +3687,21 @@ export default function App() {
         await saveStreaks({ ...streaks, [subject]: { current: newCurrent, longest: Math.max(cur.longest, newCurrent), lastDate: today } });
       }
     }
+    await recordCheckin(subject, newMins >= target && target > 0);
+    const name = settings.subjects[subject]?.name || 'time';
+    undoToast(`${name} set to ${Math.max(0, newMins)}m`, async () => { await saveDaily(prevDaily); await saveTotals(prevTotals); await saveStreaks(prevStreaks); });
   };
 
   const resetMacros = async () => {
-    const next = { ...meals, log: { ...meals.log, [todayStr()]: { protein: 0, carbs: 0, fat: 0, calories: 0 } } };
+    const prevMeals = meals;
+    const today = todayStr();
+    const next = { ...meals, entries: { ...(meals.entries || {}), [today]: [] }, log: { ...meals.log, [today]: { protein: 0, carbs: 0, fat: 0, calories: 0 } } };
     await saveMeals(next);
+    undoToast('Macros reset', () => saveMeals(prevMeals));
   };
 
   const logTime = async (subject: string, minutes: number) => {
+    const prevDaily = daily, prevTotals = totals, prevStreaks = streaks;
     const target = settings.subjects[subject]?.target || 0;
     const wasUnderTarget = (daily.completed[subject] || 0) < target;
     const newCompleted = (daily.completed[subject] || 0) + minutes;
@@ -2877,10 +3726,110 @@ export default function App() {
         await saveStreaks(next);
       }
     }
+    if (newCompleted >= target && target > 0) await recordCheckin(subject, true);
+    if (target > 0 && (daily.completed[subject] || 0) < target && newCompleted >= target) celebrate();
+    else haptic();
+    const name = settings.subjects[subject]?.name || 'time';
+    undoToast(`Logged ${minutes}m of ${name}`, async () => { await saveDaily(prevDaily); await saveTotals(prevTotals); await saveStreaks(prevStreaks); });
+  };
+
+  const resetDay = async (opts: { subjects?: boolean; macros?: boolean; workout?: boolean; status?: boolean }) => {
+    const prevDaily = daily, prevTotals = totals, prevMeals = meals, prevWorkout = workout;
+    const today = todayStr();
+    let newDaily = { ...daily };
+    let newTotals = totals;
+    let newMeals = meals;
+    let newWorkout = workout;
+
+    if (opts.subjects) {
+      newTotals = { ...totals };
+      for (const k of Object.keys(daily.completed || {})) {
+        newTotals[k] = Math.max(0, (newTotals[k] || 0) - (daily.completed[k] || 0));
+      }
+      newDaily = {
+        ...newDaily,
+        completed: Object.fromEntries(Object.keys(daily.completed || {}).map((k) => [k, 0])),
+        bonus: Object.fromEntries(Object.keys(daily.bonus || {}).map((k) => [k, 0])),
+      };
+    }
+    if (opts.macros) {
+      newMeals = { ...meals, log: { ...meals.log, [today]: { protein: 0, carbs: 0, fat: 0, calories: 0 } } };
+      if (meals.entries) newMeals.entries = { ...meals.entries, [today]: [] };
+    }
+    if (opts.workout && workout.logs?.[today]) {
+      const logs = { ...workout.logs };
+      delete logs[today];
+      newWorkout = { ...workout, logs };
+    }
+    if (opts.status) {
+      newDaily = { ...newDaily, status: 'home', busyUntil: null, busyReason: null, busy: null, wakeLogged: false, actualWake: null, scheduleStarted: false, scheduleStartTime: null };
+    }
+
+    if (opts.subjects) await saveTotals(newTotals);
+    if (opts.macros) await saveMeals(newMeals);
+    if (opts.workout) await saveWorkout(newWorkout);
+    if (opts.subjects || opts.status) await saveDaily(newDaily);
+
+    undoToast('Day reset', async () => {
+      await saveDaily(prevDaily); await saveTotals(prevTotals); await saveMeals(prevMeals); await saveWorkout(prevWorkout);
+    });
+  };
+
+  const startFocus = async (subject: string) => {
+    if (daily.focus) return;
+    await saveDaily({ ...daily, focus: { subject, start: Date.now() } });
+  };
+  const stopFocus = async () => {
+    if (!daily?.focus) return;
+    const { subject, start } = daily.focus;
+    const mins = Math.max(1, Math.round((Date.now() - start) / 60000));
+    await logTime(subject, mins);
+    // Functional update reads the latest daily (post-log) so we don't reintroduce focus.
+    setDaily((d: any) => { const nd = { ...d, focus: null }; void safeSet(K.daily, nd); return nd; });
+  };
+
+  const startBusy = async (mins: number | null, reason: string) => {
+    const now = nowHHMM();
+    const plannedUntil = mins ? addMinutes(now, mins) : null;
+    await saveDaily({ ...daily, status: 'busy', busyUntil: plannedUntil, busyReason: reason, busy: { segments: [{ reason: reason || 'Busy', start: now, end: null }], plannedUntil } });
+  };
+  const switchBusy = async (mins: number | null, reason: string) => {
+    const now = nowHHMM();
+    const segs = (daily.busy?.segments || []).map((s: any, i: number, arr: any[]) => (i === arr.length - 1 && !s.end ? { ...s, end: now } : s));
+    segs.push({ reason: reason || 'Busy', start: now, end: null });
+    const plannedUntil = mins ? addMinutes(now, mins) : (daily.busy?.plannedUntil || null);
+    await saveDaily({ ...daily, status: 'busy', busyUntil: plannedUntil, busyReason: reason, busy: { segments: segs, plannedUntil } });
+  };
+  const endBusy = async (shouldLog: boolean) => {
+    const now = nowHHMM();
+    const segs = (daily.busy?.segments || []).map((s: any) => {
+      const end = s.end || now;
+      return { reason: s.reason || 'Busy', start: s.start, end, mins: Math.max(0, timeToMins(end) - timeToMins(s.start)) };
+    });
+    if (shouldLog && segs.length) {
+      const today = todayStr();
+      await saveActivity({ ...activity, [today]: [...(activity[today] || []), ...segs] });
+    }
+    await saveDaily({ ...daily, status: 'home', busyUntil: null, busyReason: null, busy: null });
   };
 
   if (!loaded) {
-    return <div style={{ minHeight: '100vh', background: '#F5F0E6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'serif', color: '#6B6457' }}>Loading…</div>;
+    return (
+      <div className="app">
+        <GlobalStyles />
+        <div className="content">
+          <div style={{ height: 14, width: 120, background: '#E4DCC8', borderRadius: 6, marginBottom: 20, opacity: 0.7 }} />
+          <div style={{ height: 30, width: '70%', background: '#E4DCC8', borderRadius: 8, marginBottom: 22, opacity: 0.6 }} />
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="card" style={{ height: 90 + i * 10 }}>
+              <div style={{ height: 12, width: '40%', background: '#E4DCC8', borderRadius: 6, marginBottom: 12, opacity: 0.6 }} />
+              <div style={{ height: 8, width: '90%', background: '#EFE9DB', borderRadius: 6, marginBottom: 8 }} />
+              <div style={{ height: 8, width: '75%', background: '#EFE9DB', borderRadius: 6 }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   if (!settings.setupComplete) {
@@ -2900,19 +3849,26 @@ export default function App() {
   return (
     <div className="app">
       <GlobalStyles />
+      <Toaster position="top-center" toastOptions={{ style: { fontFamily: 'inherit' } }} />
       <div className="content">
         <Header date={todayStr()} onSettings={() => setModal({ type: 'settings' })} />
 
         {tab === 'today' && (
           <TodayTab
-            settings={settings} daily={daily} totals={totals} streaks={streaks} meals={meals} workout={workout}
+            settings={settings} daily={daily} totals={totals} streaks={streaks} meals={meals} workout={workout} checkins={checkins}
             onWake={(time: string) => saveDaily({ ...daily, wakeLogged: true, actualWake: time })}
             onScheduleStart={(time: string) => saveDaily({ ...daily, scheduleStarted: true, scheduleStartTime: time })}
             onStatus={(status: string, busyUntil: string) => saveDaily({ ...daily, status, busyUntil })}
             onLogTime={(s: string, mode?: string) => setModal({ type: 'logTime', subject: s, editMode: mode === 'edit' })}
             onBusy={() => setModal({ type: 'busy' })}
+            onBack={() => setModal({ type: 'busyBack' })}
+            onSwitch={() => setModal({ type: 'busy', mode: 'switch' })}
             onLogMeal={() => setModal({ type: 'logMeal' })}
             onResetMacros={resetMacros}
+            onMarkDone={markDone}
+            onFocusStart={startFocus}
+            onFocusStop={stopFocus}
+            onCoach={() => setModal({ type: 'nutritionCoach' })}
           />
         )}
         {tab === 'body' && (
@@ -2942,6 +3898,7 @@ export default function App() {
         {tab === 'history' && (
           <HistoryTab
             settings={settings} totals={totals} workout={workout} meals={meals} body={body}
+            activity={activity} streaks={streaks}
             onSelectDay={(date: string) => setModal({ type: 'dayDetail', date })}
           />
         )}
@@ -2949,19 +3906,22 @@ export default function App() {
 
       <BottomNav tab={tab} setTab={setTab} />
 
-      {modal?.type === 'settings' && <SettingsModal settings={settings} onSave={saveSettings} onClose={() => setModal(null)} onEditSubject={(k: string) => setModal({ type: 'editSubject', key: k })} onAddSubject={() => setModal({ type: 'editSubject', key: null })} onChallenge={() => setModal({ type: 'challenge' })} onExportImport={() => setModal({ type: 'exportImport' })} />}
+      {modal?.type === 'settings' && <SettingsModal settings={settings} body={body} onSave={saveSettings} onClose={() => setModal(null)} onEditSubject={(k: string) => setModal({ type: 'editSubject', key: k })} onAddSubject={() => setModal({ type: 'editSubject', key: null })} onChallenge={() => setModal({ type: 'challenge' })} onExportImport={() => setModal({ type: 'exportImport' })} onResetDay={() => setModal({ type: 'resetDay' })} />}
+      {modal?.type === 'resetDay' && <ResetDayModal onReset={resetDay} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'editSubject' && <EditSubjectModal subjectKey={modal.key} settings={settings} onSave={saveSettings} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'logTime' && <LogTimeModal subject={modal.subject} settings={settings} daily={daily} editMode={modal.editMode} onLog={(m: number) => { logTime(modal.subject, m); setModal(null); }} onSet={(m: number) => { setSubjectTime(modal.subject, m); setModal(null); }} onClose={() => setModal(null)} />}
-      {modal?.type === 'busy' && <BusyModal busyPresets={busyPresets} onSavePresets={saveBusyPresets} onConfirm={(m: number, reason: string) => { saveDaily({ ...daily, status: 'busy', busyUntil: addMinutes(nowHHMM(), m), busyReason: reason }); setModal(null); }} onClose={() => setModal(null)} />}
+      {modal?.type === 'busy' && <BusyModal isSwitch={modal.mode === 'switch'} busyPresets={busyPresets} onSavePresets={saveBusyPresets} onConfirm={(m: number | null, reason: string) => { if (modal.mode === 'switch') switchBusy(m, reason); else startBusy(m, reason); setModal(null); }} onClose={() => setModal(null)} />}
+      {modal?.type === 'busyBack' && <BusyBackModal daily={daily} onConfirm={(log: boolean) => { endBusy(log); setModal(null); }} onClose={() => setModal(null)} />}
       {modal?.type === 'addMeasurement' && <AddMeasurementModal onSave={async (entry: any) => { const next = { ...body, entries: [...body.entries, entry] }; const nextSettings = { ...settings, nextMeasurement: addMonth(todayStr(), 1) }; await saveBody(next); await saveSettings(nextSettings); setModal(null); }} onClose={() => setModal(null)} previous={body.entries[body.entries.length - 1]} />}
       {modal?.type === 'bodyGoals' && <BodyGoalsModal settings={settings} onSave={saveSettings} onClose={() => setModal(null)} />}
       {modal?.type === 'logWorkout' && <LogWorkoutModal dayIdx={modal.dayIdx} workout={workout} onSave={saveWorkout} onClose={() => setModal(null)} />}
       {modal?.type === 'editSplit' && <EditSplitModal workout={workout} onSave={saveWorkout} onClose={() => setModal(null)} />}
       {modal?.type === 'challenge' && <ChallengeModal settings={settings} challengeHistory={challengeHistory} onSave={saveSettings} onSaveHistory={saveChallengeHistory} onClose={() => setModal(null)} />}
       {modal?.type === 'logMeal' && <LogMealModal meals={meals} settings={settings} onSave={saveMeals} onClose={() => setModal(null)} />}
+      {modal?.type === 'nutritionCoach' && <NutritionCoachModal settings={settings} meals={meals} body={body} onLogItem={async (item: any) => { await saveMeals(addMealEntry(meals, todayStr(), { qty: 1, ...item })); toast(`Logged ${item.name}`); }} onClose={() => setModal(null)} />}
       {modal?.type === 'planDay' && <PlanDayModal date={modal.date} plans={plans} onSave={savePlans} onClose={() => setModal(null)} />}
-      {modal?.type === 'dayDetail' && <DayDetailModal date={modal.date} settings={settings} totals={totals} workout={workout} meals={meals} body={body} onClose={() => setModal(null)} />}
-      {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, weeklyAck }} onImport={async (d: any) => {
+      {modal?.type === 'dayDetail' && <DayDetailModal date={modal.date} settings={settings} totals={totals} workout={workout} meals={meals} body={body} activity={activity} onClose={() => setModal(null)} />}
+      {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, journal, challengeHistory, busyPresets, weeklyAck }} onImport={async (d: any) => {
         if (d.settings) { setSettings(d.settings); await safeSet(K.settings, d.settings); }
         if (d.totals) { setTotals(d.totals); await safeSet(K.totals, d.totals); }
         if (d.body) { setBody(d.body); await safeSet(K.body, d.body); }
@@ -2969,9 +3929,14 @@ export default function App() {
         if (d.meals) { setMeals(d.meals); await safeSet(K.meals, d.meals); }
         if (d.plans) { setPlans(d.plans); await safeSet(K.plans, d.plans); }
         if (d.streaks) { setStreaks(d.streaks); await safeSet(K.streaks, d.streaks); }
+        if (d.journal) { setJournal(d.journal); await safeSet(K.journal, d.journal); }
+        if (d.challengeHistory) { setChallengeHistory(d.challengeHistory); await safeSet(K.challengeHistory, d.challengeHistory); }
+        if (d.busyPresets) { setBusyPresets(d.busyPresets); await safeSet(K.busyPresets, d.busyPresets); }
+        if (d.activity) { await safeSet(K.activity, d.activity); }
+        if (d.checkins) { await safeSet(K.checkins, d.checkins); }
         setModal(null);
       }} onClose={() => setModal(null)} />}
-      {showWeekly && <WeeklyReviewModal settings={settings} totals={totals} body={body} workout={workout} streaks={streaks} onAck={async () => { const next = { lastAck: todayStr() }; await safeSet(K.weeklyReview, next); setWeeklyAck(next); }} onSkip={async () => { const next = { lastAck: todayStr() }; await safeSet(K.weeklyReview, next); setWeeklyAck(next); }} />}
+      {showWeekly && <WeeklyReviewModal settings={settings} totals={totals} body={body} workout={workout} meals={meals} streaks={streaks} onAck={async () => { const next = { lastAck: todayStr() }; await safeSet(K.weeklyReview, next); setWeeklyAck(next); }} onSkip={async () => { const next = { lastAck: todayStr() }; await safeSet(K.weeklyReview, next); setWeeklyAck(next); }} />}
     </div>
   );
 }

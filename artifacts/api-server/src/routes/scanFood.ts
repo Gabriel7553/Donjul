@@ -1,63 +1,81 @@
 import { Router } from "express";
-import OpenAI from "openai";
+import { logger } from "../lib/logger";
+import { getOpenAI, hasOpenAI, extractJson } from "../lib/openai";
 
 const router = Router();
 
-const openai = new OpenAI({
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-});
+const PROMPT = `You are a nutrition label and food reader. Look at this image — it may be a packaged nutrition label, a recipe/cookbook page, or a plate of food.
+
+Read the macro-nutrition for ONE serving:
+- If it is a nutrition label, use the "Amount per serving" column and report the serving size shown.
+- If it is a recipe, estimate per single serving.
+- If it is a plate of food, estimate the portion shown.
+
+Respond with ONLY a JSON object (no markdown, no prose), exactly these keys:
+{
+  "name": "short food name",
+  "serving": "serving size as written, e.g. '1 cup (240ml)' or 'estimated 1 plate'",
+  "protein": <grams, number>,
+  "carbs": <grams, number>,
+  "fat": <grams, number>,
+  "calories": <number>,
+  "source": "AI scan"
+}
+Use your best estimate for any value you cannot read exactly; never leave a key out.`;
 
 router.post("/scan-food", async (req, res) => {
-  const { image } = req.body as { image?: string };
+  const { image, mime } = req.body as { image?: string; mime?: string };
   if (!image) {
-    return res.status(400).json({ error: "No image provided" });
+    return res.status(400).json({ error: "No image provided." });
+  }
+  if (!hasOpenAI) {
+    return res.status(503).json({
+      error: "Image scanning isn't configured on the server yet (missing OpenAI key).",
+    });
   }
 
+  const dataUrl = `data:${mime || "image/jpeg"};base64,${image}`;
+
+  let text: string;
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAI().chat.completions.create({
       model: "gpt-4o",
-      max_tokens: 400,
+      max_tokens: 500,
       messages: [
         {
           role: "user",
           content: [
-            {
-              type: "text",
-              text: `Look at this image of food, a nutrition label, or a recipe. Extract the macro-nutritional values. 
-Return ONLY a valid JSON object with these exact keys (numbers only, no units):
-{
-  "name": "short descriptive name of the food",
-  "protein": <grams as number>,
-  "carbs": <grams as number>,
-  "fat": <grams as number>,
-  "calories": <number>,
-  "source": "AI scan"
-}
-If you cannot determine a value, use 0. Do not include any other text outside the JSON.`,
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:image/jpeg;base64,${image}`,
-                detail: "low",
-              },
-            },
+            { type: "text", text: PROMPT },
+            { type: "image_url", image_url: { url: dataUrl, detail: "high" } },
           ],
         },
       ],
     });
-
-    const text = response.choices[0]?.message?.content?.trim() || "{}";
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return res.status(422).json({ error: "Could not parse nutrition data from image" });
-    }
-    const data = JSON.parse(jsonMatch[0]);
-    return res.json(data);
+    text = response.choices[0]?.message?.content?.trim() || "";
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || "Scan failed" });
+    logger.error({ err: err?.message || err }, "scan-food: OpenAI request failed");
+    return res
+      .status(502)
+      .json({ error: "The AI service could not be reached. Try again in a moment." });
   }
+
+  const data = extractJson(text);
+  if (!data || typeof data !== "object") {
+    logger.warn({ text: text.slice(0, 300) }, "scan-food: could not parse AI response");
+    return res.status(422).json({
+      error: "Couldn't read the macros from that image. Try a clearer, closer photo of the label.",
+    });
+  }
+
+  return res.json({
+    name: typeof data.name === "string" ? data.name : "",
+    serving: typeof data.serving === "string" ? data.serving : "",
+    protein: Number(data.protein) || 0,
+    carbs: Number(data.carbs) || 0,
+    fat: Number(data.fat) || 0,
+    calories: Number(data.calories) || 0,
+    source: "AI scan",
+  });
 });
 
 export default router;
