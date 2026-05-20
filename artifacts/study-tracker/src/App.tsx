@@ -6,6 +6,7 @@ import {
   Download, Upload, History, Repeat, Zap, Play, AlertTriangle, RotateCcw, MapPin, Building2, TreePine,
   Camera, BookMarked, TrendingUp as Journal, DollarSign, ShoppingCart, Briefcase, Car, ChevronUp, Trophy, Archive, Infinity
 } from 'lucide-react';
+import { Toaster, toast } from 'sonner';
 
 // ════════════════════════════════════════════════════════════════════════════════
 // STORAGE — localStorage-backed persistence
@@ -23,7 +24,14 @@ const K = {
   journal: 'st:journal',
   challengeHistory: 'st:challengeHistory',
   busyPresets: 'st:busyPresets',
+  activity: 'st:activity',
+  checkins: 'st:checkins',
+  backups: 'st:backups',
 };
+
+// Keys included in a full data snapshot (for auto-backup + export/restore).
+const BACKUP_KEYS = ['settings', 'totals', 'body', 'workout', 'meals', 'plans', 'streaks', 'journal', 'challengeHistory', 'busyPresets', 'activity', 'checkins'] as const;
+const MAX_BACKUPS = 10;
 
 async function safeGet(key: string, fallback: any): Promise<any> {
   try {
@@ -36,6 +44,23 @@ async function safeGet(key: string, fallback: any): Promise<any> {
 async function safeSet(key: string, value: any): Promise<void> {
   try {
     localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+// Capture all data into a single timestamped backup; keep the most recent MAX_BACKUPS.
+async function createBackup(): Promise<void> {
+  try {
+    const data: Record<string, any> = {};
+    for (const name of BACKUP_KEYS) {
+      const raw = localStorage.getItem((K as any)[name]);
+      if (raw != null) data[name] = JSON.parse(raw);
+    }
+    if (Object.keys(data).length === 0) return;
+    const list = await safeGet(K.backups, []);
+    const next = [{ ts: Date.now(), data }, ...list].slice(0, MAX_BACKUPS);
+    await safeSet(K.backups, next);
   } catch (e) {
     console.error(e);
   }
@@ -78,6 +103,34 @@ function dayOfWeek() { return new Date(todayStr() + 'T00:00:00').getDay(); }
 function isSunday(dateStr = todayStr()) { return new Date(dateStr + 'T00:00:00').getDay() === 0; }
 function timeToMins(hhmm: string) { const [h, m] = (hhmm || '00:00').split(':').map(Number); return h * 60 + m; }
 function minsToHHMM(mins: number) { const h = Math.floor(mins / 60) % 24; const m = mins % 60; return `${pad(h)}:${pad(m)}`; }
+
+// Resize an image client-side so the upload stays small but label text stays legible.
+async function fileToResizedBase64(file: File, maxEdge = 1500, quality = 0.9): Promise<{ image: string; mime: string }> {
+  const dataUrl: string = await new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result as string);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+  const img: HTMLImageElement = await new Promise((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i);
+    i.onerror = rej;
+    i.src = dataUrl;
+  });
+  const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+  if (scale >= 1) {
+    return { image: dataUrl.split(',')[1], mime: file.type || 'image/jpeg' };
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(img.height * scale);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return { image: dataUrl.split(',')[1], mime: file.type || 'image/jpeg' };
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const out = canvas.toDataURL('image/jpeg', quality);
+  return { image: out.split(',')[1], mime: 'image/jpeg' };
+}
 
 function useCurrentTime() {
   const [now, setNow] = useState(nowHHMM());
@@ -1373,11 +1426,11 @@ function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, setting
             <Edit3 size={16} />
           </button>
         </div>
-        {workout.split.map((day: any, i: number) => (
-          <div key={i} className="between" style={{ padding: '8px 0', borderBottom: i < workout.split.length - 1 ? '1px solid #E4DCC8' : 'none', opacity: (mode === 'calendar' && day.day === today) || (mode === 'sequence' && day === todayWorkout) ? 1 : 0.7 }}>
+        {activeSplit.map((day: any, i: number) => (
+          <div key={i} className="between" style={{ padding: '8px 0', borderBottom: i < activeSplit.length - 1 ? '1px solid #E4DCC8' : 'none', opacity: (mode === 'calendar' && day.day === today) || (mode === 'sequence' && day === todayWorkout) ? 1 : 0.7 }}>
             <div className="row" style={{ gap: 10 }}>
               <span className="mono tiny muted">
-                {mode === 'calendar' ? ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day.day] : day.rest ? 'REST' : `D${workout.split.filter((d: any) => !d.rest).indexOf(day) + 1}`}
+                {mode === 'calendar' ? ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day.day] : day.rest ? 'REST' : `D${activeSplit.filter((d: any) => !d.rest).indexOf(day) + 1}`}
               </span>
               <span className="small" style={{ fontWeight: ((mode === 'calendar' && day.day === today) || (mode === 'sequence' && day === todayWorkout)) ? 600 : 400 }}>{day.name}</span>
             </div>
@@ -2007,26 +2060,24 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
     setScanResult(null);
     setScanError('');
     try {
-      const reader = new FileReader();
-      const b64 = await new Promise<string>((res, rej) => {
-        reader.onload = () => res((reader.result as string).split(',')[1]);
-        reader.onerror = rej;
-        reader.readAsDataURL(file);
-      });
+      const { image, mime } = await fileToResizedBase64(file);
       const resp = await fetch('/api/scan-food', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: b64 }),
+        body: JSON.stringify({ image, mime }),
       });
-      if (!resp.ok) throw new Error('AI scan failed');
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.error || 'Could not read macros. Try a clearer photo or enter manually.');
+      }
       const data = await resp.json();
       setScanResult(data);
       setScanState('done');
-      setNewPreset({ name: data.name || '', protein: String(data.protein || ''), carbs: String(data.carbs || ''), fat: String(data.fat || ''), calories: String(data.calories || ''), source: data.source || 'AI scan' });
+      setNewPreset({ name: data.name || '', protein: String(data.protein || ''), carbs: String(data.carbs || ''), fat: String(data.fat || ''), calories: String(data.calories || ''), source: data.serving ? `AI scan · ${data.serving}` : (data.source || 'AI scan') });
       setMode('add');
     } catch (e: any) {
       setScanState('error');
-      setScanError('Could not read macros. Try a clearer photo or enter manually.');
+      setScanError(e?.message || 'Could not read macros. Try a clearer photo or enter manually.');
     }
   };
 
@@ -2208,7 +2259,7 @@ function PlanDayModal({ date, plans, onSave, onClose }: any) {
   );
 }
 
-function SettingsModal({ settings, onSave, onClose, onEditSubject, onAddSubject, onChallenge, onExportImport }: any) {
+function SettingsModal({ settings, onSave, onClose, onEditSubject, onAddSubject, onChallenge, onExportImport, onResetDay }: any) {
   const [draft, setDraft] = useState(settings);
   const update = (patch: any) => setDraft({ ...draft, ...patch });
 
@@ -2277,9 +2328,14 @@ function SettingsModal({ settings, onSave, onClose, onEditSubject, onAddSubject,
         <span style={{ flex: 1 }}>60-day challenge{settings.challenge?.active && <span className="mono tiny muted" style={{ marginLeft: 6 }}>· active</span>}</span>
         <ChevronRight size={14} color="#6B6457" />
       </button>
-      <button className="tap" onClick={onExportImport} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
+      <button className="tap" onClick={onExportImport} style={{ width: '100%', marginBottom: 8, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
         <Download size={14} color="#3B5C6B" />
         <span style={{ flex: 1 }}>Backup / restore data</span>
+        <ChevronRight size={14} color="#6B6457" />
+      </button>
+      <button className="tap" onClick={onResetDay} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <RotateCcw size={14} color="#B8460E" />
+        <span style={{ flex: 1 }}>Reset today</span>
         <ChevronRight size={14} color="#6B6457" />
       </button>
     </ModalShell>
@@ -2522,11 +2578,53 @@ function ChallengeModal({ settings, challengeHistory, onSave, onSaveHistory, onC
   );
 }
 
+function ResetDayModal({ onReset, onClose }: any) {
+  const [opts, setOpts] = useState({ subjects: true, macros: true, workout: false, status: false });
+  const [confirm, setConfirm] = useState(false);
+  const rows: { key: keyof typeof opts; label: string; desc: string }[] = [
+    { key: 'subjects', label: 'Study / subject time', desc: "Clears today's logged minutes and removes them from your totals." },
+    { key: 'macros', label: 'Macros / meals', desc: "Resets today's food log to zero." },
+    { key: 'workout', label: "Today's workout log", desc: 'Deletes the workout you logged today.' },
+    { key: 'status', label: 'Status (busy / wake / start)', desc: 'Resets back to a fresh morning.' },
+  ];
+  const any = Object.values(opts).some(Boolean);
+  return (
+    <ModalShell title="Reset today" onClose={onClose} icon={<RotateCcw size={18} color="#B8460E" />}>
+      <p className="muted small" style={{ marginBottom: 14, lineHeight: 1.5 }}>Pick what to clear for today. Past days are untouched, and you can Undo right after.</p>
+      {rows.map((r) => (
+        <div key={r.key} className="between" style={{ padding: '10px 0', borderBottom: '1px solid #E4DCC8', cursor: 'pointer' }} onClick={() => setOpts({ ...opts, [r.key]: !opts[r.key] })}>
+          <div style={{ flex: 1, paddingRight: 10 }}>
+            <div className="small" style={{ fontWeight: 600 }}>{r.label}</div>
+            <div className="muted tiny" style={{ lineHeight: 1.4 }}>{r.desc}</div>
+          </div>
+          <div style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${opts[r.key] ? '#B8460E' : '#D4CCB8'}`, background: opts[r.key] ? '#B8460E' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            {opts[r.key] && <Check size={13} color="#F5F0E6" />}
+          </div>
+        </div>
+      ))}
+      {!confirm ? (
+        <button className="btn" style={{ width: '100%', marginTop: 14, background: '#B8460E' }} disabled={!any} onClick={() => setConfirm(true)}>
+          <RotateCcw size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Reset selected
+        </button>
+      ) : (
+        <>
+          <p className="small" style={{ margin: '14px 0 8px', color: '#B8460E', fontWeight: 600 }}>Reset the selected items for today?</p>
+          <button className="btn" style={{ width: '100%', background: '#B8460E' }} onClick={async () => { await onReset(opts); onClose(); }}>Yes, reset</button>
+          <button className="btn btn-ghost" style={{ width: '100%', marginTop: 8 }} onClick={() => setConfirm(false)}>Cancel</button>
+        </>
+      )}
+    </ModalShell>
+  );
+}
+
 function ExportImportModal({ data, onImport, onClose }: any) {
   const [mode, setMode] = useState('export');
   const [importText, setImportText] = useState('');
   const [copied, setCopied] = useState(false);
+  const [backups, setBackups] = useState<any[]>([]);
   const exportJson = JSON.stringify(data, null, 2);
+
+  useEffect(() => { (async () => setBackups(await safeGet(K.backups, [])))(); }, []);
 
   const handleCopy = async () => {
     try {
@@ -2547,16 +2645,38 @@ function ExportImportModal({ data, onImport, onClose }: any) {
 
   return (
     <ModalShell title="Backup data" onClose={onClose} icon={<Download size={18} color="#3B5C6B" />}>
-      <div className="row" style={{ gap: 6, marginBottom: 14 }}>
+      <div className="row" style={{ gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
         <button className={`tap ${mode === 'export' ? 'active' : ''}`} onClick={() => setMode('export')}>
           <Download size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Export
         </button>
         <button className={`tap ${mode === 'import' ? 'active' : ''}`} onClick={() => setMode('import')}>
           <Upload size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Import
         </button>
+        <button className={`tap ${mode === 'backups' ? 'active' : ''}`} onClick={() => setMode('backups')}>
+          <RotateCcw size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Auto-backups
+        </button>
       </div>
 
-      {mode === 'export' ? (
+      <p className="muted tiny" style={{ marginBottom: 12, lineHeight: 1.5, color: '#B8460E' }}>
+        Heads up: your data lives only in this browser. Export it somewhere safe, or it can be lost if you clear the browser or switch devices.
+      </p>
+
+      {mode === 'backups' && (
+        <>
+          <p className="muted small" style={{ marginBottom: 12, lineHeight: 1.5 }}>
+            Automatic snapshots taken while you use the app. Restore one to roll back. This <strong>replaces</strong> current data.
+          </p>
+          {backups.length === 0 && <p className="muted small">No backups yet — they're created automatically as you use the app.</p>}
+          {backups.map((b: any) => (
+            <div key={b.ts} className="between" style={{ padding: '10px 0', borderBottom: '1px solid #E4DCC8' }}>
+              <span className="small">{new Date(b.ts).toLocaleString()}</span>
+              <button className="tap" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => { if (confirm('Restore this backup? Current data will be replaced.')) onImport(b.data); }}>Restore</button>
+            </div>
+          ))}
+        </>
+      )}
+
+      {mode === 'export' && (
         <>
           <p className="muted small" style={{ marginBottom: 12, lineHeight: 1.5 }}>
             Copy this and save it anywhere. If you ever clear local storage, paste it back to restore everything.
@@ -2566,7 +2686,8 @@ function ExportImportModal({ data, onImport, onClose }: any) {
             {copied ? <><Check size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Copied!</> : 'Copy to clipboard'}
           </button>
         </>
-      ) : (
+      )}
+      {mode === 'import' && (
         <>
           <p className="muted small" style={{ marginBottom: 12, lineHeight: 1.5 }}>
             Paste a previously exported backup here. This <strong>replaces</strong> all current data.
@@ -2810,6 +2931,14 @@ export default function App() {
     })();
   }, []);
 
+  // Auto-backup: snapshot once after load, then periodically, so data survives accidental loss.
+  useEffect(() => {
+    if (!loaded) return;
+    void createBackup();
+    const id = setInterval(() => { void createBackup(); }, 10 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [loaded]);
+
   const saveSettings = async (next: any) => { setSettings(next); await safeSet(K.settings, next); };
   const saveDaily = async (next: any) => { setDaily(next); await safeSet(K.daily, next); };
   const saveTotals = async (next: any) => { setTotals(next); await safeSet(K.totals, next); };
@@ -2822,7 +2951,12 @@ export default function App() {
   const saveChallengeHistory = async (next: any[]) => { setChallengeHistory(next); await safeSet(K.challengeHistory, next); };
   const saveBusyPresets = async (next: string[]) => { setBusyPresets(next); await safeSet(K.busyPresets, next); };
 
+  const undoToast = (label: string, restore: () => void | Promise<void>) => {
+    toast(label, { action: { label: 'Undo', onClick: () => { void restore(); } }, duration: 6000 });
+  };
+
   const setSubjectTime = async (subject: string, newMins: number) => {
+    const prevDaily = daily, prevTotals = totals, prevStreaks = streaks;
     const oldMins = daily.completed[subject] || 0;
     const diff = newMins - oldMins;
     const newTotals = { ...totals, [subject]: Math.max(0, (totals[subject] || 0) + diff) };
@@ -2845,14 +2979,19 @@ export default function App() {
         await saveStreaks({ ...streaks, [subject]: { current: newCurrent, longest: Math.max(cur.longest, newCurrent), lastDate: today } });
       }
     }
+    const name = settings.subjects[subject]?.name || 'time';
+    undoToast(`${name} set to ${Math.max(0, newMins)}m`, async () => { await saveDaily(prevDaily); await saveTotals(prevTotals); await saveStreaks(prevStreaks); });
   };
 
   const resetMacros = async () => {
+    const prevMeals = meals;
     const next = { ...meals, log: { ...meals.log, [todayStr()]: { protein: 0, carbs: 0, fat: 0, calories: 0 } } };
     await saveMeals(next);
+    undoToast('Macros reset', () => saveMeals(prevMeals));
   };
 
   const logTime = async (subject: string, minutes: number) => {
+    const prevDaily = daily, prevTotals = totals, prevStreaks = streaks;
     const target = settings.subjects[subject]?.target || 0;
     const wasUnderTarget = (daily.completed[subject] || 0) < target;
     const newCompleted = (daily.completed[subject] || 0) + minutes;
@@ -2877,6 +3016,50 @@ export default function App() {
         await saveStreaks(next);
       }
     }
+    const name = settings.subjects[subject]?.name || 'time';
+    undoToast(`Logged ${minutes}m of ${name}`, async () => { await saveDaily(prevDaily); await saveTotals(prevTotals); await saveStreaks(prevStreaks); });
+  };
+
+  const resetDay = async (opts: { subjects?: boolean; macros?: boolean; workout?: boolean; status?: boolean }) => {
+    const prevDaily = daily, prevTotals = totals, prevMeals = meals, prevWorkout = workout;
+    const today = todayStr();
+    let newDaily = { ...daily };
+    let newTotals = totals;
+    let newMeals = meals;
+    let newWorkout = workout;
+
+    if (opts.subjects) {
+      newTotals = { ...totals };
+      for (const k of Object.keys(daily.completed || {})) {
+        newTotals[k] = Math.max(0, (newTotals[k] || 0) - (daily.completed[k] || 0));
+      }
+      newDaily = {
+        ...newDaily,
+        completed: Object.fromEntries(Object.keys(daily.completed || {}).map((k) => [k, 0])),
+        bonus: Object.fromEntries(Object.keys(daily.bonus || {}).map((k) => [k, 0])),
+      };
+    }
+    if (opts.macros) {
+      newMeals = { ...meals, log: { ...meals.log, [today]: { protein: 0, carbs: 0, fat: 0, calories: 0 } } };
+      if (meals.entries) newMeals.entries = { ...meals.entries, [today]: [] };
+    }
+    if (opts.workout && workout.logs?.[today]) {
+      const logs = { ...workout.logs };
+      delete logs[today];
+      newWorkout = { ...workout, logs };
+    }
+    if (opts.status) {
+      newDaily = { ...newDaily, status: 'home', busyUntil: null, busyReason: null, busy: null, wakeLogged: false, actualWake: null, scheduleStarted: false, scheduleStartTime: null };
+    }
+
+    if (opts.subjects) await saveTotals(newTotals);
+    if (opts.macros) await saveMeals(newMeals);
+    if (opts.workout) await saveWorkout(newWorkout);
+    if (opts.subjects || opts.status) await saveDaily(newDaily);
+
+    undoToast('Day reset', async () => {
+      await saveDaily(prevDaily); await saveTotals(prevTotals); await saveMeals(prevMeals); await saveWorkout(prevWorkout);
+    });
   };
 
   if (!loaded) {
@@ -2900,6 +3083,7 @@ export default function App() {
   return (
     <div className="app">
       <GlobalStyles />
+      <Toaster position="top-center" toastOptions={{ style: { fontFamily: 'inherit' } }} />
       <div className="content">
         <Header date={todayStr()} onSettings={() => setModal({ type: 'settings' })} />
 
@@ -2949,7 +3133,8 @@ export default function App() {
 
       <BottomNav tab={tab} setTab={setTab} />
 
-      {modal?.type === 'settings' && <SettingsModal settings={settings} onSave={saveSettings} onClose={() => setModal(null)} onEditSubject={(k: string) => setModal({ type: 'editSubject', key: k })} onAddSubject={() => setModal({ type: 'editSubject', key: null })} onChallenge={() => setModal({ type: 'challenge' })} onExportImport={() => setModal({ type: 'exportImport' })} />}
+      {modal?.type === 'settings' && <SettingsModal settings={settings} onSave={saveSettings} onClose={() => setModal(null)} onEditSubject={(k: string) => setModal({ type: 'editSubject', key: k })} onAddSubject={() => setModal({ type: 'editSubject', key: null })} onChallenge={() => setModal({ type: 'challenge' })} onExportImport={() => setModal({ type: 'exportImport' })} onResetDay={() => setModal({ type: 'resetDay' })} />}
+      {modal?.type === 'resetDay' && <ResetDayModal onReset={resetDay} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'editSubject' && <EditSubjectModal subjectKey={modal.key} settings={settings} onSave={saveSettings} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'logTime' && <LogTimeModal subject={modal.subject} settings={settings} daily={daily} editMode={modal.editMode} onLog={(m: number) => { logTime(modal.subject, m); setModal(null); }} onSet={(m: number) => { setSubjectTime(modal.subject, m); setModal(null); }} onClose={() => setModal(null)} />}
       {modal?.type === 'busy' && <BusyModal busyPresets={busyPresets} onSavePresets={saveBusyPresets} onConfirm={(m: number, reason: string) => { saveDaily({ ...daily, status: 'busy', busyUntil: addMinutes(nowHHMM(), m), busyReason: reason }); setModal(null); }} onClose={() => setModal(null)} />}
@@ -2961,7 +3146,7 @@ export default function App() {
       {modal?.type === 'logMeal' && <LogMealModal meals={meals} settings={settings} onSave={saveMeals} onClose={() => setModal(null)} />}
       {modal?.type === 'planDay' && <PlanDayModal date={modal.date} plans={plans} onSave={savePlans} onClose={() => setModal(null)} />}
       {modal?.type === 'dayDetail' && <DayDetailModal date={modal.date} settings={settings} totals={totals} workout={workout} meals={meals} body={body} onClose={() => setModal(null)} />}
-      {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, weeklyAck }} onImport={async (d: any) => {
+      {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, journal, challengeHistory, busyPresets, weeklyAck }} onImport={async (d: any) => {
         if (d.settings) { setSettings(d.settings); await safeSet(K.settings, d.settings); }
         if (d.totals) { setTotals(d.totals); await safeSet(K.totals, d.totals); }
         if (d.body) { setBody(d.body); await safeSet(K.body, d.body); }
@@ -2969,6 +3154,11 @@ export default function App() {
         if (d.meals) { setMeals(d.meals); await safeSet(K.meals, d.meals); }
         if (d.plans) { setPlans(d.plans); await safeSet(K.plans, d.plans); }
         if (d.streaks) { setStreaks(d.streaks); await safeSet(K.streaks, d.streaks); }
+        if (d.journal) { setJournal(d.journal); await safeSet(K.journal, d.journal); }
+        if (d.challengeHistory) { setChallengeHistory(d.challengeHistory); await safeSet(K.challengeHistory, d.challengeHistory); }
+        if (d.busyPresets) { setBusyPresets(d.busyPresets); await safeSet(K.busyPresets, d.busyPresets); }
+        if (d.activity) { await safeSet(K.activity, d.activity); }
+        if (d.checkins) { await safeSet(K.checkins, d.checkins); }
         setModal(null);
       }} onClose={() => setModal(null)} />}
       {showWeekly && <WeeklyReviewModal settings={settings} totals={totals} body={body} workout={workout} streaks={streaks} onAck={async () => { const next = { lastAck: todayStr() }; await safeSet(K.weeklyReview, next); setWeeklyAck(next); }} onSkip={async () => { const next = { lastAck: todayStr() }; await safeSet(K.weeklyReview, next); setWeeklyAck(next); }} />}
