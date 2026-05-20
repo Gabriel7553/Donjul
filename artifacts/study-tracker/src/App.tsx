@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Sun, Home, Footprints, Check, Plus, Settings as SettingsIcon, X, Music, Languages, Shield,
   Award, Save, Calendar as CalIcon, Activity, Dumbbell, Apple, ListChecks, ChevronRight, ChevronDown, ChevronLeft,
   TrendingUp, TrendingDown, Edit3, Trash2, Flame, ArrowUp, ArrowDown, Minus, Target, BookOpen, Clock, Moon, Coffee,
-  Download, Upload, History, Repeat, Zap, Play
+  Download, Upload, History, Repeat, Zap, Play, AlertTriangle, RotateCcw, MapPin, Building2, TreePine
 } from 'lucide-react';
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -72,6 +72,33 @@ function fmtShortDate(s: string) {
 }
 function dayOfWeek() { return new Date(todayStr() + 'T00:00:00').getDay(); }
 function isSunday(dateStr = todayStr()) { return new Date(dateStr + 'T00:00:00').getDay() === 0; }
+function timeToMins(hhmm: string) { const [h, m] = (hhmm || '00:00').split(':').map(Number); return h * 60 + m; }
+function minsToHHMM(mins: number) { const h = Math.floor(mins / 60) % 24; const m = mins % 60; return `${pad(h)}:${pad(m)}`; }
+
+function useCurrentTime() {
+  const [now, setNow] = useState(nowHHMM());
+  useEffect(() => {
+    const id = setInterval(() => setNow(nowHHMM()), 30000);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
+
+function projectedDate(subjectKey: string, settings: any, totals: any, daily: any) {
+  const s = settings.subjects[subjectKey];
+  if (!s) return null;
+  const totalDone = (totals[subjectKey] || 0) + (daily?.completed[subjectKey] || 0);
+  const target = targetTotalByDeadline(subjectKey, settings);
+  const daysElapsed = Math.max(1, diffDays(todayStr(), settings.startDate) + 1);
+  const avgPerDay = totalDone / daysElapsed;
+  if (avgPerDay <= 0) return { deadline: s.deadline, projected: null, onTime: null };
+  const remaining = Math.max(0, target - totalDone);
+  const daysNeeded = Math.ceil(remaining / avgPerDay);
+  const projDate = new Date(todayStr() + 'T00:00:00');
+  projDate.setDate(projDate.getDate() + daysNeeded);
+  const proj = `${projDate.getFullYear()}-${pad(projDate.getMonth() + 1)}-${pad(projDate.getDate())}`;
+  return { deadline: s.deadline, projected: proj, onTime: proj <= s.deadline };
+}
 
 // ════════════════════════════════════════════════════════════════════════════════
 // DEFAULTS
@@ -323,24 +350,45 @@ function BottomNav({ tab, setTab }: { tab: string; setTab: (t: string) => void }
 // ════════════════════════════════════════════════════════════════════════════════
 // TODAY TAB
 // ════════════════════════════════════════════════════════════════════════════════
-function TodayTab({ settings, daily, totals, streaks, meals, workout, onWake, onStatus, onLogTime, onBusy, onLogMeal, onScheduleStart }: any) {
+function TodayTab({ settings, daily, totals, streaks, meals, workout, onWake, onStatus, onLogTime, onBusy, onLogMeal, onScheduleStart, onResetMacros }: any) {
+  const now = useCurrentTime();
+  const nowMins = timeToMins(now);
   const subjectKeys = settings.subjectOrder.filter((k: string) => settings.subjects[k] && !settings.subjects[k].archived);
   const todayMacros = meals.log[todayStr()] || { protein: 0, carbs: 0, fat: 0, calories: 0 };
+  const sleepMins = timeToMins(settings.sleepTime || '23:00');
+  const minsToSleep = sleepMins - nowMins;
+  const sleepWarning = minsToSleep > 0 && minsToSleep <= 120 && daily.scheduleStarted;
+  const incompleteCount = subjectKeys.filter((k: string) => (daily.completed[k] || 0) < settings.subjects[k].target).length;
 
   return (
     <>
       <h1 className="h1" style={{ marginBottom: 18 }}>A day in your study.</h1>
+
+      {sleepWarning && incompleteCount > 0 && (
+        <div className="card" style={{ borderLeft: `3px solid ${minsToSleep <= 60 ? '#B8460E' : '#C8932E'}`, background: minsToSleep <= 60 ? '#FDF1EC' : '#FBF7EE', marginBottom: 14 }}>
+          <div className="row" style={{ gap: 8, marginBottom: 4 }}>
+            <Moon size={16} color={minsToSleep <= 60 ? '#B8460E' : '#C8932E'} />
+            <span className="small" style={{ fontWeight: 600, color: minsToSleep <= 60 ? '#B8460E' : '#C8932E' }}>
+              Sleep in ~{minsToSleep <= 60 ? '1 hour' : '2 hours'} — {now}
+            </span>
+          </div>
+          <div className="muted tiny" style={{ lineHeight: 1.5 }}>
+            {incompleteCount} task{incompleteCount > 1 ? 's' : ''} not done. Push hard or move the minimum to tomorrow.
+          </div>
+        </div>
+      )}
+
       {!daily.wakeLogged ? (
         <WakeCheckIn plannedWake={daily.plannedWake} onLog={onWake} />
       ) : !daily.scheduleStarted ? (
         <ScheduleStartCard daily={daily} defaultOffset={settings.scheduleStartOffsetMin} onStart={onScheduleStart} />
       ) : (
         <>
-          <StatusBar daily={daily} onBusy={onBusy} onHome={() => onStatus('home', null)} />
-          <Schedule settings={settings} daily={daily} onLog={onLogTime} subjectKeys={subjectKeys} />
+          <StatusBar daily={daily} onBusy={onBusy} onHome={() => onStatus('home', null)} nowMins={nowMins} now={now} sleepTime={settings.sleepTime} />
+          <Schedule settings={settings} daily={daily} onLog={onLogTime} subjectKeys={subjectKeys} nowMins={nowMins} />
           <Progress settings={settings} totals={totals} daily={daily} streaks={streaks} subjectKeys={subjectKeys} onLogExtra={onLogTime} />
           <ChallengeCard settings={settings} workout={workout} />
-          <MacrosCard targets={settings.macroTargets} totals={todayMacros} onLog={onLogMeal} />
+          <MacrosCard targets={settings.macroTargets} totals={todayMacros} onLog={onLogMeal} onReset={onResetMacros} />
           <WeeklySummary settings={settings} totals={totals} daily={daily} meals={meals} workout={workout} />
         </>
       )}
@@ -398,20 +446,35 @@ function ScheduleStartCard({ daily, defaultOffset, onStart }: any) {
   );
 }
 
-function StatusBar({ daily, onBusy, onHome }: any) {
+function StatusBar({ daily, onBusy, onHome, nowMins, now, sleepTime }: any) {
   const isBusy = daily.status === 'busy';
+  const sleepMins = timeToMins(sleepTime || '23:00');
+  const minsLeft = sleepMins - nowMins;
+  const timeColor = minsLeft <= 60 ? '#B8460E' : minsLeft <= 120 ? '#C8932E' : '#6B6457';
   return (
-    <div className="card between card-tight">
-      <div>
-        <div className="h2" style={{ marginBottom: 4 }}>Right now</div>
-        <div className="row" style={{ gap: 8 }}>
-          {isBusy ? <Footprints size={16} color="#C8932E" /> : <Home size={16} color="#4A6741" />}
-          <span style={{ fontSize: 15, fontWeight: 500 }}>
-            {isBusy ? `Busy until ${fmtTime(daily.busyUntil)}` : 'Home & available'}
-          </span>
+    <div className="card card-tight" style={{ marginBottom: 14 }}>
+      <div className="between">
+        <div>
+          <div className="h2" style={{ marginBottom: 4 }}>Right now</div>
+          <div className="row" style={{ gap: 8 }}>
+            {isBusy ? <Footprints size={16} color="#C8932E" /> : <Home size={16} color="#4A6741" />}
+            <span style={{ fontSize: 15, fontWeight: 500 }}>
+              {isBusy ? `Busy until ${fmtTime(daily.busyUntil)}` : 'Home & available'}
+            </span>
+          </div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div className="mono small" style={{ fontWeight: 600, color: '#1A1A2E', fontSize: 18 }}>{fmtTime(now)}</div>
+          {minsLeft > 0 && minsLeft < 480 && (
+            <div className="mono tiny" style={{ color: timeColor }}>
+              {minsLeft <= 60 ? `${minsLeft}m to sleep` : minsLeft <= 120 ? `~${Math.round(minsLeft / 60 * 10) / 10}h to sleep` : ''}
+            </div>
+          )}
         </div>
       </div>
-      {isBusy ? <button className="tap active" onClick={onHome}>I'm back</button> : <button className="tap" onClick={onBusy}>I'm busy</button>}
+      <div style={{ borderTop: '1px solid #E4DCC8', marginTop: 10, paddingTop: 10 }}>
+        {isBusy ? <button className="tap active" onClick={onHome} style={{ width: '100%' }}>I'm back</button> : <button className="tap" onClick={onBusy} style={{ width: '100%' }}>I'm stepping out</button>}
+      </div>
     </div>
   );
 }
@@ -467,12 +530,12 @@ function splitSpanish(total: number) {
   return [duo, babbel, input];
 }
 
-function Schedule({ settings, daily, onLog, subjectKeys }: any) {
+function Schedule({ settings, daily, onLog, subjectKeys, nowMins }: any) {
   const blocks = useMemo(() => buildSchedule(settings, daily, subjectKeys), [settings, daily, subjectKeys]);
 
   if (blocks.length === 0) {
     return (
-      <div className="card">
+      <div className="card" style={{ marginBottom: 14 }}>
         <div className="h2" style={{ marginBottom: 10 }}>Today's plan</div>
         <p className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <Award size={14} /> All done for today. Anything extra counts as bonus.
@@ -483,20 +546,53 @@ function Schedule({ settings, daily, onLog, subjectKeys }: any) {
 
   return (
     <div style={{ marginBottom: 14 }}>
-      <div className="h2" style={{ marginBottom: 10, paddingLeft: 4 }}>Today's plan</div>
+      <div className="h2" style={{ marginBottom: 10, paddingLeft: 4 }}>Today's schedule</div>
       {blocks.map((b: any, i: number) => {
         const subj = settings.subjects[b.subject];
         const Icon = ICON_MAP[subj.icon] || Languages;
         const done = (daily.completed[b.subject] || 0) >= subj.target;
+        const blockStart = timeToMins(b.start);
+        const blockEnd = blockStart + b.mins;
+        const isActive = !done && nowMins >= blockStart && nowMins < blockEnd;
+        const isOverdue = !done && nowMins >= blockEnd;
+        const isUpcoming = !done && !isActive && !isOverdue && (blockStart - nowMins) <= 30 && blockStart > nowMins;
+        const minsUntil = blockStart - nowMins;
+
+        let blockBg = '#FBF7EE';
+        let blockBorder = '1px solid #E4DCC8';
+        let statusEl = null;
+
+        if (done) {
+          blockBg = '#F0F5ED';
+          blockBorder = '1px solid #C8D9C0';
+        } else if (isActive) {
+          blockBg = '#FDF6EE';
+          blockBorder = `2px solid ${subj.accent}`;
+          statusEl = <span className="pill" style={{ background: subj.accent, color: '#F5F0E6', fontSize: 10, padding: '2px 8px', letterSpacing: '0.08em' }}>NOW</span>;
+        } else if (isOverdue) {
+          blockBg = '#FDF1EC';
+          blockBorder = '2px solid #B8460E';
+          statusEl = <span className="pill" style={{ background: '#F5E1D5', color: '#B8460E', fontSize: 10, padding: '2px 8px' }}>OVERDUE</span>;
+        } else if (isUpcoming) {
+          statusEl = <span className="mono tiny" style={{ color: '#C8932E' }}>in {minsUntil}m</span>;
+        }
+
         return (
-          <div key={i} className={`block ${done ? 'done' : ''}`} onClick={() => onLog(b.subject)} style={{ cursor: 'pointer' }}>
-            <div className="icon-wrap" style={{ background: subj.accent }}>
+          <div key={i} onClick={() => onLog(b.subject)} style={{
+            padding: '14px 16px', borderRadius: 10, background: blockBg, border: blockBorder,
+            marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer',
+            opacity: done ? 0.6 : 1, transition: 'all 0.2s',
+          }}>
+            <div className="icon-wrap" style={{ background: done ? '#A0A898' : subj.accent }}>
               <Icon size={18} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="between">
-                <div style={{ fontSize: 15, fontWeight: 600 }}>{subj.name}</div>
-                <div className="mono tiny muted">{fmtTime(b.start)}</div>
+                <div style={{ fontSize: 15, fontWeight: isActive ? 700 : 600 }}>{subj.name}</div>
+                <div className="row" style={{ gap: 6 }}>
+                  {statusEl}
+                  <div className="mono tiny muted">{fmtTime(b.start)}</div>
+                </div>
               </div>
               <div className="row" style={{ gap: 6, marginTop: 2 }}>
                 <span className="mono small muted">{b.mins} min</span>
@@ -526,6 +622,7 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra }:
         const diff = totalDone - expected;
         const perDayAvg = subj.target * (subj.weeklyDays / 7);
         const daysOff = Math.abs(diff) / Math.max(perDayAvg, 1);
+        const proj = projectedDate(k, settings, totals, daily);
 
         let status, sColor, sBg;
         if (Math.abs(diff) < perDayAvg * 0.5) { status = 'on pace'; sColor = '#4A6741'; sBg = '#E8EBE0'; }
@@ -538,8 +635,8 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra }:
         const isComplete = todayDone >= subj.target;
 
         return (
-          <div key={k} style={{ marginBottom: 16 }}>
-            <div className="between" style={{ marginBottom: 6 }}>
+          <div key={k} style={{ marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid #E4DCC8' }}>
+            <div className="between" style={{ marginBottom: 4 }}>
               <div className="row" style={{ gap: 8 }}>
                 <Icon size={14} color={subj.accent} />
                 <span className="h3">{subj.name}</span>
@@ -548,6 +645,20 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra }:
               </div>
               <span className="pill" style={{ background: sBg, color: sColor }}>{status}</span>
             </div>
+            {/* Deadline row */}
+            {proj && (
+              <div className="row" style={{ gap: 6, marginBottom: 6 }}>
+                <CalIcon size={11} color="#6B6457" />
+                <span className="mono tiny muted">
+                  Goal: {fmtShortDate(proj.deadline)}
+                  {proj.projected && (
+                    <> · at this pace: <span style={{ color: proj.onTime ? '#4A6741' : '#B8460E', fontWeight: 600 }}>
+                      {fmtShortDate(proj.projected)} {proj.onTime ? '✓' : '⚠'}
+                    </span></>
+                  )}
+                </span>
+              </div>
+            )}
             <div className="progress-bar">
               <div className="progress-fill" style={{ width: `${pct}%`, background: subj.accent }} />
               <div className="progress-marker" style={{ left: `${expectedPct}%` }} />
@@ -556,52 +667,75 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra }:
               <span className="mono muted tiny">
                 Today {todayDone}m{todayBonus > 0 && <span style={{ color: '#4A6741' }}> +{todayBonus}m bonus</span>} · {Math.round(totalDone / 60 * 10) / 10}h total
               </span>
-              <button onClick={() => onLogExtra(k)} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', borderColor: subj.accent, color: subj.accent }}>
-                + log
-              </button>
+              <div className="row" style={{ gap: 4 }}>
+                <button onClick={() => onLogExtra(k, 'edit')} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', color: '#6B6457' }} title="Edit/reset today's time">
+                  <Edit3 size={11} />
+                </button>
+                <button onClick={() => onLogExtra(k)} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', borderColor: subj.accent, color: subj.accent }}>
+                  + log
+                </button>
+              </div>
             </div>
           </div>
         );
       })}
       <div className="muted tiny" style={{ lineHeight: 1.4, marginTop: 4 }}>
-        Notch shows where you should be today. Tap "+ log" anytime to add time.
+        Notch = where you should be today. Pencil = edit today's logged time.
       </div>
     </div>
   );
 }
 
-function MacrosCard({ targets, totals, onLog }: any) {
+function MacrosCard({ targets, totals, onLog, onReset }: any) {
+  const [confirmReset, setConfirmReset] = useState(false);
   const items = [
     { key: 'protein', label: 'Protein', unit: 'g', primary: true, color: '#B8460E' },
     { key: 'calories', label: 'Calories', unit: '', color: '#3B5C6B' },
     { key: 'carbs', label: 'Carbs', unit: 'g', color: '#4A6741' },
     { key: 'fat', label: 'Fat', unit: 'g', color: '#C8932E' },
   ];
+  const hasData = (totals.protein || 0) + (totals.calories || 0) > 0;
   return (
     <div className="card">
       <div className="between" style={{ marginBottom: 12 }}>
         <div className="h2">Today's macros</div>
-        <button className="tap" onClick={onLog} style={{ padding: '6px 12px', fontSize: 12 }}>
-          <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Log meal
-        </button>
+        <div className="row" style={{ gap: 6 }}>
+          {hasData && !confirmReset && (
+            <button className="tap" onClick={() => setConfirmReset(true)} style={{ padding: '6px 10px', fontSize: 12, color: '#B8460E' }}>
+              <RotateCcw size={12} style={{ verticalAlign: 'middle' }} />
+            </button>
+          )}
+          {confirmReset && (
+            <>
+              <button className="tap" style={{ padding: '6px 10px', fontSize: 11, color: '#B8460E', borderColor: '#B8460E' }} onClick={() => { onReset(); setConfirmReset(false); }}>Reset</button>
+              <button className="tap" style={{ padding: '6px 10px', fontSize: 11 }} onClick={() => setConfirmReset(false)}>Cancel</button>
+            </>
+          )}
+          <button className="tap" onClick={onLog} style={{ padding: '6px 12px', fontSize: 12 }}>
+            <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Log meal
+          </button>
+        </div>
       </div>
       {items.map(it => {
         const t = targets[it.key];
         const c = totals[it.key] || 0;
         const pct = Math.min(100, (c / Math.max(t, 1)) * 100);
+        const over = c > t;
         return (
           <div key={it.key} style={{ marginBottom: 10 }}>
             <div className="between" style={{ marginBottom: 4 }}>
               <span className="small" style={{ fontWeight: it.primary ? 600 : 400 }}>{it.label}{it.primary && ' ★'}</span>
-              <span className="mono tiny muted">{Math.round(c)} / {t}{it.unit}</span>
+              <span className="mono tiny" style={{ color: over && it.primary ? '#4A6741' : over ? '#C8932E' : '#6B6457' }}>
+                {Math.round(c)} / {t}{it.unit}
+              </span>
             </div>
             <div className="progress-bar" style={{ height: 4 }}>
-              <div className="progress-fill" style={{ width: `${pct}%`, background: it.color }} />
+              <div className="progress-fill" style={{ width: `${pct}%`, background: over ? (it.primary ? '#4A6741' : '#C8932E') : it.color }} />
             </div>
           </div>
         );
       })}
-      <div className="muted tiny" style={{ lineHeight: 1.4, marginTop: 4 }}>★ Protein is your priority. Hit that first.</div>
+      <div className="muted tiny" style={{ lineHeight: 1.4, marginTop: 4 }}>★ Protein is your priority. Hit that first. Rotate arrow to reset.</div>
     </div>
   );
 }
@@ -1255,26 +1389,71 @@ function DayDetailModal({ date, settings, totals, workout, meals, body, onClose 
   );
 }
 
-function LogTimeModal({ subject, settings, daily, onLog, onClose }: any) {
+function LogTimeModal({ subject, settings, daily, onLog, onSet, onClose, editMode }: any) {
   const s = settings.subjects[subject];
   const Icon = ICON_MAP[s.icon] || Languages;
   const done = daily.completed[subject] || 0;
   const remaining = Math.max(0, s.target - done);
-  const [mins, setMins] = useState(remaining > 0 ? remaining : s.target);
+  const [mode, setMode] = useState<'add' | 'set' | 'reset'>(editMode ? 'set' : 'add');
+  const [mins, setMins] = useState(editMode ? done : (remaining > 0 ? remaining : s.target));
+  const [confirmReset, setConfirmReset] = useState(false);
 
   return (
     <ModalShell title={s.name} onClose={onClose} icon={<div className="icon-wrap" style={{ background: s.accent, width: 32, height: 32 }}><Icon size={16} /></div>}>
-      <div className="muted small" style={{ marginBottom: 14 }}>
-        {s.tools} · Today: <span className="mono">{done} / {s.target} min</span>
+      <div className="muted small" style={{ marginBottom: 12 }}>
+        {s.tools}
       </div>
-      <label>Minutes studied</label>
-      <input type="number" min="1" value={mins} onChange={(e) => setMins(parseInt(e.target.value) || 0)} style={{ marginBottom: 12 }} />
-      <div className="row" style={{ gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
-        {[15, 30, 45, 60].map(m => <button key={m} className={`tap ${mins === m ? 'active' : ''}`} onClick={() => setMins(m)}>{m}m</button>)}
+      <div className="card" style={{ padding: '10px 14px', marginBottom: 14, background: '#F5F0E6' }}>
+        <div className="between">
+          <span className="small muted">Today logged</span>
+          <span className="mono small" style={{ fontWeight: 600 }}>{done} / {s.target} min</span>
+        </div>
+        {done > 0 && (
+          <div className="progress-bar" style={{ height: 4, marginTop: 8 }}>
+            <div className="progress-fill" style={{ width: `${Math.min(100, (done / s.target) * 100)}%`, background: s.accent }} />
+          </div>
+        )}
       </div>
-      <button className="btn" style={{ width: '100%' }} onClick={() => onLog(mins)}>
-        <Check size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Log {mins} min
-      </button>
+
+      <div className="row" style={{ gap: 6, marginBottom: 14 }}>
+        <button className={`tap ${mode === 'add' ? 'active' : ''}`} style={{ flex: 1, justifyContent: 'center' }} onClick={() => { setMode('add'); setMins(remaining > 0 ? remaining : s.target); }}>
+          <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Add
+        </button>
+        <button className={`tap ${mode === 'set' ? 'active' : ''}`} style={{ flex: 1, justifyContent: 'center' }} onClick={() => { setMode('set'); setMins(done); }}>
+          <Edit3 size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Set total
+        </button>
+        {done > 0 && (
+          <button className={`tap ${mode === 'reset' ? 'active' : ''}`} style={{ flex: 1, justifyContent: 'center', color: '#B8460E' }} onClick={() => setMode('reset')}>
+            <RotateCcw size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Reset
+          </button>
+        )}
+      </div>
+
+      {mode === 'reset' ? (
+        <>
+          <p className="muted small" style={{ marginBottom: 14, lineHeight: 1.5 }}>
+            This will clear today's logged time for {s.name} and subtract it from your total progress.
+          </p>
+          <button className="btn" style={{ width: '100%', background: '#B8460E' }} onClick={() => onSet(0)}>
+            <RotateCcw size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Yes, reset to 0
+          </button>
+        </>
+      ) : (
+        <>
+          <label>{mode === 'add' ? 'Minutes to add' : 'Set today\'s total to (minutes)'}</label>
+          <input type="number" min="0" value={mins} onChange={(e) => setMins(parseInt(e.target.value) || 0)} style={{ marginBottom: 12 }} />
+          <div className="row" style={{ gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
+            {mode === 'add'
+              ? [15, 30, 45, 60].map(m => <button key={m} className={`tap ${mins === m ? 'active' : ''}`} onClick={() => setMins(m)}>{m}m</button>)
+              : [s.target, Math.round(s.target * 0.5), Math.round(s.target * 0.75), s.target + 15].map(m => <button key={m} className={`tap ${mins === m ? 'active' : ''}`} onClick={() => setMins(m)}>{m}m</button>)
+            }
+          </div>
+          <button className="btn" style={{ width: '100%' }} onClick={() => mode === 'add' ? onLog(mins) : onSet(mins)}>
+            <Check size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+            {mode === 'add' ? `Log +${mins} min` : `Set total to ${mins} min`}
+          </button>
+        </>
+      )}
     </ModalShell>
   );
 }
@@ -1324,15 +1503,45 @@ function AddMeasurementModal({ onSave, onClose, previous }: any) {
   );
 }
 
+const VTAPER_PRESET: Record<string, number | null> = {
+  weight: 178, body_fat: 14, waist: 33, shoulders: 49, chest: 44,
+  biceps_l: 15.5, biceps_r: 15.5, hips: 38, thighs_l: 24, thighs_r: 24,
+  calves_l: 15.5, calves_r: 15.5, neck: 15.5,
+};
+
 function BodyGoalsModal({ settings, onSave, onClose }: any) {
   const [goals, setGoals] = useState(settings.bodyGoals);
+  const [presetLoaded, setPresetLoaded] = useState(false);
   const set = (k: string, patch: any) => setGoals({ ...goals, [k]: { ...goals[k], ...patch } });
+
+  const loadVTaperPreset = () => {
+    const next = { ...goals };
+    Object.entries(VTAPER_PRESET).forEach(([k, target]) => {
+      if (next[k]) next[k] = { ...next[k], target };
+    });
+    setGoals(next);
+    setPresetLoaded(true);
+  };
 
   return (
     <ModalShell title="Body targets" onClose={onClose} icon={<Target size={18} color="#B8460E" />}>
-      <p className="muted small" style={{ marginBottom: 14 }}>
-        Set target numbers if you want progress bars. Direction is for trend coloring.
+      <p className="muted small" style={{ marginBottom: 10 }}>
+        Set target numbers for progress bars. Direction controls trend coloring.
       </p>
+      <div className="card" style={{ padding: '12px 14px', marginBottom: 14, background: '#EEF2F8', border: '1px solid #C8D4E4' }}>
+        <div className="between" style={{ marginBottom: 4 }}>
+          <div className="row" style={{ gap: 8 }}>
+            <Target size={14} color="#3B5C6B" />
+            <span className="small" style={{ fontWeight: 600, color: '#3B5C6B' }}>V-Taper Recomp Preset</span>
+          </div>
+          <button className="tap" style={{ padding: '5px 12px', fontSize: 11, borderColor: '#3B5C6B', color: '#3B5C6B' }} onClick={loadVTaperPreset}>
+            {presetLoaded ? '✓ Loaded' : 'Load preset'}
+          </button>
+        </div>
+        <p className="muted tiny" style={{ lineHeight: 1.5, marginBottom: 0 }}>
+          Tailored for 5'6" / 187 lb V-taper recomp: target 178 lb, 14% BF, 33" waist, 49" shoulders, 44" chest.
+        </p>
+      </div>
       {MEASUREMENT_FIELDS.map(f => {
         const g = goals[f.key];
         if (!g) return null;
@@ -1363,7 +1572,7 @@ function BodyGoalsModal({ settings, onSave, onClose }: any) {
 function LogWorkoutModal({ dayIdx, workout, onSave, onClose }: any) {
   const day = workout.split[dayIdx];
   const today = todayStr();
-  const initial = workout.logs[today] || { name: day.name, exercises: day.exercises.map((ex: any) => ({ name: ex.name, sets: Array(ex.sets).fill(0).map(() => ({ weight: '', reps: '', rpe: '' })) })) };
+  const initial = workout.logs[today] || { name: day.name, location: 'gym', exercises: day.exercises.map((ex: any) => ({ name: ex.name, sets: Array(ex.sets).fill(0).map(() => ({ weight: '', reps: '', rpe: '' })) })) };
   const [data, setData] = useState(initial);
 
   const setSet = (exIdx: number, setIdx: number, field: string, value: string) => {
@@ -1373,6 +1582,22 @@ function LogWorkoutModal({ dayIdx, workout, onSave, onClose }: any) {
 
   return (
     <ModalShell title={day.name} onClose={onClose} icon={<Dumbbell size={18} color="#3B5C6B" />}>
+      <div className="row" style={{ gap: 8, marginBottom: 14 }}>
+        <button
+          className={`tap ${data.location !== 'home' ? 'active' : ''}`}
+          style={{ flex: 1, justifyContent: 'center', padding: '8px 12px' }}
+          onClick={() => setData({ ...data, location: 'gym' })}
+        >
+          <Building2 size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} />Gym
+        </button>
+        <button
+          className={`tap ${data.location === 'home' ? 'active' : ''}`}
+          style={{ flex: 1, justifyContent: 'center', padding: '8px 12px' }}
+          onClick={() => setData({ ...data, location: 'home' })}
+        >
+          <TreePine size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} />Home
+        </button>
+      </div>
       <p className="muted small" style={{ marginBottom: 14 }}>
         Log weight × reps per set. Leave RPE blank if you don't track it.
       </p>
@@ -2147,6 +2372,36 @@ export default function App() {
   const savePlans = async (next: any) => { setPlans(next); await safeSet(K.plans, next); };
   const saveStreaks = async (next: any) => { setStreaks(next); await safeSet(K.streaks, next); };
 
+  const setSubjectTime = async (subject: string, newMins: number) => {
+    const oldMins = daily.completed[subject] || 0;
+    const diff = newMins - oldMins;
+    const newTotals = { ...totals, [subject]: Math.max(0, (totals[subject] || 0) + diff) };
+    const target = settings.subjects[subject]?.target || 0;
+    const newBonus = Math.max(0, newMins - target);
+    const newDaily = {
+      ...daily,
+      completed: { ...daily.completed, [subject]: Math.max(0, newMins) },
+      bonus: { ...(daily.bonus || {}), [subject]: newBonus },
+    };
+    await saveDaily(newDaily);
+    await saveTotals(newTotals);
+    if (newMins >= target && target > 0 && newMins > oldMins) {
+      const today = todayStr();
+      const cur = streaks[subject] || { current: 0, longest: 0, lastDate: null };
+      if (cur.lastDate !== today) {
+        const yest = (() => { const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; })();
+        const continuing = cur.lastDate === yest || diffDays(today, cur.lastDate) <= 2;
+        const newCurrent = continuing ? cur.current + 1 : 1;
+        await saveStreaks({ ...streaks, [subject]: { current: newCurrent, longest: Math.max(cur.longest, newCurrent), lastDate: today } });
+      }
+    }
+  };
+
+  const resetMacros = async () => {
+    const next = { ...meals, log: { ...meals.log, [todayStr()]: { protein: 0, carbs: 0, fat: 0, calories: 0 } } };
+    await saveMeals(next);
+  };
+
   const logTime = async (subject: string, minutes: number) => {
     const target = settings.subjects[subject]?.target || 0;
     const wasUnderTarget = (daily.completed[subject] || 0) < target;
@@ -2204,9 +2459,10 @@ export default function App() {
             onWake={(time: string) => saveDaily({ ...daily, wakeLogged: true, actualWake: time })}
             onScheduleStart={(time: string) => saveDaily({ ...daily, scheduleStarted: true, scheduleStartTime: time })}
             onStatus={(status: string, busyUntil: string) => saveDaily({ ...daily, status, busyUntil })}
-            onLogTime={(s: string) => setModal({ type: 'logTime', subject: s })}
+            onLogTime={(s: string, mode?: string) => setModal({ type: 'logTime', subject: s, editMode: mode === 'edit' })}
             onBusy={() => setModal({ type: 'busy' })}
             onLogMeal={() => setModal({ type: 'logMeal' })}
+            onResetMacros={resetMacros}
           />
         )}
         {tab === 'body' && (
@@ -2242,7 +2498,7 @@ export default function App() {
 
       {modal?.type === 'settings' && <SettingsModal settings={settings} onSave={saveSettings} onClose={() => setModal(null)} onEditSubject={(k: string) => setModal({ type: 'editSubject', key: k })} onAddSubject={() => setModal({ type: 'editSubject', key: null })} onChallenge={() => setModal({ type: 'challenge' })} onExportImport={() => setModal({ type: 'exportImport' })} />}
       {modal?.type === 'editSubject' && <EditSubjectModal subjectKey={modal.key} settings={settings} onSave={saveSettings} onClose={() => setModal({ type: 'settings' })} />}
-      {modal?.type === 'logTime' && <LogTimeModal subject={modal.subject} settings={settings} daily={daily} onLog={(m: number) => { logTime(modal.subject, m); setModal(null); }} onClose={() => setModal(null)} />}
+      {modal?.type === 'logTime' && <LogTimeModal subject={modal.subject} settings={settings} daily={daily} editMode={modal.editMode} onLog={(m: number) => { logTime(modal.subject, m); setModal(null); }} onSet={(m: number) => { setSubjectTime(modal.subject, m); setModal(null); }} onClose={() => setModal(null)} />}
       {modal?.type === 'busy' && <BusyModal onConfirm={(m: number) => { saveDaily({ ...daily, status: 'busy', busyUntil: addMinutes(nowHHMM(), m) }); setModal(null); }} onClose={() => setModal(null)} />}
       {modal?.type === 'addMeasurement' && <AddMeasurementModal onSave={async (entry: any) => { const next = { ...body, entries: [...body.entries, entry] }; const nextSettings = { ...settings, nextMeasurement: addMonth(todayStr(), 1) }; await saveBody(next); await saveSettings(nextSettings); setModal(null); }} onClose={() => setModal(null)} previous={body.entries[body.entries.length - 1]} />}
       {modal?.type === 'bodyGoals' && <BodyGoalsModal settings={settings} onSave={saveSettings} onClose={() => setModal(null)} />}
