@@ -1,0 +1,316 @@
+# Donjul — Fixes & Feature Upgrades
+
+## Context
+
+Donjul is a personal study/fitness/nutrition tracker: a React+TS single-page app
+(`artifacts/study-tracker`, all UI in one ~2978-line `src/App.tsx`, data in `localStorage`)
+plus a small Express API (`artifacts/api-server`) deployed on Replit. Replit's path router sends
+`/api/*` → api-server (port 8080) and `/` → the Vite app (port 23521).
+
+The user reported 8 issues. Confirmed decisions from clarifying questions:
+- **Busy logging:** ask "Log this to my day?" each time you press *I'm back*.
+- **Reset day:** a button that opens checkboxes so you pick what to clear each time.
+- **Subjects:** build the full flexible model (tracking style + optional details).
+- **Nutrition coach:** AI-powered, factoring in macros, history, AND body/weight goals.
+
+All UI lives in `artifacts/study-tracker/src/App.tsx` unless noted. Backend changes are in
+`artifacts/api-server/src`.
+
+---
+
+## 1. Fix the AI photo scan (it fails on legible photos)
+
+Three stacked bugs, biggest first:
+
+1. **100 KB body limit.** `app.ts:29` uses bare `express.json()`. A phone photo as base64 is
+   1–7 MB → server returns 413 before the AI runs. → `app.ts`: `express.json({ limit: "15mb" })`
+   (and same `limit` on `express.urlencoded`).
+2. **`detail: "low"`** (`scanFood.ts:43`) downscales the image so small label text is unreadable.
+   → change to `detail: "high"`.
+3. **Fragile parsing / hidden errors.** `scanFood.ts:52-56` greedily regex-matches `{...}` and
+   calls `JSON.parse` with no try/catch; the frontend throws away the server's error message
+   (`App.tsx:2021`).
+
+Changes:
+- `scanFood.ts`: wrap `JSON.parse` in try/catch; on failure log via the pino `logger` and return
+  422 with a useful message; distinguish OpenAI/API errors (502) from parse errors (422).
+  Strengthen the prompt: tell it to read the **"per serving"** column, return the serving size,
+  and emit strict JSON only. Keep the robust extract-then-parse step.
+- Add a startup warning in `scanFood.ts`/`index.ts` if `AI_INTEGRATIONS_OPENAI_API_KEY` /
+  `AI_INTEGRATIONS_OPENAI_BASE_URL` are missing (a likely silent failure on Replit).
+- Frontend `LogMealModal.scanImage` (`App.tsx:2005-2031`): before upload, **resize the image on a
+  canvas** to ~1500px max edge at JPEG q≈0.9 (keeps labels legible, payload small), send the real
+  mime type, and on `!resp.ok` surface the server's `error` text instead of a generic message.
+
+Files: `artifacts/api-server/src/app.ts`, `.../routes/scanFood.ts`, `.../src/index.ts`;
+`App.tsx` `LogMealModal` (~2005-2031).
+
+## 2. "I'm busy" → timers, activity switching, optional calendar log
+
+Today `BusyModal` (`App.tsx:1726-1769`) only stores a reason + a fixed duration; *I'm back*
+(`onHome`, wired at `App.tsx:2955` / `:449`) just clears `status`. No elapsed time, no switching,
+no history.
+
+New `daily.busy` shape (init in the daily-state block `App.tsx:2781-2792`):
+```
+busy: { active, reason, start: "HH:MM", plannedUntil: "HH:MM"|null,
+        segments: [{ reason, start, end|null }] }   // last segment open while busy
+```
+- **Step out** (`BusyModal`): pick reason; duration is now **optional** — add an "Open-ended"
+  choice. On confirm: `status:'busy'`, start a first open segment, set `plannedUntil` only if a
+  duration was given.
+- **StatusBar** (`App.tsx:511-542`) while busy: show reason + live elapsed (and planned-until if
+  set). Add a **"Switch activity"** button beside *I'm back*: closes the current segment
+  (`end: now`) and opens a new one with a new reason (reuse `BusyModal`).
+- **I'm back:** close the open segment, then prompt **"Log this to my day?"** (per decision). If
+  yes, append the day's segments (each `{reason,start,end,mins}`) to a new persistent store
+  `K.activity = { [date]: [...] }` (new key in `K`, `App.tsx:13-26`; new `saveActivity`).
+- **Show it on the calendar:** `HistoryTab` (`App.tsx:1463-1570`) gets a 4th dot for days with
+  activity; `DayDetailModal` (`App.tsx:1594-1652`) gets an "Activities" section listing
+  `activity[date]` (reason · start–end · mins).
+
+## 3. Weekly split ignores the Gym/Home toggle
+
+Bug: the "Weekly split" card hardcodes `workout.split` (gym) at `App.tsx:1376-1386` (4 refs),
+while the rest of `WorkoutTab` correctly uses `activeSplit` (`App.tsx:1231`, respects the
+Gym/Home toggle). → replace those 4 `workout.split` references with `activeSplit`. One small fix.
+
+## 4. "Reset whole day" button (pick what to clear)
+
+No whole-day reset exists today (only per-subject `setSubjectTime(k,0)` and `resetMacros`).
+Add a **Reset today** button in `SettingsModal` (`App.tsx:2211-2285`, near Backup/restore) opening
+a new `ResetDayModal` with checkboxes:
+- Subject time (clears `daily.completed`/`bonus` **and** subtracts today's minutes from `totals` —
+  reuse `setSubjectTime(k,0)` per subject),
+- Macros (reuse `resetMacros`),
+- Today's workout log (`delete workout.logs[today]`),
+- Status (busy/activity, wake, schedule → back to the fresh daily defaults).
+
+Confirm before clearing. New modal + handler wired like the others at `App.tsx:2952-2963`.
+
+## 5. Settings: Archive + Deleted tabs (15-day soft delete)
+
+Today only an `archived` boolean exists; delete = toggle archive (`EditSubjectModal.handleDelete`,
+`App.tsx:2302-2307`). Active list filters `!archived` (`App.tsx:418`).
+
+- Add `deletedAt: string|null` to the subject schema.
+- Turn the Subjects section of `SettingsModal` into 3 sub-tabs: **Active** (`!archived && !deletedAt`),
+  **Archived** (`archived && !deletedAt`), **Deleted** (`deletedAt != null`).
+  - Active: as today + Edit.
+  - Archived: Unarchive · Delete (sets `deletedAt = todayStr()`).
+  - Deleted: shows "removed in N days" · Restore (`deletedAt=null`) · **Delete now** (permanent:
+    remove key from `subjects` + `subjectOrder`).
+- **Auto-purge:** in the load `useEffect` (`App.tsx:2762`), drop subjects whose `deletedAt` is >15
+  days old before `setSettings`.
+- Filters that build active lists (`subjectKeys` at `App.tsx:418`, `buildSchedule` at `:556`) must
+  also exclude `deletedAt`.
+
+## 6. Flexible "New subject" form (optional deadline + details menu)
+
+`EditSubjectModal` (`App.tsx:2289-2351`) currently forces a deadline (`'2026-12-31'` default).
+Build the full model the user approved. New/changed subject fields:
+```
+trackingMode: 'time' | 'checkoff'        // time = log minutes (now); checkoff = just mark done
+weeklyDays:   number                      // already exists (times/week)
+goal:         { kind: 'deadline', date } | { kind: 'count', total } | { kind: 'none' }
+description:  string                        // optional (separate from existing `tools`)
+deadline:     string|null                  // derived from goal.kind==='deadline'; no longer required
+deletedAt:    string|null                  // (from #5)
+```
+Form UX: keep Name + Icon + Color + Tracking style always visible. Put everything else behind a
+small **"+ Add details"** menu (deadline, description, "finish after N sessions/days", days/week,
+daily minutes for time mode) so the form stays simple. `target`/`weeklyDays` become optional with
+sensible defaults. Guard the math helpers (`expectedTotal`, `targetTotalByDeadline`,
+`projectedDate`, Progress at `App.tsx:91-105,283-294,672-748`) so missing deadline/target is safe.
+
+## 7. No-deadline subjects: mark done, hide once weekly goal met
+
+For `goal.kind==='none'` (e.g. running 3×/week) there should be **no** "behind/on-pace" nag — just
+mark done — and once `weeklyDays` are done this week it disappears until next week.
+
+- Track completions in a new store `K.checkins = { [subjectKey]: ["YYYY-MM-DD", ...] }`.
+  A "done" is appended when a check-off subject is marked done, or a time subject hits target.
+- Helper `doneThisWeek(k)` = count of `checkins[k]` dates within the current week (Sunday-based, to
+  match the app's existing Sunday rest/weekly-review convention, `App.tsx:78,557,2898`).
+- `buildSchedule` (`App.tsx:544-586`) and `Progress` (`App.tsx:672`) exclude/relabel a subject when
+  `doneThisWeek(k) >= weeklyDays`: show "Done this week (N/N) — resets Sunday" instead of a status
+  pill. Check-off subjects render a single **"Mark done"** button (no minutes UI) in `Progress`.
+- `Progress` only shows the deadline/projection row when `goal.kind==='deadline'`; for `'count'`
+  show `sessions done / total`; for `'none'` show the weekly counter.
+
+## 8. AI nutrition coach (gaps + what to eat)
+
+Data already available: `meals.log[date]`, `settings.macroTargets`, `meals.presets`,
+`settings.bodyGoals` + latest `body.entries`.
+
+- **Backend:** new route `artifacts/api-server/src/routes/nutritionCoach.ts` (mirror `scanFood.ts`,
+  reuse the OpenAI client), registered in `routes/index.ts`. `POST /api/nutrition-coach` takes
+  today's macros, targets, remaining-for-day, 7-day averages, and body/weight goals; returns strict
+  JSON: `{ analysis: string[], stop: string[], start: string[], snack: {...,why}, meal: {...,why} }`
+  where snack/meal include protein/carbs/fat/calories. Robust parse + logging (same pattern as #1).
+- **Frontend:** add a **"Coach"** button on `MacrosCard` (`App.tsx:751-803`) opening a new
+  `NutritionCoachModal` that POSTs and renders the advice, plus a locally-computed gap line as a
+  no-AI fallback. Each suggested snack/meal gets a **"Log this"** button that adds its macros to
+  today (reuse the `logManual`/preset-add path in `LogMealModal`, `App.tsx:2038-2053`).
+
+---
+
+## Approved extras
+
+### 9. Data durability (your data is browser-only today → fix it)
+
+Decision: **best option for a Replit-hosted personal app** = keep localStorage as an instant
+offline cache, but persist the real data to the already-configured Postgres so it survives across
+browsers/devices/reloads. Done in two phases so you're protected immediately:
+
+- **Phase A (lands first, low risk):** auto local snapshots + a clear "data lives in this browser"
+  note until sync is on. On each save, keep a rolling backup (last ~10 snapshots under
+  `st:backup:<ts>`); surface "Restore from backup" in the existing `ExportImportModal`
+  (`App.tsx:2964`). Export/import already exists — just harden + auto-trigger it.
+- **Phase B (durable sync):** the data is already JSON blobs (`st:*`), so avoid a heavy normalized
+  schema. Add one table in `lib/db` (Drizzle, currently empty): `app_state(id, data jsonb,
+  updated_at)`. New api-server routes `GET /api/state` and `PUT /api/state` (single-user blob;
+  this is a personal app with no auth). Frontend: a thin sync layer wraps `safeGet`/`safeSet`
+  (`App.tsx:28-42`) — read from server on load (fall back to localStorage when offline), write to
+  both, last-write-wins with `updated_at`. Pairs naturally with the PWA offline cache (#12).
+  Requires `DATABASE_URL` set on Replit (already in `replit.md`); I'll confirm it before wiring.
+
+### 10. Undo + safety nets
+
+`sonner` is already a dependency but unused. Mount `<Toaster>` once in the app root
+(`App.tsx:2900`). Wrap mutating actions — `logTime`, `setSubjectTime`, `resetMacros`, the new
+Reset-day, meal-entry delete, subject archive/delete — with a snapshot-based **Undo** toast
+("Logged 30m · Undo"). Generic helper: capture prev state, apply, toast with a restore callback.
+Keep the existing confirm prompts for fully destructive actions (permanent delete, reset).
+
+### 11. Per-meal deletable log
+
+Today meals collapse into one opaque daily sum (`meals.log[date]`, `App.tsx:2851`). Add
+`meals.entries[date] = [{ id, name, protein, carbs, fat, calories, source, qty, time }]` as the
+source of truth; derive the daily total from the sum. Migration: an existing `log[date]` total
+becomes one "Earlier entries" row so nothing is lost. `DayDetailModal` (`App.tsx:1594-1652`) and a
+new "Today's meals" list in `LogMealModal` show entries with a per-row delete (with Undo, #10).
+This also gives the coach (#8) real meal-level data.
+
+### 12. Portion multiplier
+
+Add a quantity field when logging/scanning (`LogMealModal`, `App.tsx:1994-2053`): servings stepper
+(x0.5 / x1 / x2) + free input, optionally grams. Scanned/preset macros are per-serving and get
+multiplied by qty before they're added to the day. The scan prompt (#1) already returns serving
+size to anchor this.
+
+### 13. Install as a phone app (PWA)
+
+Make it add-to-home-screen, full-screen, offline-capable (great fit since data is local-first).
+Add `manifest.webmanifest` + icons and a service worker. Prefer `vite-plugin-pwa`; if catalog/dep
+wiring is fiddly, fall back to a hand-written manifest linked in `index.html` + a minimal SW
+registered in `main.tsx`. Must respect Vite's `base`/`BASE_PATH` so asset paths resolve on Replit.
+
+---
+
+## High-end upgrades (all approved)
+
+Big scope — grouped by theme; sequenced in the milestones below. Reuses already-installed libs
+(`framer-motion`, `recharts`, `sonner`, `next-themes`) and free APIs where possible.
+
+### Smart logging
+- **Focus/Pomodoro auto-timer** — "Start Spanish" runs a live timer (reuse the busy-timer engine
+  from #2) and auto-calls `logTime(subject, mins)` (`App.tsx:2855`) on stop. Replaces manual minute
+  entry. Persist a running timer in `daily` so it survives reloads.
+- **Natural-language food log** — new `POST /api/parse-food` (OpenAI, same client as scan) turns
+  "two eggs and toast" → macros JSON; wired into `LogMealModal` as a text box (and feeds #12 qty).
+- **Barcode scanning** — use the browser `BarcodeDetector` API (fallback `@zxing/browser`) in the
+  scan flow; look the code up via **OpenFoodFacts** (`https://world.openfoodfacts.org/api/v2/...`,
+  free, no key, CORS-ok) and prefill macros.
+- **Voice input** — Web Speech API (`SpeechRecognition`) mic button on the food/journal inputs;
+  graceful no-op where unsupported.
+
+### Insights & intelligence
+- **Trend charts** — `recharts` (installed): weight + measurements over time (data in
+  `body.entries`), macro adherence vs targets, study hours/week. New charts in `BodyTab`/`HistoryTab`.
+- **Adaptive targets** — compute calorie/macro targets from latest body stats + goal direction
+  (Mifflin-St Jeor TDEE), then nudge based on the actual weight trend; store as
+  `settings.macroTargets` with an "auto" flag and a manual override.
+- **AI weekly review** — extend `WeeklyReviewModal` (`App.tsx:2974`) with an AI summary across
+  study/fitness/nutrition (new `POST /api/weekly-review`), cached per week.
+- **Achievements/milestones** — derive badges from existing data (`streaks`, `totals`, workout PRs,
+  goal hits); store unlocked badges in a new `K.achievements`; surface on Today + a celebration toast.
+
+### Polish & feel
+- **Animations + confetti + haptics** — `framer-motion` for modal/card transitions and progress
+  fills; `canvas-confetti` (small new dep) on goal completion; `navigator.vibrate` on key taps.
+- **Better empty states + skeletons** — friendly guidance in empty lists; skeleton placeholders
+  replacing the bare "Loading…" (`App.tsx:2882`).
+- **Swipe + pull-to-refresh** — swipe-to-delete on meal/log/subject rows (with Undo, #10);
+  pull-to-refresh re-syncs (#9B).
+- **Dark mode** — `next-themes` + a one-time refactor of the hardcoded hex colors
+  (`GlobalStyles`/inline styles) into CSS variables, then a light/dark token set. Moderate refactor;
+  scheduled in the polish milestone.
+
+### Platform & personalization
+- **Units & format prefs** — `settings.units` (lb/kg, in/cm), 12/24h, week-start day; format
+  helpers (`fmtTime`, measurement labels) read these. Convert on display, store canonical.
+- **Reminders/notifications** — Notification API + SW (needs PWA #13): meal/measurement reminders,
+  "behind on X", "sleep soon". User-configurable in settings; permission-gated.
+- **Body progress photos** — attach photos to measurements with before/after compare. **Depends on
+  server storage** (photos blow the localStorage quota) — store via the #9B backend (Postgres
+  bytea/object) or IndexedDB locally; built alongside the durability work.
+- **Customizable dashboard** — reorder / show-hide the Today cards (schedule, macros, progress,
+  weekly, challenge); store layout in `settings.dashboard`.
+
+### Backlog / future ideas (not committed — pull in anytime)
+Water/hydration tracking + reminder; sleep-duration tracking & trend (extends the existing wake
+time); streak-freeze (skip a day without breaking a streak); `.ics` / Google Calendar export of the
+daily schedule + busy activities; "copy yesterday's meals" / meal templates; workout rest-timer &
+superset support; AI "ask your data anything" chat; selectable accent theme; accessibility (dynamic
+font size, high-contrast). I'll suggest these as we go rather than building upfront.
+
+---
+
+## Critical files
+
+- `artifacts/study-tracker/src/App.tsx` — all UI/state (single file). Key spots cited inline above.
+- `artifacts/study-tracker/src/main.tsx`, `index.html` — Toaster mount / PWA registration (#10,#13).
+- `artifacts/api-server/src/app.ts` — body limit (#1).
+- `artifacts/api-server/src/routes/scanFood.ts` — scan fix (#1).
+- `artifacts/api-server/src/routes/nutritionCoach.ts` (new) + `routes/index.ts` — coach (#8).
+- `artifacts/api-server/src/routes/state.ts` (new) + `lib/db` schema — Postgres state sync (#9B).
+
+## Build milestones
+
+This is a large roadmap; ship in milestones (each = its own commit(s) on
+`claude/fix-scan-task-tracking-XfIYg`) so value lands early and stays stable:
+
+1. **Core fixes:** #3 split, #1 scan, #4 reset day, #9A auto-backup, #10 undo/toasts.
+2. **Subjects revamp:** #5 archive/deleted tabs, #6 flexible form, #7 weekly/check-off, +
+   Focus/Pomodoro auto-timer.
+3. **Nutrition suite:** #11 per-meal log, #12 portions, #8 AI coach, natural-language log, barcode
+   (OpenFoodFacts), adaptive targets.
+4. **Busy & calendar:** #2 timers/switching/activity log.
+5. **Insights & engagement:** trend charts, AI weekly review, achievements, voice input.
+6. **Polish:** animations + confetti + haptics, empty states/skeletons, swipe + pull-to-refresh,
+   dark-mode refactor.
+7. **Platform:** units/format prefs, customizable dashboard, PWA (#13), reminders/notifications.
+8. **Durability:** #9B Postgres state sync + body progress photos (server storage).
+
+New deps to add: `canvas-confetti` (+ types), `@zxing/browser` (barcode fallback). Everything else
+reuses installed packages. I'll confirm before adding deps.
+
+## Verification
+
+- `pnpm run typecheck` and `pnpm run build` after each change (catches TS/build breaks).
+- Backend smoke test: `PORT=8080 pnpm --filter @workspace/api-server run dev`, then `curl` a large
+  base64 payload to `/api/scan-food` to confirm the 413 is gone and errors are JSON; same for
+  `/api/nutrition-coach` with sample macros.
+- UI: the Vite app needs `PORT` + `BASE_PATH` env (set by Replit). Because this is a headless
+  container, **final click-through verification (real photo scan, busy timer, split toggle, reset,
+  archive/delete, subject types, coach) should be done by the user on the live Replit app.** I'll
+  call out anything I couldn't verify here.
+- localStorage migrations: new fields (`deletedAt`, `goal`, `trackingMode`, `daily.busy`) and new
+  stores (`K.activity`, `K.checkins`, `meals.entries`) must default safely for existing saved data
+  — verify the app loads cleanly with pre-existing `st:*` keys (and that `meals.log` totals migrate
+  into `meals.entries` without double-counting).
+- #9B sync: confirm `DATABASE_URL` is set on Replit; run `pnpm --filter db push`; smoke-test
+  `GET`/`PUT /api/state`; verify offline (no DB) still works via the localStorage fallback.
+- #13 PWA: confirm manifest + SW load under the Replit `BASE_PATH`, and "Add to Home Screen"
+  appears on mobile (user-verified on the live app).
