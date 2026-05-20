@@ -8,6 +8,14 @@ import {
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import confetti from 'canvas-confetti';
+import { motion } from 'framer-motion';
+
+function haptic(ms = 12) { try { (navigator as any).vibrate?.(ms); } catch {} }
+function celebrate() {
+  try { confetti({ particleCount: 90, spread: 72, origin: { y: 0.7 }, colors: ['#B8460E', '#4A6741', '#3B5C6B', '#C8932E', '#8E4585'] }); } catch {}
+  haptic(25);
+}
 
 // ════════════════════════════════════════════════════════════════════════════════
 // STORAGE — localStorage-backed persistence
@@ -1971,8 +1979,8 @@ function HistoryTab({ settings, totals, workout, meals, body, activity, streaks,
 // ════════════════════════════════════════════════════════════════════════════════
 function ModalShell({ title, onClose, children, icon = null, color = '#1A1A2E' }: any) {
   return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <motion.div className="modal-bg" onClick={onClose} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }}>
+      <motion.div className="modal" onClick={(e: any) => e.stopPropagation()} initial={{ opacity: 0, scale: 0.96, y: 8 }} animate={{ opacity: 1, scale: 1, y: 0 }} transition={{ duration: 0.18, ease: 'easeOut' }}>
         <div className="between" style={{ marginBottom: 18 }}>
           <div className="row" style={{ gap: 10 }}>
             {icon}
@@ -1983,8 +1991,8 @@ function ModalShell({ title, onClose, children, icon = null, color = '#1A1A2E' }
           </button>
         </div>
         {children}
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -3605,6 +3613,7 @@ export default function App() {
       const fresh = badges.filter((b) => b.earned && !seen.includes(b.id));
       if (fresh.length) {
         fresh.forEach((b) => toast(`Achievement unlocked: ${b.label}`, { icon: <Trophy size={16} color="#C8932E" /> }));
+        celebrate();
         await safeSet(K.achievements, earnedIds);
       }
     })();
@@ -3646,6 +3655,10 @@ export default function App() {
     const has = list.includes(today);
     const nextList = has ? list.filter((d) => d !== today) : [...list, today];
     await saveCheckins({ ...checkins, [subject]: nextList });
+    if (!has) {
+      const weeklyDays = settings.subjects[subject]?.weeklyDays || 7;
+      if (doneThisWeek(subject, { [subject]: nextList }) >= weeklyDays) celebrate(); else haptic();
+    }
     const name = settings.subjects[subject]?.name || 'task';
     undoToast(has ? `${name} unmarked` : `${name} done`, () => saveCheckins(prev));
   };
@@ -3714,6 +3727,8 @@ export default function App() {
       }
     }
     if (newCompleted >= target && target > 0) await recordCheckin(subject, true);
+    if (target > 0 && (daily.completed[subject] || 0) < target && newCompleted >= target) celebrate();
+    else haptic();
     const name = settings.subjects[subject]?.name || 'time';
     undoToast(`Logged ${minutes}m of ${name}`, async () => { await saveDaily(prevDaily); await saveTotals(prevTotals); await saveStreaks(prevStreaks); });
   };
@@ -3799,7 +3814,22 @@ export default function App() {
   };
 
   if (!loaded) {
-    return <div style={{ minHeight: '100vh', background: '#F5F0E6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'serif', color: '#6B6457' }}>Loading…</div>;
+    return (
+      <div className="app">
+        <GlobalStyles />
+        <div className="content">
+          <div style={{ height: 14, width: 120, background: '#E4DCC8', borderRadius: 6, marginBottom: 20, opacity: 0.7 }} />
+          <div style={{ height: 30, width: '70%', background: '#E4DCC8', borderRadius: 8, marginBottom: 22, opacity: 0.6 }} />
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="card" style={{ height: 90 + i * 10 }}>
+              <div style={{ height: 12, width: '40%', background: '#E4DCC8', borderRadius: 6, marginBottom: 12, opacity: 0.6 }} />
+              <div style={{ height: 8, width: '90%', background: '#EFE9DB', borderRadius: 6, marginBottom: 8 }} />
+              <div style={{ height: 8, width: '75%', background: '#EFE9DB', borderRadius: 6 }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   if (!settings.setupComplete) {
