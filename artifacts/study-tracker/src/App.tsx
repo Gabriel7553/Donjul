@@ -141,9 +141,44 @@ function useCurrentTime() {
   return now;
 }
 
+// Flexible subject model: fill in safe defaults for older saved subjects.
+function normalizeSubject(s: any) {
+  return {
+    trackingMode: 'time',
+    description: '',
+    tools: '',
+    target: 30,
+    weeklyDays: 5,
+    deadline: null,
+    countTotal: null,
+    archived: false,
+    deletedAt: null,
+    ...s,
+  };
+}
+function subjectGoalKind(s: any): 'deadline' | 'count' | 'none' {
+  if (s.countTotal) return 'count';
+  if (s.deadline) return 'deadline';
+  return 'none';
+}
+// Sunday-based week start, matching the app's existing Sunday rest/review convention.
+function weekStartStr(dateStr = todayStr()) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() - d.getDay());
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+function doneThisWeek(subjectKey: string, checkins: any) {
+  const ws = weekStartStr();
+  const list: string[] = checkins?.[subjectKey] || [];
+  return list.filter((d) => d >= ws).length;
+}
+function doneTotal(subjectKey: string, checkins: any) {
+  return (checkins?.[subjectKey] || []).length;
+}
+
 function projectedDate(subjectKey: string, settings: any, totals: any, daily: any) {
   const s = settings.subjects[subjectKey];
-  if (!s) return null;
+  if (!s || !s.deadline) return null;
   const totalDone = (totals[subjectKey] || 0) + (daily?.completed[subjectKey] || 0);
   const target = targetTotalByDeadline(subjectKey, settings);
   const daysElapsed = Math.max(1, diffDays(todayStr(), settings.startDate) + 1);
@@ -161,10 +196,10 @@ function projectedDate(subjectKey: string, settings: any, totals: any, daily: an
 // DEFAULTS
 // ════════════════════════════════════════════════════════════════════════════════
 const SUBJECTS_DEFAULT: Record<string, any> = {
-  spanish: { name: 'Spanish', icon: 'languages', accent: '#B8460E', tools: 'Duolingo + Babbel + Input', target: 95, weeklyDays: 6, deadline: '2026-12-31', archived: false },
-  guitar: { name: 'Guitar', icon: 'music', accent: '#4A6741', tools: 'Simply Guitar', target: 30, weeklyDays: 5, deadline: '2026-12-31', archived: false },
-  cysa: { name: 'CySA+', icon: 'shield', accent: '#3B5C6B', tools: 'Jason Dion · Udemy', target: 45, weeklyDays: 7, deadline: '2026-06-16', archived: false },
-  running: { name: 'Running', icon: 'activity', accent: '#8E4585', tools: 'Easy pace, 25-30 min', target: 28, weeklyDays: 3, deadline: '2026-12-31', archived: false },
+  spanish: { name: 'Spanish', icon: 'languages', accent: '#B8460E', tools: 'Duolingo + Babbel + Input', description: '', trackingMode: 'time', target: 95, weeklyDays: 6, deadline: '2026-12-31', countTotal: null, archived: false, deletedAt: null },
+  guitar: { name: 'Guitar', icon: 'music', accent: '#4A6741', tools: 'Simply Guitar', description: '', trackingMode: 'time', target: 30, weeklyDays: 5, deadline: '2026-12-31', countTotal: null, archived: false, deletedAt: null },
+  cysa: { name: 'CySA+', icon: 'shield', accent: '#3B5C6B', tools: 'Jason Dion · Udemy', description: '', trackingMode: 'time', target: 45, weeklyDays: 7, deadline: '2026-06-16', countTotal: null, archived: false, deletedAt: null },
+  running: { name: 'Running', icon: 'activity', accent: '#8E4585', tools: 'Easy pace, 25-30 min', description: '', trackingMode: 'time', target: 28, weeklyDays: 3, deadline: '2026-12-31', countTotal: null, archived: false, deletedAt: null },
 };
 
 const ICON_MAP: Record<string, any> = { languages: Languages, music: Music, shield: Shield, book: BookOpen, target: Target, dumbbell: Dumbbell, activity: Activity, run: Activity };
@@ -341,7 +376,7 @@ function expectedTotal(subjectKey: string, settings: any) {
 }
 function targetTotalByDeadline(subjectKey: string, settings: any) {
   const s = settings.subjects[subjectKey];
-  if (!s) return 0;
+  if (!s || !s.deadline) return 0;
   const totalDays = Math.max(1, diffDays(s.deadline, settings.startDate) + 1);
   return Math.round(totalDays * s.target * (s.weeklyDays / 7));
 }
@@ -465,15 +500,21 @@ function BottomNav({ tab, setTab }: { tab: string; setTab: (t: string) => void }
 // ════════════════════════════════════════════════════════════════════════════════
 // TODAY TAB
 // ════════════════════════════════════════════════════════════════════════════════
-function TodayTab({ settings, daily, totals, streaks, meals, workout, onWake, onStatus, onLogTime, onBusy, onLogMeal, onScheduleStart, onResetMacros }: any) {
+function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, onWake, onStatus, onLogTime, onBusy, onLogMeal, onScheduleStart, onResetMacros, onMarkDone, onFocusStart, onFocusStop }: any) {
   const now = useCurrentTime();
   const nowMins = timeToMins(now);
-  const subjectKeys = settings.subjectOrder.filter((k: string) => settings.subjects[k] && !settings.subjects[k].archived);
+  const subjectKeys = settings.subjectOrder.filter((k: string) => settings.subjects[k] && !settings.subjects[k].archived && !settings.subjects[k].deletedAt);
   const todayMacros = meals.log[todayStr()] || { protein: 0, carbs: 0, fat: 0, calories: 0 };
   const sleepMins = timeToMins(settings.sleepTime || '23:00');
   const minsToSleep = sleepMins - nowMins;
   const sleepWarning = minsToSleep > 0 && minsToSleep <= 120 && daily.scheduleStarted;
-  const incompleteCount = subjectKeys.filter((k: string) => (daily.completed[k] || 0) < settings.subjects[k].target).length;
+  const isDoneToday = (k: string) => {
+    const s = settings.subjects[k];
+    if (doneThisWeek(k, checkins) >= (s.weeklyDays || 7)) return true;
+    if (s.trackingMode === 'checkoff') return (checkins[k] || []).includes(todayStr());
+    return (daily.completed[k] || 0) >= (s.target || 0) && (s.target || 0) > 0;
+  };
+  const incompleteCount = subjectKeys.filter((k: string) => !isDoneToday(k)).length;
 
   return (
     <>
@@ -500,8 +541,9 @@ function TodayTab({ settings, daily, totals, streaks, meals, workout, onWake, on
       ) : (
         <>
           <StatusBar daily={daily} onBusy={onBusy} onHome={() => onStatus('home', null)} nowMins={nowMins} now={now} sleepTime={settings.sleepTime} />
-          <Schedule settings={settings} daily={daily} onLog={onLogTime} subjectKeys={subjectKeys} nowMins={nowMins} />
-          <Progress settings={settings} totals={totals} daily={daily} streaks={streaks} subjectKeys={subjectKeys} onLogExtra={onLogTime} />
+          {daily.focus && <FocusTimerCard focus={daily.focus} subject={settings.subjects[daily.focus.subject]} onStop={onFocusStop} />}
+          <Schedule settings={settings} daily={daily} onLog={onLogTime} subjectKeys={subjectKeys} nowMins={nowMins} checkins={checkins} />
+          <Progress settings={settings} totals={totals} daily={daily} streaks={streaks} subjectKeys={subjectKeys} onLogExtra={onLogTime} checkins={checkins} onMarkDone={onMarkDone} onFocusStart={onFocusStart} focus={daily.focus} />
           <ChallengeCard settings={settings} workout={workout} />
           <MacrosCard targets={settings.macroTargets} totals={todayMacros} onLog={onLogMeal} onReset={onResetMacros} />
           <WeeklySummary settings={settings} totals={totals} daily={daily} meals={meals} workout={workout} />
@@ -594,7 +636,32 @@ function StatusBar({ daily, onBusy, onHome, nowMins, now, sleepTime }: any) {
   );
 }
 
-function buildSchedule(settings: any, daily: any, subjectKeys: string[]) {
+function FocusTimerCard({ focus, subject, onStop }: any) {
+  const [, tick] = useState(0);
+  useEffect(() => { const id = setInterval(() => tick((t) => t + 1), 1000); return () => clearInterval(id); }, []);
+  const elapsedMs = Date.now() - focus.start;
+  const mins = Math.floor(elapsedMs / 60000);
+  const secs = Math.floor((elapsedMs % 60000) / 1000);
+  const Icon = ICON_MAP[subject?.icon] || Target;
+  return (
+    <div className="card" style={{ borderLeft: `3px solid ${subject?.accent || '#4A6741'}`, marginBottom: 14, background: '#FDF6EE' }}>
+      <div className="between">
+        <div className="row" style={{ gap: 10 }}>
+          <div className="icon-wrap" style={{ background: subject?.accent || '#4A6741', width: 34, height: 34 }}><Icon size={18} /></div>
+          <div>
+            <div className="small" style={{ fontWeight: 600 }}>Focusing · {subject?.name || 'Session'}</div>
+            <div className="mono" style={{ fontSize: 22, fontWeight: 700 }}>{pad(mins)}:{pad(secs)}</div>
+          </div>
+        </div>
+        <button className="btn" style={{ background: '#B8460E' }} onClick={onStop}>
+          <Check size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Stop & log
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function buildSchedule(settings: any, daily: any, subjectKeys: string[], checkins: any = {}) {
   if (!daily?.scheduleStartTime) return [];
   const breakMin = settings.blockBreakMin ?? 15;
   let cursor = daily.scheduleStartTime;
@@ -606,10 +673,13 @@ function buildSchedule(settings: any, daily: any, subjectKeys: string[]) {
 
   for (const k of order) {
     const s = settings.subjects[k];
-    if (!s || s.archived) continue;
+    if (!s || s.archived || s.deletedAt) continue;
+    // Check-off habits aren't time-blocked, and weekly-met goals drop off until next week.
+    if (s.trackingMode === 'checkoff') continue;
+    if (doneThisWeek(k, checkins) >= (s.weeklyDays || 7)) continue;
     const isRest = (s.weeklyDays < 7) && (dow === 0);
     if (isRest) continue;
-    const remaining = Math.max(0, s.target - (daily.completed[k] || 0));
+    const remaining = Math.max(0, (s.target || 0) - (daily.completed[k] || 0));
     if (remaining <= 0) continue;
 
     if (k === 'spanish' && remaining >= 60) {
@@ -645,8 +715,8 @@ function splitSpanish(total: number) {
   return [duo, babbel, input];
 }
 
-function Schedule({ settings, daily, onLog, subjectKeys, nowMins }: any) {
-  const blocks = useMemo(() => buildSchedule(settings, daily, subjectKeys), [settings, daily, subjectKeys]);
+function Schedule({ settings, daily, onLog, subjectKeys, nowMins, checkins }: any) {
+  const blocks = useMemo(() => buildSchedule(settings, daily, subjectKeys, checkins), [settings, daily, subjectKeys, checkins]);
 
   if (blocks.length === 0) {
     return (
@@ -722,46 +792,60 @@ function Schedule({ settings, daily, onLog, subjectKeys, nowMins }: any) {
   );
 }
 
-function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra }: any) {
+function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, checkins, onMarkDone, onFocusStart, focus }: any) {
   return (
     <div className="card">
       <div className="h2" style={{ marginBottom: 14 }}>Progress</div>
       {subjectKeys.map((k: string) => {
         const subj = settings.subjects[k];
         const Icon = ICON_MAP[subj.icon] || Languages;
-        const totalDone = (totals[k] || 0) + (daily.completed[k] || 0);
+        const goalKind = subjectGoalKind(subj);
+        const isCheckoff = subj.trackingMode === 'checkoff';
+        const weeklyDays = subj.weeklyDays || 7;
+        const weekDone = doneThisWeek(k, checkins);
+        const weeklyMet = weekDone >= weeklyDays;
+        const streak = streaks[k]?.current || 0;
+        const todayDone = daily.completed[k] || 0;
+        const todayBonus = (daily.bonus?.[k]) || 0;
+        const checkedToday = (checkins[k] || []).includes(todayStr());
+        const isFocusing = focus?.subject === k;
+        const sessionsDone = doneTotal(k, checkins);
+        const countComplete = goalKind === 'count' && sessionsDone >= (subj.countTotal || 0);
+
+        // On-pace metrics only meaningful for timed subjects with a deadline.
+        const totalDone = (totals[k] || 0) + todayDone;
         const expected = expectedTotal(k, settings);
         const target = targetTotalByDeadline(k, settings);
         const pct = Math.min(100, (totalDone / Math.max(target, 1)) * 100);
         const expectedPct = Math.min(100, (expected / Math.max(target, 1)) * 100);
         const diff = totalDone - expected;
-        const perDayAvg = subj.target * (subj.weeklyDays / 7);
+        const perDayAvg = (subj.target || 0) * (weeklyDays / 7);
         const daysOff = Math.abs(diff) / Math.max(perDayAvg, 1);
         const proj = projectedDate(k, settings, totals, daily);
+        const showPace = goalKind === 'deadline' && !isCheckoff && !weeklyMet;
 
-        let status, sColor, sBg;
-        if (Math.abs(diff) < perDayAvg * 0.5) { status = 'on pace'; sColor = '#4A6741'; sBg = '#E8EBE0'; }
-        else if (diff > 0) { status = `${daysOff.toFixed(1)}d ahead`; sColor = '#4A6741'; sBg = '#E8EBE0'; }
-        else { status = `${daysOff.toFixed(1)}d behind`; sColor = '#B8460E'; sBg = '#F5E1D5'; }
-
-        const streak = streaks[k]?.current || 0;
-        const todayDone = daily.completed[k] || 0;
-        const todayBonus = (daily.bonus?.[k]) || 0;
-        const isComplete = todayDone >= subj.target;
+        let status = '', sColor = '#6B6457', sBg = '#EEEAE0';
+        if (weeklyMet) { status = `Done this week · ${weekDone}/${weeklyDays}`; sColor = '#4A6741'; sBg = '#E8EBE0'; }
+        else if (countComplete) { status = 'Complete'; sColor = '#4A6741'; sBg = '#E8EBE0'; }
+        else if (showPace) {
+          if (Math.abs(diff) < perDayAvg * 0.5) { status = 'on pace'; sColor = '#4A6741'; sBg = '#E8EBE0'; }
+          else if (diff > 0) { status = `${daysOff.toFixed(1)}d ahead`; sColor = '#4A6741'; sBg = '#E8EBE0'; }
+          else { status = `${daysOff.toFixed(1)}d behind`; sColor = '#B8460E'; sBg = '#F5E1D5'; }
+        } else { status = `${weekDone}/${weeklyDays} this week`; }
 
         return (
-          <div key={k} style={{ marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid #E4DCC8' }}>
+          <div key={k} style={{ marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid #E4DCC8', opacity: weeklyMet || countComplete ? 0.65 : 1 }}>
             <div className="between" style={{ marginBottom: 4 }}>
               <div className="row" style={{ gap: 8 }}>
                 <Icon size={14} color={subj.accent} />
                 <span className="h3">{subj.name}</span>
-                {isComplete && <Check size={14} color="#4A6741" />}
+                {(weeklyMet || countComplete || checkedToday) && <Check size={14} color="#4A6741" />}
                 {streak > 1 && <span className="streak-flame"><Flame size={11} /> {streak}d</span>}
               </div>
               <span className="pill" style={{ background: sBg, color: sColor }}>{status}</span>
             </div>
-            {/* Deadline row */}
-            {proj && (
+
+            {showPace && proj && (
               <div className="row" style={{ gap: 6, marginBottom: 6 }}>
                 <CalIcon size={11} color="#6B6457" />
                 <span className="mono tiny muted">
@@ -774,28 +858,57 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra }:
                 </span>
               </div>
             )}
-            <div className="progress-bar">
-              <div className="progress-fill" style={{ width: `${pct}%`, background: subj.accent }} />
-              <div className="progress-marker" style={{ left: `${expectedPct}%` }} />
-            </div>
+
+            {showPace ? (
+              <div className="progress-bar">
+                <div className="progress-fill" style={{ width: `${pct}%`, background: subj.accent }} />
+                <div className="progress-marker" style={{ left: `${expectedPct}%` }} />
+              </div>
+            ) : goalKind === 'count' ? (
+              <div className="progress-bar">
+                <div className="progress-fill" style={{ width: `${Math.min(100, (sessionsDone / Math.max(subj.countTotal || 1, 1)) * 100)}%`, background: subj.accent }} />
+              </div>
+            ) : (
+              <div className="row" style={{ gap: 4, marginTop: 2 }}>
+                {Array.from({ length: weeklyDays }).map((_, i) => (
+                  <div key={i} style={{ flex: 1, height: 6, borderRadius: 3, background: i < weekDone ? subj.accent : '#E4DCC8' }} />
+                ))}
+              </div>
+            )}
+
             <div className="between" style={{ marginTop: 6 }}>
               <span className="mono muted tiny">
-                Today {todayDone}m{todayBonus > 0 && <span style={{ color: '#4A6741' }}> +{todayBonus}m bonus</span>} · {Math.round(totalDone / 60 * 10) / 10}h total
+                {goalKind === 'count'
+                  ? `${sessionsDone}/${subj.countTotal} sessions`
+                  : isCheckoff
+                    ? (checkedToday ? 'Done today' : 'Not done today')
+                    : <>Today {todayDone}m{todayBonus > 0 && <span style={{ color: '#4A6741' }}> +{todayBonus}m bonus</span>}</>}
               </span>
               <div className="row" style={{ gap: 4 }}>
-                <button onClick={() => onLogExtra(k, 'edit')} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', color: '#6B6457' }} title="Edit/reset today's time">
-                  <Edit3 size={11} />
-                </button>
-                <button onClick={() => onLogExtra(k)} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', borderColor: subj.accent, color: subj.accent }}>
-                  + log
-                </button>
+                {isCheckoff ? (
+                  <button onClick={() => onMarkDone(k)} className={`tap ${checkedToday ? 'active' : ''}`} style={{ padding: '3px 12px', fontSize: 11, fontFamily: 'JetBrains Mono', borderColor: subj.accent, color: checkedToday ? '#F5F0E6' : subj.accent, background: checkedToday ? subj.accent : 'transparent' }}>
+                    {checkedToday ? <><Check size={11} style={{ verticalAlign: 'middle' }} /> done</> : 'Mark done'}
+                  </button>
+                ) : (
+                  <>
+                    <button onClick={() => onFocusStart(k)} disabled={!!focus} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', color: isFocusing ? '#4A6741' : '#6B6457' }} title="Start a focus timer">
+                      <Play size={11} />
+                    </button>
+                    <button onClick={() => onLogExtra(k, 'edit')} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', color: '#6B6457' }} title="Edit/reset today's time">
+                      <Edit3 size={11} />
+                    </button>
+                    <button onClick={() => onLogExtra(k)} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', borderColor: subj.accent, color: subj.accent }}>
+                      + log
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
         );
       })}
       <div className="muted tiny" style={{ lineHeight: 1.4, marginTop: 4 }}>
-        Notch = where you should be today. Pencil = edit today's logged time.
+        Play = start a focus timer. Pencil = edit today's time. Habits hide once you hit your weekly count.
       </div>
     </div>
   );
@@ -2261,7 +2374,26 @@ function PlanDayModal({ date, plans, onSave, onClose }: any) {
 
 function SettingsModal({ settings, onSave, onClose, onEditSubject, onAddSubject, onChallenge, onExportImport, onResetDay }: any) {
   const [draft, setDraft] = useState(settings);
+  const [subTab, setSubTab] = useState<'active' | 'archived' | 'deleted'>('active');
   const update = (patch: any) => setDraft({ ...draft, ...patch });
+
+  // Subject actions persist immediately (and preserve any in-progress schedule/macro edits).
+  const applySubjectChange = (key: string, patch: any) => {
+    const nd = { ...draft, subjects: { ...draft.subjects, [key]: { ...draft.subjects[key], ...patch } } };
+    setDraft(nd); onSave(nd);
+  };
+  const fullDelete = (key: string) => {
+    if (!confirm('Permanently delete this subject? This cannot be undone.')) return;
+    const subjects = { ...draft.subjects }; delete subjects[key];
+    const nd = { ...draft, subjects, subjectOrder: draft.subjectOrder.filter((x: string) => x !== key) };
+    setDraft(nd); onSave(nd);
+  };
+
+  const allKeys: string[] = draft.subjectOrder.filter((k: string) => draft.subjects[k]);
+  const activeKeys = allKeys.filter((k) => !draft.subjects[k].archived && !draft.subjects[k].deletedAt);
+  const archivedKeys = allKeys.filter((k) => draft.subjects[k].archived && !draft.subjects[k].deletedAt);
+  const deletedKeys = allKeys.filter((k) => draft.subjects[k].deletedAt);
+  const shownKeys = subTab === 'active' ? activeKeys : subTab === 'archived' ? archivedKeys : deletedKeys;
 
   return (
     <ModalShell title="Settings" onClose={onClose}>
@@ -2286,25 +2418,51 @@ function SettingsModal({ settings, onSave, onClose, onEditSubject, onAddSubject,
       </div>
 
       <div className="h2" style={{ marginBottom: 8, marginTop: 16 }}>Subjects</div>
-      {draft.subjectOrder.map((k: string) => {
+      <div className="row" style={{ gap: 6, marginBottom: 10 }}>
+        <button className={`tap ${subTab === 'active' ? 'active' : ''}`} style={{ flex: 1, fontSize: 12 }} onClick={() => setSubTab('active')}>Active ({activeKeys.length})</button>
+        <button className={`tap ${subTab === 'archived' ? 'active' : ''}`} style={{ flex: 1, fontSize: 12 }} onClick={() => setSubTab('archived')}>Archived ({archivedKeys.length})</button>
+        <button className={`tap ${subTab === 'deleted' ? 'active' : ''}`} style={{ flex: 1, fontSize: 12 }} onClick={() => setSubTab('deleted')}>Deleted ({deletedKeys.length})</button>
+      </div>
+      {shownKeys.length === 0 && <p className="muted small" style={{ padding: '8px 0' }}>{subTab === 'active' ? 'No active subjects.' : subTab === 'archived' ? 'Nothing archived.' : 'Nothing deleted.'}</p>}
+      {shownKeys.map((k: string) => {
         const s = draft.subjects[k];
-        if (!s) return null;
         const Icon = ICON_MAP[s.icon] || Languages;
+        const kind = subjectGoalKind(s);
+        const meta = s.trackingMode === 'checkoff' ? `Check-off · ${s.weeklyDays}x/wk` : `${s.target}min/day · ${s.weeklyDays}x/wk`;
+        const daysLeft = s.deletedAt ? Math.max(0, 15 - diffDays(todayStr(), s.deletedAt)) : 0;
         return (
           <div key={k} className="between" style={{ padding: '10px 0', borderBottom: '1px solid #E4DCC8' }}>
-            <div className="row" style={{ gap: 10 }}>
+            <div className="row" style={{ gap: 10, flex: 1, minWidth: 0 }}>
               <div className="icon-wrap" style={{ background: s.accent, width: 28, height: 28 }}><Icon size={14} /></div>
-              <div>
-                <div className="small" style={{ fontWeight: 600, opacity: s.archived ? 0.5 : 1 }}>{s.name}</div>
-                <div className="mono tiny muted">{s.target}min/day · {s.weeklyDays}x/wk{s.archived ? ' · archived' : ''}</div>
+              <div style={{ minWidth: 0 }}>
+                <div className="small" style={{ fontWeight: 600, opacity: subTab === 'active' ? 1 : 0.6 }}>{s.name}</div>
+                <div className="mono tiny muted">{meta}{kind === 'deadline' ? ` · ${fmtShortDate(s.deadline)}` : kind === 'count' ? ` · ${s.countTotal} sessions` : ''}{s.deletedAt ? ` · deletes in ${daysLeft}d` : ''}</div>
               </div>
             </div>
-            <button onClick={() => onEditSubject(k)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6457' }}>
-              <Edit3 size={14} />
-            </button>
+            <div className="row" style={{ gap: 4 }}>
+              {subTab === 'active' && (
+                <>
+                  <button onClick={() => onEditSubject(k)} className="tap" style={{ padding: '4px 8px' }} title="Edit"><Edit3 size={13} /></button>
+                  <button onClick={() => applySubjectChange(k, { archived: true })} className="tap" style={{ padding: '4px 8px' }} title="Archive"><Archive size={13} /></button>
+                </>
+              )}
+              {subTab === 'archived' && (
+                <>
+                  <button onClick={() => applySubjectChange(k, { archived: false })} className="tap" style={{ padding: '4px 10px', fontSize: 11 }}>Unarchive</button>
+                  <button onClick={() => applySubjectChange(k, { deletedAt: todayStr() })} className="tap" style={{ padding: '4px 8px', color: '#B8460E' }} title="Delete"><Trash2 size={13} /></button>
+                </>
+              )}
+              {subTab === 'deleted' && (
+                <>
+                  <button onClick={() => applySubjectChange(k, { deletedAt: null })} className="tap" style={{ padding: '4px 10px', fontSize: 11 }}>Restore</button>
+                  <button onClick={() => fullDelete(k)} className="tap" style={{ padding: '4px 8px', color: '#B8460E' }} title="Delete now"><Trash2 size={13} /></button>
+                </>
+              )}
+            </div>
           </div>
         );
       })}
+      {subTab === 'deleted' && deletedKeys.length > 0 && <p className="muted tiny" style={{ marginTop: 8, lineHeight: 1.5 }}>Deleted subjects auto-remove after 15 days. "Delete now" removes permanently.</p>}
       <button className="tap" onClick={onAddSubject} style={{ width: '100%', marginTop: 10, marginBottom: 16 }}>
         <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Add subject
       </button>
@@ -2344,39 +2502,54 @@ function SettingsModal({ settings, onSave, onClose, onEditSubject, onAddSubject,
 
 function EditSubjectModal({ subjectKey, settings, onSave, onClose }: any) {
   const isNew = !subjectKey;
-  const existing = isNew ? null : settings.subjects[subjectKey];
-  const [draft, setDraft] = useState(existing || { name: '', icon: 'target', accent: '#B8460E', tools: '', target: 30, weeklyDays: 5, deadline: '2026-12-31', archived: false });
+  const existing = isNew ? null : normalizeSubject(settings.subjects[subjectKey]);
+  const [draft, setDraft] = useState<any>(existing || normalizeSubject({ name: '', icon: 'target', accent: '#B8460E', trackingMode: 'time', target: 30, weeklyDays: 5, deadline: null, countTotal: null }));
+  const [goalSel, setGoalSel] = useState<'none' | 'deadline' | 'count'>(subjectGoalKind(draft));
+  const [showDetails, setShowDetails] = useState(!isNew);
+  const set = (patch: any) => setDraft({ ...draft, ...patch });
 
   const handleSave = () => {
+    const clean = { ...draft };
+    if (goalSel === 'deadline') { clean.countTotal = null; if (!clean.deadline) clean.deadline = addMonth(todayStr(), 3); }
+    else if (goalSel === 'count') { clean.deadline = null; clean.countTotal = Math.max(1, parseInt(clean.countTotal) || 10); }
+    else { clean.deadline = null; clean.countTotal = null; }
+    if (clean.trackingMode === 'checkoff') clean.target = 0;
     const key = subjectKey || draft.name.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 20) + '_' + Date.now().toString(36);
-    const next = { ...settings, subjects: { ...settings.subjects, [key]: draft } };
+    const next = { ...settings, subjects: { ...settings.subjects, [key]: clean } };
     if (isNew) next.subjectOrder = [...settings.subjectOrder, key];
     onSave(next);
     onClose();
   };
 
-  const handleDelete = () => {
-    if (!subjectKey) return;
-    const next = { ...settings, subjects: { ...settings.subjects, [subjectKey]: { ...existing, archived: !existing.archived } } };
-    onSave(next);
-    onClose();
-  };
-
-  const ICONS = ['languages', 'music', 'shield', 'book', 'target', 'dumbbell'];
+  const ICONS = ['languages', 'music', 'shield', 'book', 'target', 'dumbbell', 'activity'];
   const COLORS = ['#B8460E', '#4A6741', '#3B5C6B', '#C8932E', '#8E4585', '#1A1A2E'];
+  const goals: { key: typeof goalSel; label: string }[] = [
+    { key: 'none', label: 'No deadline' },
+    { key: 'deadline', label: 'Deadline' },
+    { key: 'count', label: 'Finish after N' },
+  ];
 
   return (
     <ModalShell title={isNew ? 'New subject' : 'Edit subject'} onClose={onClose}>
       <label>Name</label>
-      <input type="text" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. CompTIA Security+" style={{ marginBottom: 12 }} />
-      <label>Tools / source</label>
-      <input type="text" value={draft.tools} onChange={(e) => setDraft({ ...draft, tools: e.target.value })} placeholder="e.g. Jason Dion · Udemy" style={{ marginBottom: 12 }} />
+      <input type="text" value={draft.name} onChange={(e) => set({ name: e.target.value })} placeholder="e.g. CompTIA Security+" style={{ marginBottom: 12 }} />
+
+      <label>How do you track it?</label>
+      <div className="row" style={{ gap: 6, marginBottom: 12 }}>
+        <button className={`tap ${draft.trackingMode === 'time' ? 'active' : ''}`} style={{ flex: 1 }} onClick={() => set({ trackingMode: 'time' })}>
+          <Clock size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Log time
+        </button>
+        <button className={`tap ${draft.trackingMode === 'checkoff' ? 'active' : ''}`} style={{ flex: 1 }} onClick={() => set({ trackingMode: 'checkoff' })}>
+          <Check size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Just mark done
+        </button>
+      </div>
+
       <label>Icon</label>
       <div className="row" style={{ gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
         {ICONS.map(ic => {
           const I = ICON_MAP[ic];
           return (
-            <button key={ic} className={`tap ${draft.icon === ic ? 'active' : ''}`} onClick={() => setDraft({ ...draft, icon: ic })} style={{ padding: 8 }}>
+            <button key={ic} className={`tap ${draft.icon === ic ? 'active' : ''}`} onClick={() => set({ icon: ic })} style={{ padding: 8 }}>
               <I size={16} />
             </button>
           );
@@ -2385,23 +2558,48 @@ function EditSubjectModal({ subjectKey, settings, onSave, onClose }: any) {
       <label>Color</label>
       <div className="row" style={{ gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
         {COLORS.map(c => (
-          <button key={c} onClick={() => setDraft({ ...draft, accent: c })} style={{ width: 32, height: 32, borderRadius: 8, background: c, border: draft.accent === c ? '3px solid #1A1A2E' : '1px solid #D4CCB8', cursor: 'pointer' }} />
+          <button key={c} onClick={() => set({ accent: c })} style={{ width: 32, height: 32, borderRadius: 8, background: c, border: draft.accent === c ? '3px solid #1A1A2E' : '1px solid #D4CCB8', cursor: 'pointer' }} />
         ))}
       </div>
-      <div className="row" style={{ gap: 8, marginBottom: 12 }}>
-        <div style={{ flex: 1 }}><label>Daily (min)</label><input type="number" value={draft.target} onChange={(e) => setDraft({ ...draft, target: parseInt(e.target.value) || 0 })} /></div>
-        <div style={{ flex: 1 }}><label>Days/week</label><input type="number" min="1" max="7" value={draft.weeklyDays} onChange={(e) => setDraft({ ...draft, weeklyDays: parseInt(e.target.value) || 1 })} /></div>
-      </div>
-      <label>Deadline</label>
-      <input type="date" value={draft.deadline} onChange={(e) => setDraft({ ...draft, deadline: e.target.value })} style={{ marginBottom: 14 }} />
-      <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={handleSave} disabled={!draft.name}>
+
+      {!showDetails ? (
+        <button className="tap" style={{ width: '100%', marginBottom: 14 }} onClick={() => setShowDetails(true)}>
+          <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Add details (deadline, description, days/week…)
+        </button>
+      ) : (
+        <div style={{ marginBottom: 6 }}>
+          <label>Description (optional)</label>
+          <input type="text" value={draft.tools} onChange={(e) => set({ tools: e.target.value })} placeholder="e.g. Jason Dion · Udemy" style={{ marginBottom: 12 }} />
+
+          <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+            {draft.trackingMode === 'time' && (
+              <div style={{ flex: 1 }}><label>Daily (min)</label><input type="number" value={draft.target} onChange={(e) => set({ target: parseInt(e.target.value) || 0 })} /></div>
+            )}
+            <div style={{ flex: 1 }}><label>Days/week</label><input type="number" min="1" max="7" value={draft.weeklyDays} onChange={(e) => set({ weeklyDays: Math.min(7, Math.max(1, parseInt(e.target.value) || 1)) })} /></div>
+          </div>
+
+          <label>Finish goal</label>
+          <div className="row" style={{ gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+            {goals.map(g => (
+              <button key={g.key} className={`tap ${goalSel === g.key ? 'active' : ''}`} style={{ flex: 1, fontSize: 12 }} onClick={() => setGoalSel(g.key)}>{g.label}</button>
+            ))}
+          </div>
+          {goalSel === 'deadline' && (
+            <input type="date" value={draft.deadline || addMonth(todayStr(), 3)} onChange={(e) => set({ deadline: e.target.value })} style={{ marginBottom: 8 }} />
+          )}
+          {goalSel === 'count' && (
+            <>
+              <label>Finish after how many sessions/days?</label>
+              <input type="number" min="1" value={draft.countTotal || ''} onChange={(e) => set({ countTotal: parseInt(e.target.value) || 0 })} placeholder="e.g. 20" style={{ marginBottom: 8 }} />
+            </>
+          )}
+          {goalSel === 'none' && <p className="muted tiny" style={{ marginBottom: 8, lineHeight: 1.5 }}>No deadline — just keep doing it. Once you hit your weekly count it hides until next week.</p>}
+        </div>
+      )}
+
+      <button className="btn" style={{ width: '100%', marginTop: 8 }} onClick={handleSave} disabled={!draft.name}>
         <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save subject
       </button>
-      {!isNew && (
-        <button className="btn btn-ghost" style={{ width: '100%' }} onClick={handleDelete}>
-          {existing?.archived ? 'Unarchive' : 'Archive subject'}
-        </button>
-      )}
     </ModalShell>
   );
 }
@@ -2878,12 +3076,24 @@ export default function App() {
   const [journal, setJournal] = useState<any>({});
   const [challengeHistory, setChallengeHistory] = useState<any[]>([]);
   const [busyPresets, setBusyPresets] = useState<string[]>(BUSY_PRESET_DEFAULTS);
+  const [checkins, setCheckins] = useState<any>({});
+  const [activity, setActivity] = useState<any>({});
   const [modal, setModal] = useState<any>(null);
 
   useEffect(() => {
     (async () => {
       const s = await safeGet(K.settings, DEFAULT_SETTINGS);
       const merged = { ...DEFAULT_SETTINGS, ...s, subjects: { ...DEFAULT_SETTINGS.subjects, ...(s.subjects || {}) }, macroTargets: { ...DEFAULT_SETTINGS.macroTargets, ...(s.macroTargets || {}) } };
+      // Normalize subjects to the flexible model and purge soft-deletes older than 15 days.
+      for (const k of Object.keys(merged.subjects)) {
+        const sub = normalizeSubject(merged.subjects[k]);
+        if (sub.deletedAt && diffDays(todayStr(), sub.deletedAt) > 15) {
+          delete merged.subjects[k];
+          merged.subjectOrder = (merged.subjectOrder || []).filter((x: string) => x !== k);
+        } else {
+          merged.subjects[k] = sub;
+        }
+      }
       const t = await safeGet(K.totals, {});
       const b = await safeGet(K.body, { entries: [] });
       const w = await safeGet(K.workout, { split: DEFAULT_WORKOUT_SPLIT, logs: {}, mode: 'sequence', sequencePosition: 1 });
@@ -2896,6 +3106,8 @@ export default function App() {
       const jn = await safeGet(K.journal, {});
       const ch = await safeGet(K.challengeHistory, []);
       const bp = await safeGet(K.busyPresets, BUSY_PRESET_DEFAULTS);
+      const ci = await safeGet(K.checkins, {});
+      const ac = await safeGet(K.activity, {});
       let d = await safeGet(K.daily, null);
       if (!d || d.date !== todayStr()) {
         const plan = p[todayStr()];
@@ -2927,6 +3139,8 @@ export default function App() {
       setJournal(jn);
       setChallengeHistory(ch);
       setBusyPresets(bp);
+      setCheckins(ci);
+      setActivity(ac);
       setLoaded(true);
     })();
   }, []);
@@ -2950,9 +3164,33 @@ export default function App() {
   const saveJournal = async (next: any) => { setJournal(next); await safeSet(K.journal, next); };
   const saveChallengeHistory = async (next: any[]) => { setChallengeHistory(next); await safeSet(K.challengeHistory, next); };
   const saveBusyPresets = async (next: string[]) => { setBusyPresets(next); await safeSet(K.busyPresets, next); };
+  const saveCheckins = async (next: any) => { setCheckins(next); await safeSet(K.checkins, next); };
+  const saveActivity = async (next: any) => { setActivity(next); await safeSet(K.activity, next); };
 
   const undoToast = (label: string, restore: () => void | Promise<void>) => {
     toast(label, { action: { label: 'Undo', onClick: () => { void restore(); } }, duration: 6000 });
+  };
+
+  // Record (or remove) a "done today" check-in for a subject's weekly/count goals.
+  const recordCheckin = async (subject: string, doneToday: boolean) => {
+    const today = todayStr();
+    const list: string[] = checkins[subject] || [];
+    const has = list.includes(today);
+    if (doneToday === has) return;
+    const nextList = doneToday ? [...list, today] : list.filter((d) => d !== today);
+    await saveCheckins({ ...checkins, [subject]: nextList });
+  };
+
+  // Check-off subjects: toggle today's completion.
+  const markDone = async (subject: string) => {
+    const prev = checkins;
+    const today = todayStr();
+    const list: string[] = checkins[subject] || [];
+    const has = list.includes(today);
+    const nextList = has ? list.filter((d) => d !== today) : [...list, today];
+    await saveCheckins({ ...checkins, [subject]: nextList });
+    const name = settings.subjects[subject]?.name || 'task';
+    undoToast(has ? `${name} unmarked` : `${name} done`, () => saveCheckins(prev));
   };
 
   const setSubjectTime = async (subject: string, newMins: number) => {
@@ -2979,6 +3217,7 @@ export default function App() {
         await saveStreaks({ ...streaks, [subject]: { current: newCurrent, longest: Math.max(cur.longest, newCurrent), lastDate: today } });
       }
     }
+    await recordCheckin(subject, newMins >= target && target > 0);
     const name = settings.subjects[subject]?.name || 'time';
     undoToast(`${name} set to ${Math.max(0, newMins)}m`, async () => { await saveDaily(prevDaily); await saveTotals(prevTotals); await saveStreaks(prevStreaks); });
   };
@@ -3016,6 +3255,7 @@ export default function App() {
         await saveStreaks(next);
       }
     }
+    if (newCompleted >= target && target > 0) await recordCheckin(subject, true);
     const name = settings.subjects[subject]?.name || 'time';
     undoToast(`Logged ${minutes}m of ${name}`, async () => { await saveDaily(prevDaily); await saveTotals(prevTotals); await saveStreaks(prevStreaks); });
   };
@@ -3062,6 +3302,19 @@ export default function App() {
     });
   };
 
+  const startFocus = async (subject: string) => {
+    if (daily.focus) return;
+    await saveDaily({ ...daily, focus: { subject, start: Date.now() } });
+  };
+  const stopFocus = async () => {
+    if (!daily?.focus) return;
+    const { subject, start } = daily.focus;
+    const mins = Math.max(1, Math.round((Date.now() - start) / 60000));
+    await logTime(subject, mins);
+    // Functional update reads the latest daily (post-log) so we don't reintroduce focus.
+    setDaily((d: any) => { const nd = { ...d, focus: null }; void safeSet(K.daily, nd); return nd; });
+  };
+
   if (!loaded) {
     return <div style={{ minHeight: '100vh', background: '#F5F0E6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'serif', color: '#6B6457' }}>Loading…</div>;
   }
@@ -3089,7 +3342,7 @@ export default function App() {
 
         {tab === 'today' && (
           <TodayTab
-            settings={settings} daily={daily} totals={totals} streaks={streaks} meals={meals} workout={workout}
+            settings={settings} daily={daily} totals={totals} streaks={streaks} meals={meals} workout={workout} checkins={checkins}
             onWake={(time: string) => saveDaily({ ...daily, wakeLogged: true, actualWake: time })}
             onScheduleStart={(time: string) => saveDaily({ ...daily, scheduleStarted: true, scheduleStartTime: time })}
             onStatus={(status: string, busyUntil: string) => saveDaily({ ...daily, status, busyUntil })}
@@ -3097,6 +3350,9 @@ export default function App() {
             onBusy={() => setModal({ type: 'busy' })}
             onLogMeal={() => setModal({ type: 'logMeal' })}
             onResetMacros={resetMacros}
+            onMarkDone={markDone}
+            onFocusStart={startFocus}
+            onFocusStop={stopFocus}
           />
         )}
         {tab === 'body' && (
