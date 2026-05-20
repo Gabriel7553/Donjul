@@ -104,6 +104,47 @@ function isSunday(dateStr = todayStr()) { return new Date(dateStr + 'T00:00:00')
 function timeToMins(hhmm: string) { const [h, m] = (hhmm || '00:00').split(':').map(Number); return h * 60 + m; }
 function minsToHHMM(mins: number) { const h = Math.floor(mins / 60) % 24; const m = mins % 60; return `${pad(h)}:${pad(m)}`; }
 
+// Sum a day's meal entries into a macro total.
+function mealTotalsFromEntries(entries: any[]): any {
+  return (entries || []).reduce((acc, e) => ({
+    protein: acc.protein + (Number(e.protein) || 0),
+    carbs: acc.carbs + (Number(e.carbs) || 0),
+    fat: acc.fat + (Number(e.fat) || 0),
+    calories: acc.calories + (Number(e.calories) || 0),
+  }), { protein: 0, carbs: 0, fat: 0, calories: 0 });
+}
+
+// Add a meal entry to a date and keep the cached daily total in sync.
+function addMealEntry(meals: any, date: string, entry: any): any {
+  const entries = { ...(meals.entries || {}) };
+  const dayList = [...(entries[date] || []), { id: 'm' + Date.now() + Math.random().toString(36).slice(2, 6), time: nowHHMM(), ...entry }];
+  entries[date] = dayList;
+  return { ...meals, entries, log: { ...meals.log, [date]: mealTotalsFromEntries(dayList) } };
+}
+
+function removeMealEntry(meals: any, date: string, id: string): any {
+  const entries = { ...(meals.entries || {}) };
+  const dayList = (entries[date] || []).filter((e: any) => e.id !== id);
+  entries[date] = dayList;
+  return { ...meals, entries, log: { ...meals.log, [date]: mealTotalsFromEntries(dayList) } };
+}
+
+// One-time migration: turn legacy daily totals into a single editable entry.
+function migrateMeals(meals: any): any {
+  const m = { presets: meals.presets || [], log: meals.log || {}, entries: meals.entries || {} };
+  for (const date of Object.keys(m.log)) {
+    if (!m.entries[date]) {
+      const t = m.log[date];
+      if (t && (t.protein || t.carbs || t.fat || t.calories)) {
+        m.entries[date] = [{ id: 'legacy_' + date, time: '', name: 'Logged earlier', source: '', qty: 1, ...t }];
+      } else {
+        m.entries[date] = [];
+      }
+    }
+  }
+  return m;
+}
+
 // Resize an image client-side so the upload stays small but label text stays legible.
 async function fileToResizedBase64(file: File, maxEdge = 1500, quality = 0.9): Promise<{ image: string; mime: string }> {
   const dataUrl: string = await new Promise((res, rej) => {
@@ -174,6 +215,20 @@ function doneThisWeek(subjectKey: string, checkins: any) {
 }
 function doneTotal(subjectKey: string, checkins: any) {
   return (checkins?.[subjectKey] || []).length;
+}
+
+// Suggest macro targets from latest bodyweight + goal direction (lb-based heuristic;
+// no height/age stored, so we use kcal-per-lb rules of thumb).
+function suggestMacros(latestBody: any, bodyGoals: any) {
+  const wLb = Number(latestBody?.weight);
+  if (!wLb) return null;
+  const dir = bodyGoals?.weight?.direction || 'down';
+  const calPerLb = dir === 'down' ? 12 : dir === 'up' ? 17 : 15;
+  const calories = Math.round((wLb * calPerLb) / 10) * 10;
+  const protein = Math.round(wLb);
+  const fat = Math.round(wLb * 0.4);
+  const carbs = Math.max(0, Math.round((calories - protein * 4 - fat * 9) / 4));
+  return { protein, carbs, fat, calories };
 }
 
 function projectedDate(subjectKey: string, settings: any, totals: any, daily: any) {
@@ -500,7 +555,7 @@ function BottomNav({ tab, setTab }: { tab: string; setTab: (t: string) => void }
 // ════════════════════════════════════════════════════════════════════════════════
 // TODAY TAB
 // ════════════════════════════════════════════════════════════════════════════════
-function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, onWake, onStatus, onLogTime, onBusy, onLogMeal, onScheduleStart, onResetMacros, onMarkDone, onFocusStart, onFocusStop }: any) {
+function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, onWake, onStatus, onLogTime, onBusy, onLogMeal, onScheduleStart, onResetMacros, onMarkDone, onFocusStart, onFocusStop, onCoach }: any) {
   const now = useCurrentTime();
   const nowMins = timeToMins(now);
   const subjectKeys = settings.subjectOrder.filter((k: string) => settings.subjects[k] && !settings.subjects[k].archived && !settings.subjects[k].deletedAt);
@@ -545,7 +600,7 @@ function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, 
           <Schedule settings={settings} daily={daily} onLog={onLogTime} subjectKeys={subjectKeys} nowMins={nowMins} checkins={checkins} />
           <Progress settings={settings} totals={totals} daily={daily} streaks={streaks} subjectKeys={subjectKeys} onLogExtra={onLogTime} checkins={checkins} onMarkDone={onMarkDone} onFocusStart={onFocusStart} focus={daily.focus} />
           <ChallengeCard settings={settings} workout={workout} />
-          <MacrosCard targets={settings.macroTargets} totals={todayMacros} onLog={onLogMeal} onReset={onResetMacros} />
+          <MacrosCard targets={settings.macroTargets} totals={todayMacros} onLog={onLogMeal} onReset={onResetMacros} onCoach={onCoach} />
           <WeeklySummary settings={settings} totals={totals} daily={daily} meals={meals} workout={workout} />
         </>
       )}
@@ -914,7 +969,7 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, c
   );
 }
 
-function MacrosCard({ targets, totals, onLog, onReset }: any) {
+function MacrosCard({ targets, totals, onLog, onReset, onCoach }: any) {
   const [confirmReset, setConfirmReset] = useState(false);
   const items = [
     { key: 'protein', label: 'Protein', unit: 'g', primary: true, color: '#B8460E' },
@@ -963,8 +1018,83 @@ function MacrosCard({ targets, totals, onLog, onReset }: any) {
           </div>
         );
       })}
-      <div className="muted tiny" style={{ lineHeight: 1.4, marginTop: 4 }}>★ Protein is your priority. Hit that first. Rotate arrow to reset.</div>
+      <button className="tap" onClick={onCoach} style={{ width: '100%', marginTop: 8, color: '#8E4585', borderColor: '#8E4585' }}>
+        <Zap size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Ask the nutrition coach
+      </button>
+      <div className="muted tiny" style={{ lineHeight: 1.4, marginTop: 8 }}>★ Protein is your priority. Hit that first. Rotate arrow to reset.</div>
     </div>
+  );
+}
+
+function NutritionCoachModal({ settings, meals, body, onLogItem, onClose }: any) {
+  const [state, setState] = useState<'loading' | 'done' | 'error'>('loading');
+  const [err, setErr] = useState('');
+  const [data, setData] = useState<any>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const today = meals.log?.[todayStr()] || { protein: 0, carbs: 0, fat: 0, calories: 0 };
+        const targets = settings.macroTargets;
+        const remaining = { protein: Math.max(0, targets.protein - today.protein), carbs: Math.max(0, targets.carbs - today.carbs), fat: Math.max(0, targets.fat - today.fat), calories: Math.max(0, targets.calories - today.calories) };
+        // 7-day averages from the meal log
+        const days: string[] = [];
+        for (let i = 6; i >= 0; i--) { const d = new Date(todayStr() + 'T00:00:00'); d.setDate(d.getDate() - i); days.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`); }
+        const logged = days.map((d) => meals.log?.[d]).filter((x: any) => x && (x.protein || x.calories));
+        const avg = (k: string) => logged.length ? Math.round(logged.reduce((a: number, b: any) => a + (b[k] || 0), 0) / logged.length) : 0;
+        const weekAvg = { protein: avg('protein'), carbs: avg('carbs'), fat: avg('fat'), calories: avg('calories') };
+        const latest = body.entries?.[body.entries.length - 1] || null;
+        const resp = await fetch('/api/nutrition-coach', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ today, targets, remaining, weekAvg, bodyGoal: settings.bodyGoals, latestBody: latest }) });
+        if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.error || 'Coach unavailable.'); }
+        setData(await resp.json()); setState('done');
+      } catch (e: any) { setErr(e?.message || 'Coach unavailable.'); setState('error'); }
+    })();
+  }, []);
+
+  const Suggestion = ({ item, label }: any) => (
+    <div className="card" style={{ padding: 12, marginBottom: 8 }}>
+      <div className="mono tiny muted" style={{ textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 2 }}>{label}</div>
+      <div className="small" style={{ fontWeight: 600 }}>{item.name}</div>
+      <div className="mono tiny muted" style={{ margin: '4px 0' }}>{item.protein}p · {item.carbs}c · {item.fat}f · {item.calories}cal</div>
+      {item.why && <div className="muted tiny" style={{ lineHeight: 1.4, marginBottom: 8 }}>{item.why}</div>}
+      <button className="tap" style={{ width: '100%' }} onClick={() => onLogItem({ name: item.name, source: 'Coach', protein: item.protein, carbs: item.carbs, fat: item.fat, calories: item.calories })}>
+        <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Log this
+      </button>
+    </div>
+  );
+
+  return (
+    <ModalShell title="Nutrition coach" onClose={onClose} icon={<Zap size={18} color="#8E4585" />}>
+      {state === 'loading' && <p className="muted small">Analyzing your day…</p>}
+      {state === 'error' && <p className="small" style={{ color: '#B8460E' }}>{err}</p>}
+      {state === 'done' && data && (
+        <>
+          {data.analysis?.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <div className="h3" style={{ marginBottom: 6 }}>Where you're at</div>
+              {data.analysis.map((a: string, i: number) => <div key={i} className="small" style={{ marginBottom: 4, lineHeight: 1.45 }}>• {a}</div>)}
+            </div>
+          )}
+          <div className="row" style={{ gap: 10, marginBottom: 12 }}>
+            {data.start?.length > 0 && (
+              <div style={{ flex: 1 }}>
+                <div className="mono tiny" style={{ color: '#4A6741', fontWeight: 600, marginBottom: 4 }}>EAT MORE</div>
+                {data.start.map((s: string, i: number) => <div key={i} className="tiny" style={{ marginBottom: 2 }}>+ {s}</div>)}
+              </div>
+            )}
+            {data.stop?.length > 0 && (
+              <div style={{ flex: 1 }}>
+                <div className="mono tiny" style={{ color: '#B8460E', fontWeight: 600, marginBottom: 4 }}>CUT BACK</div>
+                {data.stop.map((s: string, i: number) => <div key={i} className="tiny" style={{ marginBottom: 2 }}>− {s}</div>)}
+              </div>
+            )}
+          </div>
+          <div className="h3" style={{ marginBottom: 8 }}>To finish your day</div>
+          {data.snack?.name && <Suggestion item={data.snack} label="Snack" />}
+          {data.meal?.name && <Suggestion item={data.meal} label="Meal" />}
+        </>
+      )}
+    </ModalShell>
   );
 }
 
@@ -1759,13 +1889,14 @@ function ModalShell({ title, onClose, children, icon = null, color = '#1A1A2E' }
 
 function DayDetailModal({ date, settings, totals, workout, meals, body, onClose }: any) {
   const dayMeals = meals.log?.[date];
+  const dayEntries = meals.entries?.[date] || [];
   const dayWorkout = workout.logs?.[date];
   const dayMeasurement = body.entries?.find((e: any) => e.date === date);
 
   return (
     <ModalShell title={fmtDate(date)} onClose={onClose} icon={<History size={18} color="#6B6457" />}>
       <div className="h2" style={{ marginBottom: 8 }}>Nutrition</div>
-      {dayMeals ? (
+      {dayMeals && (dayMeals.protein || dayMeals.calories || dayMeals.carbs || dayMeals.fat) ? (
         <div className="card" style={{ padding: 12, marginBottom: 14 }}>
           <div className="row" style={{ gap: 16, flexWrap: 'wrap' }}>
             <div><div className="mono tiny muted">PROTEIN</div><div className="h3" style={{ color: '#B8460E' }}>{Math.round(dayMeals.protein || 0)}g</div></div>
@@ -1773,6 +1904,16 @@ function DayDetailModal({ date, settings, totals, workout, meals, body, onClose 
             <div><div className="mono tiny muted">CARBS</div><div className="h3">{Math.round(dayMeals.carbs || 0)}g</div></div>
             <div><div className="mono tiny muted">FAT</div><div className="h3">{Math.round(dayMeals.fat || 0)}g</div></div>
           </div>
+          {dayEntries.length > 0 && (
+            <div style={{ marginTop: 10, borderTop: '1px solid #E4DCC8', paddingTop: 8 }}>
+              {dayEntries.map((e: any) => (
+                <div key={e.id} className="between" style={{ padding: '3px 0' }}>
+                  <span className="small">{e.name}</span>
+                  <span className="mono tiny muted">{e.protein}p · {e.carbs}c · {e.fat}f · {e.calories}cal</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         <p className="muted small" style={{ marginBottom: 14 }}>No meals logged this day.</p>
@@ -2157,57 +2298,93 @@ function EditSplitModal({ workout, onSave, onClose }: any) {
   );
 }
 
+function QtyStepper({ qty, setQty }: any) {
+  return (
+    <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 10 }}>
+      <span className="small" style={{ fontWeight: 600 }}>Servings</span>
+      <button className="tap" style={{ padding: '4px 12px' }} onClick={() => setQty(Math.max(0.25, Math.round((qty - 0.5) * 4) / 4))}>−</button>
+      <input type="number" step="0.25" min="0.25" value={qty} onChange={(e) => setQty(Math.max(0.25, parseFloat(e.target.value) || 0.25))} style={{ width: 70, textAlign: 'center' }} />
+      <button className="tap" style={{ padding: '4px 12px' }} onClick={() => setQty(Math.round((qty + 0.5) * 4) / 4)}>+</button>
+    </div>
+  );
+}
+
 function LogMealModal({ meals, settings, onSave, onClose }: any) {
   const [mode, setMode] = useState('preset');
   const [newPreset, setNewPreset] = useState({ name: '', protein: '', carbs: '', fat: '', calories: '', source: '' });
-  const [manual, setManual] = useState({ protein: '', carbs: '', fat: '', calories: '' });
+  const [manual, setManual] = useState({ name: '', protein: '', carbs: '', fat: '', calories: '' });
+  const [qty, setQty] = useState(1);
   const [scanState, setScanState] = useState<'idle'|'scanning'|'done'|'error'>('idle');
-  const [scanResult, setScanResult] = useState<any>(null);
   const [scanError, setScanError] = useState('');
+  const [review, setReview] = useState<any>(null); // parsed item awaiting log/save (scan/type/barcode)
+  const [typeText, setTypeText] = useState('');
+  const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const barcodeRef = useRef<HTMLInputElement>(null);
   const today = todayStr();
-  const todayMacros = meals.log[today] || { protein: 0, carbs: 0, fat: 0, calories: 0 };
+  const todayEntries = meals.entries?.[today] || [];
+  const scaled = (m: any, q: number) => ({ protein: Math.round((m.protein || 0) * q), carbs: Math.round((m.carbs || 0) * q), fat: Math.round((m.fat || 0) * q), calories: Math.round((m.calories || 0) * q) });
+
+  const logItem = async (item: any, q = 1) => {
+    const s = scaled(item, q);
+    const name = q !== 1 ? `${item.name} ×${q}` : item.name;
+    await onSave(addMealEntry(meals, today, { name, source: item.source || '', qty: q, ...s }));
+    onClose();
+  };
+  const removeEntry = async (id: string) => { await onSave(removeMealEntry(meals, today, id)); };
 
   const scanImage = async (file: File) => {
-    setScanState('scanning');
-    setScanResult(null);
-    setScanError('');
+    setScanState('scanning'); setReview(null); setScanError('');
     try {
       const { image, mime } = await fileToResizedBase64(file);
-      const resp = await fetch('/api/scan-food', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image, mime }),
-      });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error || 'Could not read macros. Try a clearer photo or enter manually.');
-      }
+      const resp = await fetch('/api/scan-food', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ image, mime }) });
+      if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err.error || 'Could not read macros.'); }
       const data = await resp.json();
-      setScanResult(data);
-      setScanState('done');
-      setNewPreset({ name: data.name || '', protein: String(data.protein || ''), carbs: String(data.carbs || ''), fat: String(data.fat || ''), calories: String(data.calories || ''), source: data.serving ? `AI scan · ${data.serving}` : (data.source || 'AI scan') });
-      setMode('add');
-    } catch (e: any) {
-      setScanState('error');
-      setScanError(e?.message || 'Could not read macros. Try a clearer photo or enter manually.');
-    }
+      setReview({ ...data, source: data.serving ? `Scan · ${data.serving}` : 'AI scan' });
+      setQty(1); setScanState('done');
+    } catch (e: any) { setScanState('error'); setScanError(e?.message || 'Could not read macros.'); }
   };
 
-  const logPreset = async (p: any) => {
-    const next = { protein: todayMacros.protein + p.protein, carbs: todayMacros.carbs + p.carbs, fat: todayMacros.fat + p.fat, calories: todayMacros.calories + p.calories };
-    await onSave({ ...meals, log: { ...meals.log, [today]: next } });
-    onClose();
+  const scanBarcode = async (file: File) => {
+    setScanState('scanning'); setReview(null); setScanError('');
+    try {
+      if (!('BarcodeDetector' in window)) throw new Error('Barcode scanning needs a newer phone browser. Use photo scan instead.');
+      const bitmap = await createImageBitmap(file);
+      // @ts-ignore - BarcodeDetector is not yet in TS DOM lib
+      const detector = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] });
+      const codes = await detector.detect(bitmap);
+      if (!codes.length) throw new Error('No barcode found. Try again, square on the code.');
+      const code = codes[0].rawValue;
+      const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,nutriments,serving_size`);
+      const j = await r.json();
+      if (j.status !== 1 || !j.product) throw new Error('Product not found in the food database.');
+      const n = j.product.nutriments || {};
+      const perServing = n['energy-kcal_serving'] != null;
+      const pick = (base: string) => Number(perServing ? n[`${base}_serving`] : n[`${base}_100g`]) || 0;
+      setReview({
+        name: j.product.product_name || 'Scanned product',
+        protein: pick('proteins'), carbs: pick('carbohydrates'), fat: pick('fat'),
+        calories: Number(perServing ? n['energy-kcal_serving'] : n['energy-kcal_100g']) || 0,
+        source: perServing ? `Barcode · ${j.product.serving_size || 'per serving'}` : 'Barcode · per 100g',
+      });
+      setQty(1); setScanState('done');
+    } catch (e: any) { setScanState('error'); setScanError(e?.message || 'Barcode scan failed.'); }
   };
+
+  const parseTyped = async () => {
+    if (!typeText.trim()) return;
+    setBusy(true); setScanError(''); setReview(null);
+    try {
+      const resp = await fetch('/api/parse-food', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: typeText }) });
+      if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err.error || 'Could not read that.'); }
+      const data = await resp.json();
+      setReview(data); setQty(1);
+    } catch (e: any) { setScanError(e?.message || 'Could not read that.'); }
+    finally { setBusy(false); }
+  };
+
   const logManual = async () => {
-    const next = {
-      protein: todayMacros.protein + (parseFloat(manual.protein) || 0),
-      carbs: todayMacros.carbs + (parseFloat(manual.carbs) || 0),
-      fat: todayMacros.fat + (parseFloat(manual.fat) || 0),
-      calories: todayMacros.calories + (parseFloat(manual.calories) || 0),
-    };
-    await onSave({ ...meals, log: { ...meals.log, [today]: next } });
-    onClose();
+    await logItem({ name: manual.name || 'Manual entry', source: 'Manual', protein: parseFloat(manual.protein) || 0, carbs: parseFloat(manual.carbs) || 0, fat: parseFloat(manual.fat) || 0, calories: parseFloat(manual.calories) || 0 }, qty);
   };
   const addPreset = async () => {
     const p = { id: 'p' + Date.now(), name: newPreset.name, protein: parseFloat(newPreset.protein) || 0, carbs: parseFloat(newPreset.carbs) || 0, fat: parseFloat(newPreset.fat) || 0, calories: parseFloat(newPreset.calories) || 0, source: newPreset.source };
@@ -2215,56 +2392,86 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
     setMode('preset');
     setNewPreset({ name: '', protein: '', carbs: '', fat: '', calories: '', source: '' });
   };
-  const removePreset = async (id: string) => {
-    await onSave({ ...meals, presets: meals.presets.filter((p: any) => p.id !== id) });
-  };
+  const removePreset = async (id: string) => { await onSave({ ...meals, presets: meals.presets.filter((p: any) => p.id !== id) }); };
+
+  const ReviewPanel = review && (
+    <div className="card" style={{ padding: 14, marginBottom: 12, background: '#F0F5ED', border: '1px solid #C8D9C0' }}>
+      <div className="small" style={{ fontWeight: 600, marginBottom: 2 }}>{review.name}</div>
+      {review.source && <div className="muted tiny" style={{ marginBottom: 8 }}>{review.source}</div>}
+      <QtyStepper qty={qty} setQty={setQty} />
+      <div className="mono tiny muted" style={{ marginBottom: 10 }}>
+        {(() => { const s = scaled(review, qty); return `${s.protein}p · ${s.carbs}c · ${s.fat}f · ${s.calories}cal`; })()}
+      </div>
+      <button className="btn" style={{ width: '100%', marginBottom: 6 }} onClick={() => logItem(review, qty)}>
+        <Plus size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Log to today
+      </button>
+      <button className="tap" style={{ width: '100%' }} onClick={async () => { await onSave({ ...meals, presets: [...meals.presets, { id: 'p' + Date.now(), name: review.name, protein: review.protein || 0, carbs: review.carbs || 0, fat: review.fat || 0, calories: review.calories || 0, source: review.source || '' }] }); setReview(null); setMode('preset'); }}>
+        Save as preset
+      </button>
+    </div>
+  );
 
   return (
     <ModalShell title="Log meal" onClose={onClose} icon={<Apple size={18} color="#4A6741" />}>
       <div className="row" style={{ gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
         <button className={`tap ${mode === 'preset' ? 'active' : ''}`} onClick={() => setMode('preset')}>Presets</button>
-        <button className={`tap ${mode === 'manual' ? 'active' : ''}`} onClick={() => setMode('manual')}>Manual</button>
-        <button className={`tap ${mode === 'add' ? 'active' : ''}`} onClick={() => setMode('add')}>+ Save new</button>
-        <button className={`tap ${mode === 'scan' ? 'active' : ''}`} style={{ color: '#3B5C6B', borderColor: '#3B5C6B' }} onClick={() => setMode('scan')}>
+        <button className={`tap ${mode === 'type' ? 'active' : ''}`} onClick={() => { setMode('type'); setReview(null); }}>Type</button>
+        <button className={`tap ${mode === 'scan' ? 'active' : ''}`} style={{ color: '#3B5C6B', borderColor: '#3B5C6B' }} onClick={() => { setMode('scan'); setReview(null); setScanState('idle'); }}>
           <Camera size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Scan
         </button>
+        <button className={`tap ${mode === 'manual' ? 'active' : ''}`} onClick={() => setMode('manual')}>Manual</button>
+        <button className={`tap ${mode === 'add' ? 'active' : ''}`} onClick={() => setMode('add')}>+ Save</button>
       </div>
+
+      {mode === 'type' && (
+        <>
+          <label>Describe what you ate</label>
+          <textarea value={typeText} onChange={(e) => setTypeText(e.target.value)} placeholder="e.g. 2 scrambled eggs, a slice of buttered toast, and a banana" style={{ height: 70, marginBottom: 10, width: '100%', resize: 'vertical' }} />
+          {scanError && <p className="small" style={{ color: '#B8460E', marginBottom: 8 }}>{scanError}</p>}
+          {ReviewPanel}
+          <button className="btn" style={{ width: '100%' }} onClick={parseTyped} disabled={busy || !typeText.trim()}>
+            {busy ? 'Estimating…' : <><Zap size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Estimate with AI</>}
+          </button>
+        </>
+      )}
 
       {mode === 'scan' && (
         <>
           <div className="card" style={{ padding: 14, marginBottom: 12, background: '#EEF2F8', border: '1px solid #C8D4E4', textAlign: 'center' }}>
             <Camera size={28} color="#3B5C6B" style={{ marginBottom: 8 }} />
-            <p className="muted small" style={{ lineHeight: 1.5, marginBottom: 12 }}>
-              Take a photo of a nutrition label, cookbook page, or meal — AI will read the macros for you.
-            </p>
-            {scanState === 'scanning' && <p className="mono small" style={{ color: '#3B5C6B' }}>Reading image…</p>}
+            <p className="muted small" style={{ lineHeight: 1.5, marginBottom: 12 }}>Photo a nutrition label, cookbook page, or meal — or scan a product barcode.</p>
+            {scanState === 'scanning' && <p className="mono small" style={{ color: '#3B5C6B' }}>Reading…</p>}
             {scanState === 'error' && <p className="small" style={{ color: '#B8460E', marginBottom: 8 }}>{scanError}</p>}
             {scanState !== 'scanning' && (
               <>
                 <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) scanImage(f); }} />
+                <input ref={barcodeRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files?.[0]; if (f) scanBarcode(f); }} />
                 <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={() => fileRef.current?.click()}>
-                  <Camera size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Take / choose photo
+                  <Camera size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Photo (label / food)
+                </button>
+                <button className="tap" style={{ width: '100%' }} onClick={() => barcodeRef.current?.click()}>
+                  Scan barcode
                 </button>
               </>
             )}
           </div>
-          <p className="muted tiny" style={{ lineHeight: 1.5 }}>After scanning, review the values before saving. AI reads labels well but may estimate portions.</p>
+          {ReviewPanel}
+          <p className="muted tiny" style={{ lineHeight: 1.5 }}>Review the values and set servings before logging. AI reads labels well but may estimate portions.</p>
         </>
       )}
 
       {mode === 'preset' && (
         <>
-          <div className="muted tiny" style={{ marginBottom: 10 }}>Tap a meal to log it.</div>
-          {meals.presets.length === 0 && <p className="muted small" style={{ marginBottom: 10 }}>No presets yet — tap "+ New preset" to add some.</p>}
+          <div className="muted tiny" style={{ marginBottom: 10 }}>Set servings, then tap a meal to log it.</div>
+          <QtyStepper qty={qty} setQty={setQty} />
+          {meals.presets.length === 0 && <p className="muted small" style={{ marginBottom: 10 }}>No presets yet — tap "+ Save" to add some.</p>}
           {meals.presets.map((p: any) => (
-            <div key={p.id} className="card" style={{ padding: 12, marginBottom: 8, cursor: 'pointer' }} onClick={() => logPreset(p)}>
+            <div key={p.id} className="card" style={{ padding: 12, marginBottom: 8, cursor: 'pointer' }} onClick={() => logItem(p, qty)}>
               <div className="between">
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="small" style={{ fontWeight: 600 }}>{p.name}</div>
                   {p.source && <div className="muted tiny">{p.source}</div>}
-                  <div className="mono tiny muted" style={{ marginTop: 4 }}>
-                    {p.protein}p · {p.carbs}c · {p.fat}f · {p.calories}cal
-                  </div>
+                  <div className="mono tiny muted" style={{ marginTop: 4 }}>{p.protein}p · {p.carbs}c · {p.fat}f · {p.calories}cal{qty !== 1 ? ` (×${qty})` : ''}</div>
                 </div>
                 <button onClick={(e) => { e.stopPropagation(); removePreset(p.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 4 }}>
                   <Trash2 size={14} />
@@ -2277,14 +2484,16 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
 
       {mode === 'manual' && (
         <>
-          <label>Protein (g)</label>
-          <input type="number" value={manual.protein} onChange={(e) => setManual({ ...manual, protein: e.target.value })} style={{ marginBottom: 10 }} />
-          <label>Carbs (g)</label>
-          <input type="number" value={manual.carbs} onChange={(e) => setManual({ ...manual, carbs: e.target.value })} style={{ marginBottom: 10 }} />
-          <label>Fat (g)</label>
-          <input type="number" value={manual.fat} onChange={(e) => setManual({ ...manual, fat: e.target.value })} style={{ marginBottom: 10 }} />
-          <label>Calories</label>
-          <input type="number" value={manual.calories} onChange={(e) => setManual({ ...manual, calories: e.target.value })} style={{ marginBottom: 14 }} />
+          <label>Name (optional)</label>
+          <input type="text" value={manual.name} onChange={(e) => setManual({ ...manual, name: e.target.value })} placeholder="e.g. Lunch" style={{ marginBottom: 10 }} />
+          <div className="row" style={{ gap: 8 }}>
+            <div style={{ flex: 1 }}><label>Protein (g)</label><input type="number" value={manual.protein} onChange={(e) => setManual({ ...manual, protein: e.target.value })} /></div>
+            <div style={{ flex: 1 }}><label>Carbs (g)</label><input type="number" value={manual.carbs} onChange={(e) => setManual({ ...manual, carbs: e.target.value })} /></div>
+          </div>
+          <div className="row" style={{ gap: 8, marginTop: 10, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}><label>Fat (g)</label><input type="number" value={manual.fat} onChange={(e) => setManual({ ...manual, fat: e.target.value })} /></div>
+            <div style={{ flex: 1 }}><label>Calories</label><input type="number" value={manual.calories} onChange={(e) => setManual({ ...manual, calories: e.target.value })} /></div>
+          </div>
           <button className="btn" style={{ width: '100%' }} onClick={logManual}>
             <Plus size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Add to today
           </button>
@@ -2309,6 +2518,21 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
             <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save preset
           </button>
         </>
+      )}
+
+      {todayEntries.length > 0 && (
+        <div style={{ marginTop: 16, borderTop: '1px solid #E4DCC8', paddingTop: 12 }}>
+          <div className="h3" style={{ marginBottom: 8 }}>Today's meals</div>
+          {todayEntries.map((e: any) => (
+            <div key={e.id} className="between" style={{ padding: '6px 0' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="small">{e.name}</div>
+                <div className="mono tiny muted">{e.protein}p · {e.carbs}c · {e.fat}f · {e.calories}cal</div>
+              </div>
+              <button onClick={() => removeEntry(e.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 4 }}><Trash2 size={13} /></button>
+            </div>
+          ))}
+        </div>
       )}
     </ModalShell>
   );
@@ -2372,9 +2596,11 @@ function PlanDayModal({ date, plans, onSave, onClose }: any) {
   );
 }
 
-function SettingsModal({ settings, onSave, onClose, onEditSubject, onAddSubject, onChallenge, onExportImport, onResetDay }: any) {
+function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSubject, onChallenge, onExportImport, onResetDay }: any) {
   const [draft, setDraft] = useState(settings);
   const [subTab, setSubTab] = useState<'active' | 'archived' | 'deleted'>('active');
+  const latestBody = body?.entries?.[body.entries.length - 1];
+  const suggested = suggestMacros(latestBody, draft.bodyGoals);
   const update = (patch: any) => setDraft({ ...draft, ...patch });
 
   // Subject actions persist immediately (and preserve any in-progress schedule/macro edits).
@@ -2472,10 +2698,17 @@ function SettingsModal({ settings, onSave, onClose, onEditSubject, onAddSubject,
         <div style={{ flex: 1 }}><label>Protein (g)</label><input type="number" value={draft.macroTargets.protein} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, protein: parseInt(e.target.value) || 0 } })} /></div>
         <div style={{ flex: 1 }}><label>Calories</label><input type="number" value={draft.macroTargets.calories} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, calories: parseInt(e.target.value) || 0 } })} /></div>
       </div>
-      <div className="row" style={{ gap: 8, marginBottom: 16 }}>
+      <div className="row" style={{ gap: 8, marginBottom: 10 }}>
         <div style={{ flex: 1 }}><label>Carbs (g)</label><input type="number" value={draft.macroTargets.carbs} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, carbs: parseInt(e.target.value) || 0 } })} /></div>
         <div style={{ flex: 1 }}><label>Fat (g)</label><input type="number" value={draft.macroTargets.fat} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, fat: parseInt(e.target.value) || 0 } })} /></div>
       </div>
+      {suggested ? (
+        <button className="tap" style={{ width: '100%', marginBottom: 16, fontSize: 12 }} onClick={() => update({ macroTargets: suggested })}>
+          <Zap size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Auto from body + goal ({suggested.protein}p · {suggested.carbs}c · {suggested.fat}f · {suggested.calories}cal)
+        </button>
+      ) : (
+        <p className="muted tiny" style={{ marginBottom: 16, lineHeight: 1.4 }}>Add a body weight entry to auto-calculate macro targets from your goal.</p>
+      )}
 
       <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={() => { onSave(draft); onClose(); }}>
         <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save settings
@@ -3099,7 +3332,7 @@ export default function App() {
       const w = await safeGet(K.workout, { split: DEFAULT_WORKOUT_SPLIT, logs: {}, mode: 'sequence', sequencePosition: 1 });
       if (!w.mode) w.mode = 'sequence';
       if (w.sequencePosition == null) w.sequencePosition = 1;
-      const m = await safeGet(K.meals, { presets: SAMPLE_PRESETS, log: {} });
+      const m = migrateMeals(await safeGet(K.meals, { presets: SAMPLE_PRESETS, log: {}, entries: {} }));
       const p = await safeGet(K.plans, {});
       const st = await safeGet(K.streaks, {});
       const wa = await safeGet(K.weeklyReview, { lastAck: null });
@@ -3224,7 +3457,8 @@ export default function App() {
 
   const resetMacros = async () => {
     const prevMeals = meals;
-    const next = { ...meals, log: { ...meals.log, [todayStr()]: { protein: 0, carbs: 0, fat: 0, calories: 0 } } };
+    const today = todayStr();
+    const next = { ...meals, entries: { ...(meals.entries || {}), [today]: [] }, log: { ...meals.log, [today]: { protein: 0, carbs: 0, fat: 0, calories: 0 } } };
     await saveMeals(next);
     undoToast('Macros reset', () => saveMeals(prevMeals));
   };
@@ -3353,6 +3587,7 @@ export default function App() {
             onMarkDone={markDone}
             onFocusStart={startFocus}
             onFocusStop={stopFocus}
+            onCoach={() => setModal({ type: 'nutritionCoach' })}
           />
         )}
         {tab === 'body' && (
@@ -3389,7 +3624,7 @@ export default function App() {
 
       <BottomNav tab={tab} setTab={setTab} />
 
-      {modal?.type === 'settings' && <SettingsModal settings={settings} onSave={saveSettings} onClose={() => setModal(null)} onEditSubject={(k: string) => setModal({ type: 'editSubject', key: k })} onAddSubject={() => setModal({ type: 'editSubject', key: null })} onChallenge={() => setModal({ type: 'challenge' })} onExportImport={() => setModal({ type: 'exportImport' })} onResetDay={() => setModal({ type: 'resetDay' })} />}
+      {modal?.type === 'settings' && <SettingsModal settings={settings} body={body} onSave={saveSettings} onClose={() => setModal(null)} onEditSubject={(k: string) => setModal({ type: 'editSubject', key: k })} onAddSubject={() => setModal({ type: 'editSubject', key: null })} onChallenge={() => setModal({ type: 'challenge' })} onExportImport={() => setModal({ type: 'exportImport' })} onResetDay={() => setModal({ type: 'resetDay' })} />}
       {modal?.type === 'resetDay' && <ResetDayModal onReset={resetDay} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'editSubject' && <EditSubjectModal subjectKey={modal.key} settings={settings} onSave={saveSettings} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'logTime' && <LogTimeModal subject={modal.subject} settings={settings} daily={daily} editMode={modal.editMode} onLog={(m: number) => { logTime(modal.subject, m); setModal(null); }} onSet={(m: number) => { setSubjectTime(modal.subject, m); setModal(null); }} onClose={() => setModal(null)} />}
@@ -3400,6 +3635,7 @@ export default function App() {
       {modal?.type === 'editSplit' && <EditSplitModal workout={workout} onSave={saveWorkout} onClose={() => setModal(null)} />}
       {modal?.type === 'challenge' && <ChallengeModal settings={settings} challengeHistory={challengeHistory} onSave={saveSettings} onSaveHistory={saveChallengeHistory} onClose={() => setModal(null)} />}
       {modal?.type === 'logMeal' && <LogMealModal meals={meals} settings={settings} onSave={saveMeals} onClose={() => setModal(null)} />}
+      {modal?.type === 'nutritionCoach' && <NutritionCoachModal settings={settings} meals={meals} body={body} onLogItem={async (item: any) => { await saveMeals(addMealEntry(meals, todayStr(), { qty: 1, ...item })); toast(`Logged ${item.name}`); }} onClose={() => setModal(null)} />}
       {modal?.type === 'planDay' && <PlanDayModal date={modal.date} plans={plans} onSave={savePlans} onClose={() => setModal(null)} />}
       {modal?.type === 'dayDetail' && <DayDetailModal date={modal.date} settings={settings} totals={totals} workout={workout} meals={meals} body={body} onClose={() => setModal(null)} />}
       {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, journal, challengeHistory, busyPresets, weeklyAck }} onImport={async (d: any) => {

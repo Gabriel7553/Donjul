@@ -1,26 +1,8 @@
 import { Router } from "express";
-import OpenAI from "openai";
 import { logger } from "../lib/logger";
+import { getOpenAI, hasOpenAI, extractJson } from "../lib/openai";
 
 const router = Router();
-
-const OPENAI_BASE_URL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-const OPENAI_API_KEY = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-
-if (!OPENAI_API_KEY) {
-  logger.warn(
-    "AI_INTEGRATIONS_OPENAI_API_KEY is not set — /api/scan-food will fail until the OpenAI integration is configured.",
-  );
-}
-
-// Construct lazily so a missing key returns a clean 503 instead of crashing the server at startup.
-let openaiClient: OpenAI | null = null;
-function getOpenAI(): OpenAI {
-  if (!openaiClient) {
-    openaiClient = new OpenAI({ baseURL: OPENAI_BASE_URL, apiKey: OPENAI_API_KEY });
-  }
-  return openaiClient;
-}
 
 const PROMPT = `You are a nutrition label and food reader. Look at this image — it may be a packaged nutrition label, a recipe/cookbook page, or a plate of food.
 
@@ -41,29 +23,12 @@ Respond with ONLY a JSON object (no markdown, no prose), exactly these keys:
 }
 Use your best estimate for any value you cannot read exactly; never leave a key out.`;
 
-function extractJson(text: string): any | null {
-  // Try direct parse first, then the first balanced {...} block.
-  try {
-    return JSON.parse(text);
-  } catch {
-    /* fall through */
-  }
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return null;
-  try {
-    return JSON.parse(text.slice(start, end + 1));
-  } catch {
-    return null;
-  }
-}
-
 router.post("/scan-food", async (req, res) => {
   const { image, mime } = req.body as { image?: string; mime?: string };
   if (!image) {
     return res.status(400).json({ error: "No image provided." });
   }
-  if (!OPENAI_API_KEY) {
+  if (!hasOpenAI) {
     return res.status(503).json({
       error: "Image scanning isn't configured on the server yet (missing OpenAI key).",
     });
