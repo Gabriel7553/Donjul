@@ -10,6 +10,7 @@ import { Toaster, toast } from 'sonner';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import confetti from 'canvas-confetti';
 import { motion } from 'framer-motion';
+import { pushKey as syncPushKey } from './sync';
 
 function haptic(ms = 12) { try { (navigator as any).vibrate?.(ms); } catch {} }
 function celebrate() {
@@ -54,6 +55,7 @@ async function safeGet(key: string, fallback: any): Promise<any> {
 async function safeSet(key: string, value: any): Promise<void> {
   try {
     localStorage.setItem(key, JSON.stringify(value));
+    syncPushKey(key, value);
   } catch (e) {
     console.error(e);
   }
