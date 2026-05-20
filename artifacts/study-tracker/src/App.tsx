@@ -5,7 +5,8 @@ import {
   TrendingUp, TrendingDown, Edit3, Trash2, Flame, ArrowUp, ArrowDown, Minus, Target, BookOpen, Clock, Moon, Coffee,
   Download, Upload, History, Repeat, Zap, Play, AlertTriangle, RotateCcw, MapPin, Building2, TreePine,
   Camera, BookMarked, TrendingUp as Journal, DollarSign, ShoppingCart, Briefcase, Car, ChevronUp, Trophy, Archive, Infinity, Mic,
-  Wallet, PiggyBank, CreditCard, PieChart, Receipt, Pencil, ArrowUpRight, ArrowDownRight, Sparkles
+  Wallet, PiggyBank, CreditCard, PieChart, Receipt, Pencil, ArrowUpRight, ArrowDownRight, Sparkles,
+  ArrowRightLeft, Users, Banknote, BadgeAlert, CircleDollarSign, HandCoins
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
@@ -573,6 +574,9 @@ const DEFAULT_SPEND_CATEGORIES = [
 const DEFAULT_SPENDING = {
   entries: [] as any[],
   categories: DEFAULT_SPEND_CATEGORIES,
+  accounts: [] as any[],   // bank/debit/credit card accounts
+  debts: [] as any[],      // loans, balances outside of credit cards
+  owed: [] as any[],       // money people owe you
   monthlyBudget: 0,
   savingsGoal: 0,
 };
@@ -581,10 +585,23 @@ function migrateSpending(s: any): any {
   const base = { ...DEFAULT_SPENDING, ...(s || {}) };
   base.entries = Array.isArray(base.entries) ? base.entries : [];
   base.categories = Array.isArray(base.categories) && base.categories.length > 0 ? base.categories : DEFAULT_SPEND_CATEGORIES;
+  base.accounts = Array.isArray(base.accounts) ? base.accounts : [];
+  base.debts = Array.isArray(base.debts) ? base.debts : [];
+  base.owed = Array.isArray(base.owed) ? base.owed : [];
   base.monthlyBudget = Number(base.monthlyBudget) || 0;
   base.savingsGoal = Number(base.savingsGoal) || 0;
   return base;
 }
+
+const ACCOUNT_COLORS = ['#1A1A2E', '#3B5C6B', '#8E4585', '#3F7A4F', '#B8460E', '#C8932E', '#5C6E8E', '#6B6457'];
+const DEBT_TYPES = [
+  { id: 'student_loan', label: 'Student Loan' },
+  { id: 'car_loan', label: 'Car Loan' },
+  { id: 'personal_loan', label: 'Personal Loan' },
+  { id: 'mortgage', label: 'Mortgage' },
+  { id: 'credit_card', label: 'Credit Card (debt)' },
+  { id: 'other', label: 'Other' },
+];
 
 function fmtMoney(n: number, opts: { signed?: boolean } = {}): string {
   const v = Number(n) || 0;
@@ -3970,7 +3987,7 @@ function Setup({ onComplete, onImport }: any) {
 // ════════════════════════════════════════════════════════════════════════════════
 // MONEY TAB — manual personal-finance tracker (Rocket Money inspired)
 // ════════════════════════════════════════════════════════════════════════════════
-function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories }: any) {
+function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories, onAddAccount, onEditAccount, onAddDebt, onEditDebt, onAddOwed, onEditOwed, onTransfer }: any) {
   const today = todayStr();
   const thisMonth = monthKey(today);
   const lastMonth = prevMonth(thisMonth);
@@ -3984,6 +4001,18 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories }:
   const savedPct = goal > 0 ? Math.min(100, (savedThisMonth / goal) * 100) : 0;
   const savingsRate = cur.income > 0 ? Math.max(0, Math.min(100, (cur.net / cur.income) * 100)) : 0;
 
+  const accounts: any[] = spending.accounts || [];
+  const debts: any[] = spending.debts || [];
+  const owed: any[] = spending.owed || [];
+  const hasCreditCards = accounts.some((a: any) => a.type === 'credit');
+
+  const assets = accounts.filter((a: any) => a.type !== 'credit' && a.includeInNetWorth !== false).reduce((s: number, a: any) => s + (Number(a.balance) || 0), 0);
+  const creditDebt = accounts.filter((a: any) => a.type === 'credit' && a.includeInNetWorth !== false).reduce((s: number, a: any) => s + (Number(a.balance) || 0), 0);
+  const loanDebt = debts.filter((d: any) => d.includeInNetWorth !== false).reduce((s: number, d: any) => s + (Number(d.balance) || 0), 0);
+  const totalLiabilities = creditDebt + loanDebt;
+  const netWorth = assets - totalLiabilities;
+  const totalOwed = owed.filter((o: any) => !o.paid).reduce((s: number, o: any) => s + (Number(o.amount) || 0), 0);
+
   const recent = useMemo(
     () => [...spending.entries].sort((a: any, b: any) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (b.id || '').localeCompare(a.id || ''))).slice(0, 8),
     [spending.entries],
@@ -3994,8 +4023,8 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories }:
     for (const e of spending.entries) {
       if (!e.recurring || e.type !== 'out') continue;
       const k = `${e.name?.toLowerCase().trim()}|${e.categoryId}`;
-      const cur = map.get(k);
-      if (!cur || e.date > cur.date) map.set(k, e);
+      const existing = map.get(k);
+      if (!existing || e.date > existing.date) map.set(k, e);
     }
     return Array.from(map.values()).sort((a, b) => b.amount - a.amount).slice(0, 6);
   }, [spending.entries]);
@@ -4022,8 +4051,8 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories }:
   const netDelta = cur.net - prev.net;
   const spentDelta = prev.spent > 0 ? ((cur.spent - prev.spent) / prev.spent) * 100 : 0;
   const trendMax = Math.max(1, ...trend.map((t) => Math.max(t.income, t.spent)));
-
   const empty = spending.entries.length === 0;
+  const negativeMonth = cur.net < 0 && !empty;
 
   return (
     <>
@@ -4035,31 +4064,24 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories }:
       </div>
       <div className="muted small" style={{ marginBottom: 16 }}>{monthLabel(thisMonth)} · manual entries, your data stays local.</div>
 
-      {/* HERO — net for the month */}
-      <div
-        className="card"
-        style={{
-          background: 'linear-gradient(135deg, #1A1A2E 0%, #2A2A4E 100%)',
-          color: '#F5F0E6',
-          padding: 22,
-          marginBottom: 14,
-          border: 'none',
-        }}
-      >
+      {/* NEGATIVE MONTH ALERT */}
+      {negativeMonth && (
+        <div style={{ background: '#B8460E18', border: '1px solid #B8460E55', borderRadius: 10, padding: '10px 14px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <BadgeAlert size={16} color="#B8460E" style={{ flexShrink: 0 }} />
+          <div>
+            <div className="small" style={{ fontWeight: 600, color: '#B8460E' }}>You're in the red this month</div>
+            <div className="tiny muted">Spending exceeds income by {fmtMoney(Math.abs(cur.net))}. Check your budget.</div>
+          </div>
+        </div>
+      )}
+
+      {/* HERO */}
+      <div className="card" style={{ background: 'linear-gradient(135deg, #1A1A2E 0%, #2A2A4E 100%)', color: '#F5F0E6', padding: 22, marginBottom: 14, border: 'none' }}>
         <div className="row" style={{ gap: 6, marginBottom: 6, opacity: 0.7 }}>
           <Wallet size={13} />
           <span className="h2" style={{ color: '#F5F0E6', opacity: 0.7 }}>Net this month</span>
         </div>
-        <div
-          className="mono"
-          style={{
-            fontSize: 38,
-            fontWeight: 600,
-            letterSpacing: '-0.02em',
-            color: cur.net >= 0 ? '#A8D8B0' : '#F4A89E',
-            lineHeight: 1.05,
-          }}
-        >
+        <div className="mono" style={{ fontSize: 38, fontWeight: 600, letterSpacing: '-0.02em', color: cur.net >= 0 ? '#A8D8B0' : '#F4A89E', lineHeight: 1.05 }}>
           {fmtMoney(cur.net, { signed: true })}
         </div>
         {!empty && (
@@ -4085,24 +4107,104 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories }:
             <div className="mono" style={{ fontSize: 15, fontWeight: 600 }}>{Math.round(savingsRate)}%</div>
           </div>
         </div>
+        {(accounts.length > 0 || debts.length > 0) && (
+          <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid rgba(245,240,230,0.15)' }}>
+            <div className="row" style={{ gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <div className="tiny" style={{ opacity: 0.65, marginBottom: 2 }}>Net worth</div>
+                <div className="mono" style={{ fontSize: 15, fontWeight: 600, color: netWorth >= 0 ? '#A8D8B0' : '#F4A89E' }}>{fmtMoney(netWorth)}</div>
+              </div>
+              <div style={{ width: 1, background: 'rgba(245,240,230,0.15)' }} />
+              <div style={{ flex: 1 }}>
+                <div className="tiny" style={{ opacity: 0.65, marginBottom: 2 }}>Assets</div>
+                <div className="mono" style={{ fontSize: 15, fontWeight: 600, color: '#A8D8B0' }}>{fmtMoney(assets)}</div>
+              </div>
+              <div style={{ width: 1, background: 'rgba(245,240,230,0.15)' }} />
+              <div style={{ flex: 1 }}>
+                <div className="tiny" style={{ opacity: 0.65, marginBottom: 2 }}>Debt</div>
+                <div className="mono" style={{ fontSize: 15, fontWeight: 600, color: '#F4A89E' }}>{fmtMoney(totalLiabilities)}</div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* QUICK ACTIONS */}
       <div className="row" style={{ gap: 8, marginBottom: 14 }}>
-        <button
-          className="btn"
-          style={{ flex: 1, background: '#3F7A4F', color: '#F5F0E6', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-          onClick={() => onAdd('in')}
-        >
+        <button className="btn" style={{ flex: 1, background: '#3F7A4F', color: '#F5F0E6', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }} onClick={() => onAdd('in')}>
           <Plus size={14} /> Income
         </button>
-        <button
-          className="btn"
-          style={{ flex: 1, background: '#B8460E', color: '#F5F0E6', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-          onClick={() => onAdd('out')}
-        >
+        <button className="btn" style={{ flex: 1, background: '#B8460E', color: '#F5F0E6', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }} onClick={() => onAdd('out')}>
           <Plus size={14} /> Expense
         </button>
+        {hasCreditCards && (
+          <button className="btn" style={{ flex: 1, background: '#3B5C6B', color: '#F5F0E6', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5, fontSize: 13 }} onClick={onTransfer}>
+            <ArrowRightLeft size={13} /> Pay Card
+          </button>
+        )}
+      </div>
+
+      {/* ACCOUNTS */}
+      <div style={{ marginBottom: 14 }}>
+        <div className="between" style={{ marginBottom: 10 }}>
+          <div className="row" style={{ gap: 6 }}>
+            <Wallet size={14} color="#1A1A2E" />
+            <span className="h2">Accounts</span>
+          </div>
+          <button className="tap" onClick={onAddAccount} style={{ padding: '4px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <Plus size={11} /> Add
+          </button>
+        </div>
+        {accounts.length === 0 ? (
+          <button className="tap" onClick={onAddAccount} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', textAlign: 'left' }}>
+            <CreditCard size={14} color="#6B6457" />
+            <span className="small" style={{ flex: 1 }}>Add a bank account or credit card</span>
+            <ChevronRight size={14} color="#6B6457" />
+          </button>
+        ) : (
+          <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none' }}>
+            {accounts.map((acc: any) => {
+              const isCredit = acc.type === 'credit';
+              const limit = Number(acc.creditLimit) || 0;
+              const bal = Number(acc.balance) || 0;
+              const utilPct = isCredit && limit > 0 ? Math.min(100, (bal / limit) * 100) : 0;
+              const available = limit - bal;
+              return (
+                <button
+                  key={acc.id}
+                  onClick={() => onEditAccount(acc)}
+                  style={{
+                    flexShrink: 0, width: 172, padding: 16, borderRadius: 14, border: 'none', cursor: 'pointer', textAlign: 'left',
+                    background: isCredit ? '#F5F0E6' : (acc.color || '#1A1A2E'),
+                    boxShadow: '0 2px 10px rgba(0,0,0,0.13)',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: isCredit ? '#6B6457' : 'rgba(245,240,230,0.65)' }}>
+                      {isCredit ? 'Credit' : acc.type === 'savings' ? 'Savings' : 'Checking'}
+                    </span>
+                    {isCredit ? <CreditCard size={13} color="#6B6457" /> : <Wallet size={13} color="rgba(245,240,230,0.6)" />}
+                  </div>
+                  <div style={{ fontSize: 11, color: isCredit ? '#6B6457' : 'rgba(245,240,230,0.7)', marginBottom: 3 }}>{acc.bank || acc.name}</div>
+                  {!isCredit && <div style={{ fontSize: 10, color: 'rgba(245,240,230,0.55)', marginBottom: 4 }}>{acc.name}</div>}
+                  <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: isCredit ? '#B8460E' : '#F5F0E6', lineHeight: 1.1, marginBottom: isCredit ? 10 : 0 }}>
+                    {fmtMoney(bal)}
+                  </div>
+                  {isCredit && limit > 0 && (
+                    <>
+                      <div style={{ height: 4, background: '#E4DCC8', borderRadius: 2, overflow: 'hidden', marginBottom: 5 }}>
+                        <div style={{ width: `${utilPct}%`, height: '100%', background: utilPct > 80 ? '#B8460E' : utilPct > 50 ? '#C8932E' : '#3F7A4F', borderRadius: 2 }} />
+                      </div>
+                      <div style={{ fontSize: 10, color: '#6B6457' }}>{fmtMoney(available)} avail · {Math.round(utilPct)}%</div>
+                      {acc.dueDay && <div style={{ fontSize: 10, color: '#8E4585', marginTop: 3 }}>Due day {acc.dueDay}</div>}
+                    </>
+                  )}
+                  {isCredit && !acc.name.includes(acc.bank || '') && <div style={{ fontSize: 10, color: '#6B6457', marginTop: 4, opacity: 0.75 }}>{acc.name}</div>}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* BUDGET PROGRESS */}
@@ -4116,14 +4218,7 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories }:
             <span className="mono small">{fmtMoney(cur.spent)} / {fmtMoney(budget)}</span>
           </div>
           <div style={{ height: 10, background: '#F5F0E6', borderRadius: 6, overflow: 'hidden', marginBottom: 6 }}>
-            <div
-              style={{
-                width: `${spentPct}%`,
-                height: '100%',
-                background: spentPct >= 100 ? '#B8460E' : spentPct >= 80 ? '#C8932E' : '#3F7A4F',
-                transition: 'width 0.3s',
-              }}
-            />
+            <div style={{ width: `${spentPct}%`, height: '100%', background: spentPct >= 100 ? '#B8460E' : spentPct >= 80 ? '#C8932E' : '#3F7A4F', transition: 'width 0.3s' }} />
           </div>
           <div className="between tiny muted">
             <span>{spentPct >= 100 ? `Over by ${fmtMoney(cur.spent - budget)}` : `${fmtMoney(budget - cur.spent)} left`}</span>
@@ -4131,11 +4226,7 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories }:
           </div>
         </div>
       ) : (
-        <button
-          className="tap"
-          onClick={onBudget}
-          style={{ width: '100%', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', textAlign: 'left' }}
-        >
+        <button className="tap" onClick={onBudget} style={{ width: '100%', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', textAlign: 'left' }}>
           <Target size={14} color="#8E4585" />
           <span className="small" style={{ flex: 1 }}>Set a monthly budget to track spending</span>
           <ChevronRight size={14} color="#6B6457" />
@@ -4177,26 +4268,8 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories }:
             {trend.map((t) => (
               <div key={t.ym} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
                 <div style={{ display: 'flex', gap: 2, alignItems: 'flex-end', height: 70, width: '100%', justifyContent: 'center' }}>
-                  <div
-                    title={`Income ${fmtMoney(t.income)}`}
-                    style={{
-                      width: '40%',
-                      height: `${(t.income / trendMax) * 100}%`,
-                      background: '#3F7A4F',
-                      borderRadius: '3px 3px 0 0',
-                      minHeight: t.income > 0 ? 2 : 0,
-                    }}
-                  />
-                  <div
-                    title={`Spent ${fmtMoney(t.spent)}`}
-                    style={{
-                      width: '40%',
-                      height: `${(t.spent / trendMax) * 100}%`,
-                      background: '#B8460E',
-                      borderRadius: '3px 3px 0 0',
-                      minHeight: t.spent > 0 ? 2 : 0,
-                    }}
-                  />
+                  <div title={`Income ${fmtMoney(t.income)}`} style={{ width: '40%', height: `${(t.income / trendMax) * 100}%`, background: '#3F7A4F', borderRadius: '3px 3px 0 0', minHeight: t.income > 0 ? 2 : 0 }} />
+                  <div title={`Spent ${fmtMoney(t.spent)}`} style={{ width: '40%', height: `${(t.spent / trendMax) * 100}%`, background: '#B8460E', borderRadius: '3px 3px 0 0', minHeight: t.spent > 0 ? 2 : 0 }} />
                 </div>
                 <div className="tiny muted" style={{ fontSize: 10 }}>{monthShort(t.ym)}</div>
               </div>
@@ -4208,6 +4281,87 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories }:
           </div>
         </div>
       )}
+
+      {/* DEBT TRACKER */}
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div className="between" style={{ marginBottom: 10 }}>
+          <div className="row" style={{ gap: 6 }}>
+            <Banknote size={14} color="#B8460E" />
+            <span className="h2">Debt tracker</span>
+          </div>
+          <button className="tap" onClick={onAddDebt} style={{ padding: '4px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <Plus size={11} /> Add
+          </button>
+        </div>
+        {debts.length === 0 && !hasCreditCards ? (
+          <button className="tap" onClick={onAddDebt} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', textAlign: 'left', background: 'transparent', border: 'none' }}>
+            <CircleDollarSign size={14} color="#6B6457" />
+            <span className="small muted" style={{ flex: 1 }}>Track a loan or credit card balance</span>
+            <ChevronRight size={14} color="#6B6457" />
+          </button>
+        ) : (
+          <>
+            {accounts.filter((a: any) => a.type === 'credit').map((acc: any) => {
+              const limit = Number(acc.creditLimit) || 0;
+              const bal = Number(acc.balance) || 0;
+              const paidPct = limit > 0 ? Math.max(0, Math.min(100, ((limit - bal) / limit) * 100)) : 0;
+              return (
+                <div key={acc.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid #F0EAD8' }}>
+                  <div className="between" style={{ marginBottom: 6 }}>
+                    <div>
+                      <div className="small" style={{ fontWeight: 600 }}>{acc.name}{acc.bank ? ` · ${acc.bank}` : ''}</div>
+                      <div className="tiny muted">Credit Card{acc.dueDay ? ` · due day ${acc.dueDay}` : ''}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(bal)}</div>
+                      {limit > 0 && <div className="tiny muted">of {fmtMoney(limit)} limit</div>}
+                    </div>
+                  </div>
+                  {limit > 0 && (
+                    <>
+                      <div style={{ height: 6, background: '#F0EAD8', borderRadius: 3, overflow: 'hidden', marginBottom: 4 }}>
+                        <div style={{ width: `${100 - paidPct}%`, height: '100%', background: '#B8460E', borderRadius: 3 }} />
+                      </div>
+                      <div className="tiny muted">{fmtMoney(limit - bal)} available</div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+            {debts.map((debt: any) => {
+              const original = Number(debt.originalAmount) || Number(debt.balance) || 1;
+              const bal = Number(debt.balance) || 0;
+              const paid = original - bal;
+              const paidPct = Math.max(0, Math.min(100, (paid / original) * 100));
+              const debtType = DEBT_TYPES.find((t) => t.id === debt.type);
+              return (
+                <button key={debt.id} className="tap" onClick={() => onEditDebt(debt)} style={{ width: '100%', textAlign: 'left', padding: '10px 0', borderBottom: '1px solid #F0EAD8', background: 'transparent', borderRadius: 0 }}>
+                  <div className="between" style={{ marginBottom: 6 }}>
+                    <div>
+                      <div className="small" style={{ fontWeight: 600 }}>{debt.name}</div>
+                      <div className="tiny muted">{debtType?.label || 'Debt'}{debt.rate ? ` · ${debt.rate}% APR` : ''}{debt.dueDay ? ` · due day ${debt.dueDay}` : ''}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(bal)}</div>
+                      {debt.minPayment > 0 && <div className="tiny muted">min {fmtMoney(debt.minPayment)}/mo</div>}
+                    </div>
+                  </div>
+                  <div style={{ height: 6, background: '#F0EAD8', borderRadius: 3, overflow: 'hidden', marginBottom: 4 }}>
+                    <div style={{ width: `${paidPct}%`, height: '100%', background: '#3F7A4F', borderRadius: 3 }} />
+                  </div>
+                  <div className="tiny muted">{Math.round(paidPct)}% paid off · {fmtMoney(bal)} remaining of {fmtMoney(original)}</div>
+                </button>
+              );
+            })}
+            {totalLiabilities > 0 && (
+              <div className="between" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid #F0EAD8' }}>
+                <span className="small muted">Total debt</span>
+                <span className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(totalLiabilities)}</span>
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       {/* CATEGORY BREAKDOWN */}
       {topCats.length > 0 && (
@@ -4264,6 +4418,36 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories }:
         </div>
       )}
 
+      {/* PEOPLE OWE ME */}
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div className="between" style={{ marginBottom: 10 }}>
+          <div className="row" style={{ gap: 6 }}>
+            <HandCoins size={14} color="#3F7A4F" />
+            <span className="h2">People owe me</span>
+            {totalOwed > 0 && <span className="mono tiny" style={{ marginLeft: 4, background: '#3F7A4F22', color: '#3F7A4F', padding: '2px 6px', borderRadius: 6 }}>{fmtMoney(totalOwed)}</span>}
+          </div>
+          <button className="tap" onClick={onAddOwed} style={{ padding: '4px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <Plus size={11} /> Add
+          </button>
+        </div>
+        {owed.length === 0 ? (
+          <div className="muted small" style={{ textAlign: 'center', padding: '8px 0' }}>No IOUs tracked — add someone who owes you.</div>
+        ) : (
+          owed.map((item: any) => (
+            <button key={item.id} className="tap" onClick={() => onEditOwed(item)} style={{ width: '100%', textAlign: 'left', padding: '10px 8px', borderBottom: '1px solid #F0EAD8', background: 'transparent', borderRadius: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: item.paid ? '#3F7A4F22' : '#C8932E22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Users size={14} color={item.paid ? '#3F7A4F' : '#C8932E'} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="small" style={{ fontWeight: 600, color: item.paid ? '#6B6457' : '#1A1A2E', textDecoration: item.paid ? 'line-through' : 'none' }}>{item.name}</div>
+                <div className="tiny muted">{item.note ? `${item.note} · ` : ''}{item.dueDate ? `Due ${item.dueDate}` : item.dateAdded ? `Added ${item.dateAdded}` : ''}</div>
+              </div>
+              <span className="mono small" style={{ fontWeight: 700, color: item.paid ? '#6B6457' : '#3F7A4F' }}>{fmtMoney(item.amount)}</span>
+            </button>
+          ))
+        )}
+      </div>
+
       {/* RECENT TRANSACTIONS */}
       <div className="card">
         <div className="between" style={{ marginBottom: 10 }}>
@@ -4282,26 +4466,15 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories }:
           recent.map((e: any) => {
             const cat = catMap[e.categoryId];
             const isIn = e.type === 'in';
+            const acct = accounts.find((a: any) => a.id === e.accountId);
             return (
-              <button
-                key={e.id}
-                className="tap"
-                onClick={() => onEdit(e)}
-                style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 8px', textAlign: 'left', borderBottom: '1px solid #F0EAD8', background: 'transparent', borderRadius: 0 }}
-              >
-                <div
-                  style={{
-                    width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-                    background: (cat?.color || '#6B6457') + '22',
-                    color: cat?.color || '#6B6457',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}
-                >
+              <button key={e.id} className="tap" onClick={() => onEdit(e)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 8px', textAlign: 'left', borderBottom: '1px solid #F0EAD8', background: 'transparent', borderRadius: 0 }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, background: (cat?.color || '#6B6457') + '22', color: cat?.color || '#6B6457', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   {isIn ? <ArrowDownRight size={15} /> : <ArrowUpRight size={15} />}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="small" style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name || (isIn ? 'Income' : 'Expense')}</div>
-                  <div className="tiny muted">{cat?.name || 'Other'} · {e.date}{e.recurring ? ' · recurring' : ''}</div>
+                  <div className="tiny muted">{cat?.name || 'Other'} · {e.date}{e.recurring ? ' · recurring' : ''}{acct ? ` · ${acct.name}` : ''}</div>
                 </div>
                 <span className="mono small" style={{ color: isIn ? '#3F7A4F' : '#B8460E', fontWeight: 600 }}>
                   {isIn ? '+' : '−'}{fmtMoney(e.amount).replace('−', '')}
@@ -4536,6 +4709,358 @@ function MoneyCategoriesModal({ spending, onSave, onClose }: any) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
+// MONEY — ADD / EDIT ACCOUNT MODAL
+// ════════════════════════════════════════════════════════════════════════════════
+function AddAccountModal({ account, onSave, onDelete, onClose }: any) {
+  const isEdit = !!account;
+  const [name, setName] = useState(account?.name || '');
+  const [bank, setBank] = useState(account?.bank || '');
+  const [type, setType] = useState<'checking' | 'savings' | 'credit'>(account?.type || 'checking');
+  const [balance, setBalance] = useState(String(account?.balance ?? ''));
+  const [creditLimit, setCreditLimit] = useState(String(account?.creditLimit ?? ''));
+  const [dueDay, setDueDay] = useState(String(account?.dueDay ?? ''));
+  const [color, setColor] = useState(account?.color || ACCOUNT_COLORS[0]);
+  const [includeNW, setIncludeNW] = useState(account?.includeInNetWorth !== false);
+
+  const save = () => {
+    if (!name.trim()) { toast.error('Enter an account name'); return; }
+    const bal = parseFloat(balance);
+    if (!isFinite(bal) || bal < 0) { toast.error('Enter a valid balance'); return; }
+    const next: any = {
+      id: account?.id || `acc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: name.trim(), bank: bank.trim(), type,
+      balance: Math.round(bal * 100) / 100, color, includeInNetWorth: includeNW,
+    };
+    if (type === 'credit') {
+      next.creditLimit = parseFloat(creditLimit) || 0;
+      next.dueDay = parseInt(dueDay) || null;
+    }
+    onSave(next); onClose();
+  };
+
+  return (
+    <ModalShell title={isEdit ? 'Edit account' : 'Add account'} onClose={onClose}>
+      <div className="row" style={{ gap: 6, marginBottom: 14 }}>
+        {(['checking', 'savings', 'credit'] as const).map((t) => (
+          <button key={t} className="tap" onClick={() => setType(t)} style={{ flex: 1, padding: '8px 4px', fontSize: 11, fontWeight: type === t ? 700 : 400, background: type === t ? '#1A1A2E' : 'transparent', color: type === t ? '#F5F0E6' : '#1A1A2E', borderColor: type === t ? '#1A1A2E' : '#E4DCC8', textTransform: 'capitalize' }}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      <label>Account nickname</label>
+      <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={type === 'credit' ? 'Navy Federal CC, Chase Sapphire…' : 'Main checking, Emergency fund…'} style={{ marginBottom: 12 }} autoFocus={!isEdit} />
+
+      <label>Bank / institution</label>
+      <input type="text" value={bank} onChange={(e) => setBank(e.target.value)} placeholder="Chase, Navy Federal, Wells Fargo…" style={{ marginBottom: 12 }} />
+
+      <label>{type === 'credit' ? 'Current balance owed' : 'Current balance'}</label>
+      <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 12 }}>
+        <span className="mono muted">$</span>
+        <input type="number" step="0.01" inputMode="decimal" value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="0.00" style={{ flex: 1, fontFamily: 'JetBrains Mono, monospace' }} />
+      </div>
+
+      {type === 'credit' && (
+        <>
+          <label>Credit limit</label>
+          <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 12 }}>
+            <span className="mono muted">$</span>
+            <input type="number" step="1" inputMode="decimal" value={creditLimit} onChange={(e) => setCreditLimit(e.target.value)} placeholder="e.g. 5000" style={{ flex: 1 }} />
+          </div>
+          <label>Payment due day of month</label>
+          <input type="number" min={1} max={31} value={dueDay} onChange={(e) => setDueDay(e.target.value)} placeholder="e.g. 15" style={{ marginBottom: 12 }} />
+        </>
+      )}
+
+      {type !== 'credit' && (
+        <>
+          <label>Card color</label>
+          <div className="row" style={{ gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+            {ACCOUNT_COLORS.map((c) => (
+              <button key={c} onClick={() => setColor(c)} style={{ width: 28, height: 28, borderRadius: 8, background: c, border: color === c ? '3px solid #C8932E' : '1px solid #E4DCC8', cursor: 'pointer' }} />
+            ))}
+          </div>
+        </>
+      )}
+
+      <div className="between" style={{ marginBottom: 18 }}>
+        <span className="small">Include in net worth</span>
+        <button className="tap" onClick={() => setIncludeNW(!includeNW)} style={{ padding: '6px 14px', background: includeNW ? '#3F7A4F' : 'transparent', color: includeNW ? '#F5F0E6' : '#1A1A2E', borderColor: includeNW ? '#3F7A4F' : '#E4DCC8' }}>
+          {includeNW ? 'Yes' : 'No'}
+        </button>
+      </div>
+
+      <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={save}>
+        <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> {isEdit ? 'Save account' : 'Add account'}
+      </button>
+      {isEdit && (
+        <button className="tap" onClick={() => { if (confirm('Remove this account?')) { onDelete(account.id); onClose(); } }} style={{ width: '100%', color: '#B8460E', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          <Trash2 size={12} /> Remove account
+        </button>
+      )}
+    </ModalShell>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// MONEY — ADD / EDIT DEBT MODAL
+// ════════════════════════════════════════════════════════════════════════════════
+function AddDebtModal({ debt, onSave, onDelete, onClose }: any) {
+  const isEdit = !!debt;
+  const [name, setName] = useState(debt?.name || '');
+  const [type, setType] = useState(debt?.type || 'student_loan');
+  const [originalAmount, setOriginalAmount] = useState(String(debt?.originalAmount ?? ''));
+  const [balance, setBalance] = useState(String(debt?.balance ?? ''));
+  const [minPayment, setMinPayment] = useState(String(debt?.minPayment ?? ''));
+  const [rate, setRate] = useState(String(debt?.rate ?? ''));
+  const [dueDay, setDueDay] = useState(String(debt?.dueDay ?? ''));
+  const [includeNW, setIncludeNW] = useState(debt?.includeInNetWorth !== false);
+
+  const save = () => {
+    if (!name.trim()) { toast.error('Enter a name'); return; }
+    const bal = parseFloat(balance);
+    if (!isFinite(bal) || bal < 0) { toast.error('Enter a valid balance'); return; }
+    onSave({
+      id: debt?.id || `debt_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: name.trim(), type,
+      originalAmount: parseFloat(originalAmount) || bal,
+      balance: Math.round(bal * 100) / 100,
+      minPayment: parseFloat(minPayment) || 0,
+      rate: parseFloat(rate) || 0,
+      dueDay: parseInt(dueDay) || null,
+      includeInNetWorth: includeNW,
+    });
+    onClose();
+  };
+
+  return (
+    <ModalShell title={isEdit ? 'Edit debt' : 'Add debt'} onClose={onClose}>
+      <label>Type of debt</label>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6, marginBottom: 14 }}>
+        {DEBT_TYPES.map((t) => (
+          <button key={t.id} className="tap" onClick={() => setType(t.id)} style={{ padding: '8px', fontSize: 12, background: type === t.id ? '#B8460E22' : 'transparent', borderColor: type === t.id ? '#B8460E' : '#E4DCC8', fontWeight: type === t.id ? 600 : 400 }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <label>Name / label</label>
+      <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Sallie Mae, Car loan…" style={{ marginBottom: 12 }} autoFocus={!isEdit} />
+
+      <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+        <div style={{ flex: 1 }}>
+          <label>Current balance owed</label>
+          <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+            <span className="mono muted">$</span>
+            <input type="number" step="0.01" inputMode="decimal" value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="0.00" style={{ flex: 1 }} />
+          </div>
+        </div>
+        <div style={{ flex: 1 }}>
+          <label>Original total</label>
+          <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+            <span className="mono muted">$</span>
+            <input type="number" step="0.01" inputMode="decimal" value={originalAmount} onChange={(e) => setOriginalAmount(e.target.value)} placeholder="e.g. 20000" style={{ flex: 1 }} />
+          </div>
+        </div>
+      </div>
+
+      <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+        <div style={{ flex: 1 }}>
+          <label>Min payment / mo</label>
+          <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+            <span className="mono muted">$</span>
+            <input type="number" step="0.01" value={minPayment} onChange={(e) => setMinPayment(e.target.value)} placeholder="0.00" style={{ flex: 1 }} />
+          </div>
+        </div>
+        <div style={{ flex: 1 }}>
+          <label>Interest rate %</label>
+          <input type="number" step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="e.g. 5.99" />
+        </div>
+      </div>
+
+      <label>Payment due day of month (optional)</label>
+      <input type="number" min={1} max={31} value={dueDay} onChange={(e) => setDueDay(e.target.value)} placeholder="e.g. 1" style={{ marginBottom: 12 }} />
+
+      <div className="between" style={{ marginBottom: 18 }}>
+        <span className="small">Include in net worth calculation</span>
+        <button className="tap" onClick={() => setIncludeNW(!includeNW)} style={{ padding: '6px 14px', background: includeNW ? '#3F7A4F' : 'transparent', color: includeNW ? '#F5F0E6' : '#1A1A2E', borderColor: includeNW ? '#3F7A4F' : '#E4DCC8' }}>
+          {includeNW ? 'Yes' : 'No'}
+        </button>
+      </div>
+
+      <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={save}>
+        <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> {isEdit ? 'Save debt' : 'Add debt'}
+      </button>
+      {isEdit && (
+        <button className="tap" onClick={() => { if (confirm('Remove this debt?')) { onDelete(debt.id); onClose(); } }} style={{ width: '100%', color: '#B8460E', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          <Trash2 size={12} /> Remove debt
+        </button>
+      )}
+    </ModalShell>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// MONEY — ADD / EDIT "PEOPLE OWE ME" MODAL
+// ════════════════════════════════════════════════════════════════════════════════
+function AddOwedModal({ item, onSave, onDelete, onClose }: any) {
+  const isEdit = !!item;
+  const [name, setName] = useState(item?.name || '');
+  const [amount, setAmount] = useState(String(item?.amount ?? ''));
+  const [note, setNote] = useState(item?.note || '');
+  const [dueDate, setDueDate] = useState(item?.dueDate || '');
+  const [paid, setPaid] = useState(item?.paid || false);
+
+  const save = () => {
+    if (!name.trim()) { toast.error('Enter a name'); return; }
+    const amt = parseFloat(amount);
+    if (!isFinite(amt) || amt <= 0) { toast.error('Enter an amount'); return; }
+    onSave({
+      id: item?.id || `owed_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: name.trim(), amount: Math.round(amt * 100) / 100,
+      note: note.trim() || undefined, dueDate: dueDate || undefined,
+      paid, dateAdded: item?.dateAdded || todayStr(),
+    });
+    onClose();
+  };
+
+  return (
+    <ModalShell title={isEdit ? 'Edit IOU' : 'Someone owes me'} onClose={onClose}>
+      <label>Who owes you?</label>
+      <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name or group" style={{ marginBottom: 12 }} autoFocus={!isEdit} />
+
+      <label>Amount</label>
+      <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 12 }}>
+        <span className="mono" style={{ fontSize: 20, color: '#6B6457' }}>$</span>
+        <input type="number" step="0.01" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" style={{ flex: 1, fontSize: 20, fontFamily: 'JetBrains Mono, monospace' }} />
+      </div>
+
+      <label>What for? (optional)</label>
+      <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Dinner, concert tickets, rent split…" style={{ marginBottom: 12 }} />
+
+      <label>Due date (optional)</label>
+      <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={{ marginBottom: 14 }} />
+
+      {isEdit && (
+        <div className="between" style={{ marginBottom: 18 }}>
+          <span className="small">Mark as paid</span>
+          <button className="tap" onClick={() => setPaid(!paid)} style={{ padding: '6px 14px', background: paid ? '#3F7A4F' : 'transparent', color: paid ? '#F5F0E6' : '#1A1A2E', borderColor: paid ? '#3F7A4F' : '#E4DCC8' }}>
+            {paid ? '✓ Paid' : 'Unpaid'}
+          </button>
+        </div>
+      )}
+
+      <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={save}>
+        <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> {isEdit ? 'Save' : 'Add IOU'}
+      </button>
+      {isEdit && (
+        <button className="tap" onClick={() => { if (confirm('Delete this IOU?')) { onDelete(item.id); onClose(); } }} style={{ width: '100%', color: '#B8460E', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+          <Trash2 size={12} /> Delete
+        </button>
+      )}
+    </ModalShell>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// MONEY — CREDIT CARD PAYMENT (TRANSFER) MODAL
+// ════════════════════════════════════════════════════════════════════════════════
+function AccountTransferModal({ spending, onSave, onClose }: any) {
+  const fromAccounts = (spending.accounts || []).filter((a: any) => a.type !== 'credit');
+  const toAccounts = (spending.accounts || []).filter((a: any) => a.type === 'credit');
+  const [fromId, setFromId] = useState(fromAccounts[0]?.id || '');
+  const [toId, setToId] = useState(toAccounts[0]?.id || '');
+  const [amount, setAmount] = useState('');
+  const [date, setDate] = useState(todayStr());
+
+  const from = fromAccounts.find((a: any) => a.id === fromId);
+  const to = toAccounts.find((a: any) => a.id === toId);
+
+  const save = () => {
+    const amt = parseFloat(amount);
+    if (!isFinite(amt) || amt <= 0) { toast.error('Enter an amount'); return; }
+    if (!fromId && fromAccounts.length > 0) { toast.error('Select a source account'); return; }
+    if (!toId) { toast.error('Select a credit card to pay'); return; }
+    onSave({
+      tx: {
+        id: `tx_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        type: 'out', amount: Math.round(amt * 100) / 100,
+        name: `CC Payment → ${to?.name || 'Credit Card'}`,
+        categoryId: 'c_bills', date,
+        accountId: fromId || undefined, isTransfer: true,
+      },
+      creditAccountId: toId,
+      amount: Math.round(amt * 100) / 100,
+    });
+    onClose();
+  };
+
+  if (toAccounts.length === 0) {
+    return (
+      <ModalShell title="Pay credit card" onClose={onClose}>
+        <p className="muted small" style={{ textAlign: 'center', padding: '20px 0' }}>No credit cards found. Add a credit card in Accounts first.</p>
+      </ModalShell>
+    );
+  }
+
+  return (
+    <ModalShell title="Pay credit card" onClose={onClose}>
+      <p className="muted small" style={{ marginBottom: 16, lineHeight: 1.5 }}>Records a payment from a debit/savings account and reduces the credit card balance.</p>
+
+      {fromAccounts.length > 0 && (
+        <>
+          <label>Pay from (debit / savings)</label>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14, overflowX: 'auto', paddingBottom: 2 }}>
+            {fromAccounts.map((a: any) => (
+              <button key={a.id} className="tap" onClick={() => setFromId(a.id)} style={{ flexShrink: 0, padding: '8px 14px', fontSize: 12, background: fromId === a.id ? (a.color || '#1A1A2E') : 'transparent', color: fromId === a.id ? '#F5F0E6' : '#1A1A2E', borderColor: fromId === a.id ? (a.color || '#1A1A2E') : '#E4DCC8' }}>
+                {a.name}{a.bank ? ` · ${a.bank}` : ''}
+                <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>{fmtMoney(a.balance)}</div>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      <label>Pay to (credit card)</label>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, overflowX: 'auto', paddingBottom: 2 }}>
+        {toAccounts.map((a: any) => (
+          <button key={a.id} className="tap" onClick={() => setToId(a.id)} style={{ flexShrink: 0, padding: '8px 14px', fontSize: 12, background: toId === a.id ? '#B8460E' : 'transparent', color: toId === a.id ? '#F5F0E6' : '#1A1A2E', borderColor: toId === a.id ? '#B8460E' : '#E4DCC8' }}>
+            {a.name}{a.bank ? ` · ${a.bank}` : ''}
+            <div style={{ fontSize: 10, opacity: 0.75, marginTop: 2 }}>Owes {fmtMoney(a.balance)}</div>
+          </button>
+        ))}
+      </div>
+
+      <label>Payment amount</label>
+      <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 12 }}>
+        <span className="mono" style={{ fontSize: 20, color: '#6B6457' }}>$</span>
+        <input type="number" step="0.01" inputMode="decimal" autoFocus value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" style={{ flex: 1, fontSize: 20, fontFamily: 'JetBrains Mono, monospace' }} />
+      </div>
+      {to && Number(to.balance) > 0 && (
+        <div className="row" style={{ gap: 6, marginBottom: 12 }}>
+          <button className="tap" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setAmount(String(to.balance))}>Full balance {fmtMoney(to.balance)}</button>
+          {Number(to.minPayment) > 0 && <button className="tap" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setAmount(String(to.minPayment))}>Min {fmtMoney(to.minPayment)}</button>}
+        </div>
+      )}
+
+      <label>Date</label>
+      <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ marginBottom: 18 }} />
+
+      {from && to && parseFloat(amount) > 0 && (
+        <div style={{ background: '#F0EAD8', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 12 }}>
+          <span className="muted">{from.name}</span> <ArrowRightLeft size={11} style={{ verticalAlign: 'middle', margin: '0 4px' }} /> <span className="muted">{to.name}</span>
+          <span className="mono" style={{ float: 'right', fontWeight: 700 }}>{fmtMoney(parseFloat(amount) || 0)}</span>
+        </div>
+      )}
+
+      <button className="btn" style={{ width: '100%' }} onClick={save}>
+        <ArrowRightLeft size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Record payment
+      </button>
+    </ModalShell>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
 // ROOT
 // ════════════════════════════════════════════════════════════════════════════════
 export default function App() {
@@ -4706,6 +5231,78 @@ export default function App() {
         return next;
       });
     });
+  };
+
+  const upsertAccount = async (acc: any) => {
+    let computed: any = null;
+    setSpending((prev: any) => {
+      const idx = prev.accounts.findIndex((a: any) => a.id === acc.id);
+      const next = { ...prev, accounts: idx >= 0 ? prev.accounts.map((a: any) => a.id === acc.id ? acc : a) : [...prev.accounts, acc] };
+      computed = next;
+      return next;
+    });
+    if (computed) await safeSet(K.spending, computed);
+  };
+  const deleteAccount = async (id: string) => {
+    let computed: any = null;
+    setSpending((prev: any) => {
+      const next = { ...prev, accounts: prev.accounts.filter((a: any) => a.id !== id) };
+      computed = next;
+      return next;
+    });
+    if (computed) await safeSet(K.spending, computed);
+    toast('Account removed');
+  };
+  const upsertDebt = async (debt: any) => {
+    let computed: any = null;
+    setSpending((prev: any) => {
+      const idx = prev.debts.findIndex((d: any) => d.id === debt.id);
+      const next = { ...prev, debts: idx >= 0 ? prev.debts.map((d: any) => d.id === debt.id ? debt : d) : [...prev.debts, debt] };
+      computed = next;
+      return next;
+    });
+    if (computed) await safeSet(K.spending, computed);
+  };
+  const deleteDebt = async (id: string) => {
+    let computed: any = null;
+    setSpending((prev: any) => {
+      const next = { ...prev, debts: prev.debts.filter((d: any) => d.id !== id) };
+      computed = next;
+      return next;
+    });
+    if (computed) await safeSet(K.spending, computed);
+  };
+  const upsertOwed = async (item: any) => {
+    let computed: any = null;
+    setSpending((prev: any) => {
+      const idx = prev.owed.findIndex((o: any) => o.id === item.id);
+      const next = { ...prev, owed: idx >= 0 ? prev.owed.map((o: any) => o.id === item.id ? item : o) : [...prev.owed, item] };
+      computed = next;
+      return next;
+    });
+    if (computed) await safeSet(K.spending, computed);
+  };
+  const deleteOwed = async (id: string) => {
+    let computed: any = null;
+    setSpending((prev: any) => {
+      const next = { ...prev, owed: prev.owed.filter((o: any) => o.id !== id) };
+      computed = next;
+      return next;
+    });
+    if (computed) await safeSet(K.spending, computed);
+  };
+  const doTransfer = async ({ tx, creditAccountId, amount: payAmt }: any) => {
+    let computed: any = null;
+    setSpending((prev: any) => {
+      const nextAccounts = prev.accounts.map((a: any) =>
+        a.id === creditAccountId ? { ...a, balance: Math.max(0, (Number(a.balance) || 0) - payAmt) } : a,
+      );
+      const next = { ...prev, accounts: nextAccounts, entries: [tx, ...prev.entries] };
+      computed = next;
+      return next;
+    });
+    if (computed) await safeSet(K.spending, computed);
+    toast(`Payment of ${fmtMoney(payAmt)} applied`);
   };
 
   const undoToast = (label: string, restore: () => void | Promise<void>) => {
@@ -5024,6 +5621,13 @@ export default function App() {
             onDelete={deleteTransaction}
             onBudget={() => setModal({ type: 'moneyGoals' })}
             onCategories={() => setModal({ type: 'moneyCategories' })}
+            onAddAccount={() => setModal({ type: 'addAccount' })}
+            onEditAccount={(account: any) => setModal({ type: 'addAccount', account })}
+            onAddDebt={() => setModal({ type: 'addDebt' })}
+            onEditDebt={(debt: any) => setModal({ type: 'addDebt', debt })}
+            onAddOwed={() => setModal({ type: 'addOwed' })}
+            onEditOwed={(item: any) => setModal({ type: 'addOwed', item })}
+            onTransfer={() => setModal({ type: 'accountTransfer' })}
           />
         )}
         {tab === 'journal' && (
@@ -5058,6 +5662,10 @@ export default function App() {
       {modal?.type === 'addTransaction' && <AddTransactionModal entry={modal.entry} defaultType={modal.defaultType} spending={spending} onSave={upsertTransaction} onDelete={deleteTransaction} onClose={() => setModal(null)} />}
       {modal?.type === 'moneyGoals' && <MoneyGoalsModal spending={spending} onSave={saveSpending} onClose={() => setModal(null)} />}
       {modal?.type === 'moneyCategories' && <MoneyCategoriesModal spending={spending} onSave={saveSpending} onClose={() => setModal(null)} />}
+      {modal?.type === 'addAccount' && <AddAccountModal account={modal.account} onSave={upsertAccount} onDelete={deleteAccount} onClose={() => setModal(null)} />}
+      {modal?.type === 'addDebt' && <AddDebtModal debt={modal.debt} onSave={upsertDebt} onDelete={deleteDebt} onClose={() => setModal(null)} />}
+      {modal?.type === 'addOwed' && <AddOwedModal item={modal.item} onSave={upsertOwed} onDelete={deleteOwed} onClose={() => setModal(null)} />}
+      {modal?.type === 'accountTransfer' && <AccountTransferModal spending={spending} onSave={doTransfer} onClose={() => setModal(null)} />}
       {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, journal, challengeHistory, busyPresets, weeklyAck, spending }} onImport={async (d: any) => {
         if (d.spending) { const sp = migrateSpending(d.spending); setSpending(sp); await safeSet(K.spending, sp); }
         if (d.settings) { setSettings(d.settings); await safeSet(K.settings, d.settings); }
