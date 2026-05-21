@@ -88,6 +88,31 @@ export function clearLocalSyncData(): void {
   for (const k of keys) localStorage.removeItem(k);
 }
 
+/**
+ * Synchronously push every local st: key to the server under the current userId.
+ * Used on account creation so all pre-existing data is uploaded before reloading.
+ */
+export async function pushAllLocalData(): Promise<void> {
+  const pushes: Promise<void>[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key || !shouldSync(key)) continue;
+    const raw = localStorage.getItem(key);
+    if (raw === null) continue;
+    let value: unknown;
+    try { value = JSON.parse(raw); } catch { value = raw; }
+    pushes.push(
+      fetch(`${API}/sync/push`, {
+        method: "POST",
+        headers: headers(),
+        body: JSON.stringify({ key, value }),
+        keepalive: true,
+      }).then(() => {}).catch(() => {}),
+    );
+  }
+  await Promise.all(pushes);
+}
+
 function markLocalTs(key: string): void {
   try {
     localStorage.setItem(LOCAL_TS_PREFIX + key, String(Date.now()));

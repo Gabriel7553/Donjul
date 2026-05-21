@@ -12,7 +12,7 @@ import { Toaster, toast } from 'sonner';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import confetti from 'canvas-confetti';
 import { motion } from 'framer-motion';
-import { pushKey as syncPushKey, getSyncId, setSyncId, getStoredUsername, setStoredUsername, clearStoredUsername, clearLocalSyncData } from './sync';
+import { pushKey as syncPushKey, getSyncId, setSyncId, getStoredUsername, setStoredUsername, clearStoredUsername, clearLocalSyncData, pushAllLocalData } from './sync';
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor,
   useSensor, useSensors, type DragEndEvent
@@ -3465,8 +3465,9 @@ function AccountModal({ onClose }: { onClose: () => void }) {
       if (!resp.ok) { setErr(data.error || 'Registration failed.'); setLoading(false); return; }
       setSyncId(data.userId);
       setStoredUsername(data.username);
-      toast.success(`Account created! Signed in as ${data.username}.`);
-      setTimeout(() => window.location.reload(), 800);
+      toast.success(`Account created! Uploading your data…`);
+      await pushAllLocalData();
+      window.location.reload();
     } catch {
       setErr('Network error — check your connection.');
       setLoading(false);
