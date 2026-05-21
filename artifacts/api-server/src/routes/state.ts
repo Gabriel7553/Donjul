@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { logger } from "../lib/logger";
+import { requireSyncSecret } from "../middlewares/requireSyncSecret";
+import { isPlainObject, MAX_STATE_BYTES } from "../lib/validate";
 
 const router = Router();
 
@@ -15,7 +17,7 @@ async function getDb() {
   return dbMod;
 }
 
-router.get("/state", async (_req, res) => {
+router.get("/state", requireSyncSecret, async (_req, res) => {
   if (!hasDatabase) return res.status(503).json({ error: "Cloud sync is not configured (no DATABASE_URL)." });
   try {
     const { db, appStateTable, eq } = await loadDb();
@@ -28,10 +30,13 @@ router.get("/state", async (_req, res) => {
   }
 });
 
-router.put("/state", async (req, res) => {
+router.put("/state", requireSyncSecret, async (req, res) => {
   if (!hasDatabase) return res.status(503).json({ error: "Cloud sync is not configured (no DATABASE_URL)." });
   const { data } = req.body as { data?: any };
-  if (data == null || typeof data !== "object") return res.status(400).json({ error: "Missing data." });
+  if (!isPlainObject(data)) return res.status(400).json({ error: "Missing data." });
+  if (JSON.stringify(data).length > MAX_STATE_BYTES) {
+    return res.status(413).json({ error: "Saved data is too large to sync." });
+  }
   try {
     const { db, appStateTable } = await loadDb();
     const updatedAt = new Date();

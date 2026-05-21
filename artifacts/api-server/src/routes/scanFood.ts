@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { logger } from "../lib/logger";
 import { getOpenAI, hasOpenAI, extractJson } from "../lib/openai";
+import { aiRateLimit } from "../middlewares/rateLimit";
+import { ALLOWED_IMAGE_MIME, MAX_IMAGE_BYTES, approxBase64Bytes } from "../lib/validate";
 
 const router = Router();
 
@@ -23,10 +25,16 @@ Respond with ONLY a JSON object (no markdown, no prose), exactly these keys:
 }
 Use your best estimate for any value you cannot read exactly; never leave a key out.`;
 
-router.post("/scan-food", async (req, res) => {
+router.post("/scan-food", aiRateLimit, async (req, res) => {
   const { image, mime } = req.body as { image?: string; mime?: string };
-  if (!image) {
+  if (typeof image !== "string" || !image) {
     return res.status(400).json({ error: "No image provided." });
+  }
+  if (mime != null && !ALLOWED_IMAGE_MIME.has(mime)) {
+    return res.status(400).json({ error: "Unsupported image type. Use a PNG, JPEG, or WebP photo." });
+  }
+  if (approxBase64Bytes(image) > MAX_IMAGE_BYTES) {
+    return res.status(400).json({ error: "That image is too large. Try a smaller or more compressed photo." });
   }
   if (!hasOpenAI) {
     return res.status(503).json({
@@ -41,6 +49,7 @@ router.post("/scan-food", async (req, res) => {
     const response = await getOpenAI().chat.completions.create({
       model: "gpt-4o",
       max_tokens: 500,
+      response_format: { type: "json_object" },
       messages: [
         {
           role: "user",

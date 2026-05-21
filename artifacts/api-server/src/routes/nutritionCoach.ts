@@ -1,14 +1,19 @@
 import { Router } from "express";
 import { logger } from "../lib/logger";
 import { getOpenAI, hasOpenAI, extractJson } from "../lib/openai";
+import { aiRateLimit } from "../middlewares/rateLimit";
+import { isPlainObject } from "../lib/validate";
 
 const router = Router();
 
-router.post("/nutrition-coach", async (req, res) => {
+router.post("/nutrition-coach", aiRateLimit, async (req, res) => {
   if (!hasOpenAI) {
     return res.status(503).json({ error: "The nutrition coach isn't configured on the server yet (missing OpenAI key)." });
   }
 
+  if (!isPlainObject(req.body)) {
+    return res.status(400).json({ error: "Invalid request body." });
+  }
   const { today, targets, remaining, weekAvg, bodyGoal, latestBody } = req.body as any;
 
   const prompt = `You are a concise, practical nutrition coach. Use the user's data to give specific, actionable guidance for the rest of TODAY. Be direct and encouraging, not preachy.
@@ -35,6 +40,7 @@ Make snack and meal realistic and roughly fill the remaining macros. Numbers onl
     const response = await getOpenAI().chat.completions.create({
       model: "gpt-4o",
       max_tokens: 700,
+      response_format: { type: "json_object" },
       messages: [{ role: "user", content: prompt }],
     });
     text = response.choices[0]?.message?.content?.trim() || "";
