@@ -2616,19 +2616,21 @@ function DayDetailModal({ date, settings, totals, workout, meals, body, activity
   );
 
   // Workout sub-view
-  const activeSplit = workout.location === 'home'
-    ? (workout.homeSplit || HOME_WORKOUT_SPLIT)
-    : (workout.split || DEFAULT_WORKOUT_SPLIT);
   const dow = new Date(date + 'T12:00:00').getDay();
-  const splitDay = activeSplit.find((d: any) => d.day === dow) || activeSplit[dow % activeSplit.length] || activeSplit[0];
-  const [wData, setWData] = useState<any>(() =>
-    dayWorkout || {
-      name: splitDay?.name || 'Workout', location: workout.location || 'gym',
-      exercises: (splitDay?.exercises || []).map((ex: any) => ({
-        name: ex.name, sets: Array(ex.sets || 3).fill(0).map(() => ({ weight: '', reps: '', rpe: '' })),
-      })),
-    },
-  );
+  const getSplitDay = (loc: string) => {
+    const sp = loc === 'home' ? (workout.homeSplit || HOME_WORKOUT_SPLIT) : (workout.split || DEFAULT_WORKOUT_SPLIT);
+    return sp.find((d: any) => d.day === dow) || sp[dow % sp.length] || sp[0];
+  };
+  const [wData, setWData] = useState<any>(() => {
+    if (dayWorkout) return dayWorkout;
+    const loc = workout.location || 'gym';
+    const sd = getSplitDay(loc);
+    return { name: sd?.name || 'Workout', location: loc, exercises: (sd?.exercises || []).map((ex: any) => ({ name: ex.name, sets: Array(ex.sets || 3).fill(0).map(() => ({ weight: '', reps: '', rpe: '' })) })) };
+  });
+  const switchWLoc = (newLoc: string) => {
+    const sd = getSplitDay(newLoc);
+    setWData({ name: sd?.name || 'Workout', location: newLoc, exercises: (sd?.exercises || []).map((ex: any) => ({ name: ex.name, sets: Array(ex.sets || 3).fill(0).map(() => ({ weight: '', reps: '', rpe: '' })) })) });
+  };
   const wSetSet = (exIdx: number, setIdx: number, field: string, value: string) =>
     setWData((prev: any) => ({
       ...prev,
@@ -2649,6 +2651,14 @@ function DayDetailModal({ date, settings, totals, workout, meals, body, activity
         <button className="tap" style={{ marginBottom: 14, fontSize: 12 }} onClick={() => setSubView(null)}>
           <ChevronLeft size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Back to day
         </button>
+        <div className="row" style={{ gap: 8, marginBottom: 14 }}>
+          <button className={`tap ${wData.location !== 'home' ? 'active' : ''}`} style={{ flex: 1, justifyContent: 'center', padding: '8px 12px' }} onClick={() => switchWLoc('gym')}>
+            <Building2 size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} />Gym
+          </button>
+          <button className={`tap ${wData.location === 'home' ? 'active' : ''}`} style={{ flex: 1, justifyContent: 'center', padding: '8px 12px' }} onClick={() => switchWLoc('home')}>
+            <TreePine size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} />Home
+          </button>
+        </div>
         <p className="muted small" style={{ marginBottom: 14 }}>Log weight × reps. Leave blank to skip a set.</p>
         {wData.exercises?.map((ex: any, i: number) => (
           <div key={i} style={{ marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid #E4DCC8' }}>
@@ -2854,14 +2864,47 @@ function DayDetailModal({ date, settings, totals, workout, meals, body, activity
             <div><div className="mono tiny muted">CARBS</div><div className="h3">{Math.round(dayMeals.carbs || 0)}g</div></div>
             <div><div className="mono tiny muted">FAT</div><div className="h3">{Math.round(dayMeals.fat || 0)}g</div></div>
           </div>
+          {MICRO_DEFS.some(d => (dayMeals[d.key] || 0) > 0) && (
+            <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid #E4DCC8' }}>
+              <div className="mono tiny muted" style={{ marginBottom: 5 }}>MICROS</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px' }}>
+                {MICRO_DEFS.filter(d => (dayMeals[d.key] || 0) > 0).map(d => {
+                  const v = dayMeals[d.key];
+                  const tgt = settings.microTargets?.[d.key] || d.defaultTarget;
+                  const hit = !d.limit && v >= tgt;
+                  const over = d.limit && v > tgt;
+                  const fmt = v < 10 ? Math.round(v * 10) / 10 : Math.round(v);
+                  return (
+                    <span key={d.key} className="mono tiny" style={{ color: over ? '#B8460E' : hit ? '#4A6741' : '#6B6457' }}>
+                      {d.label.replace('Vitamin ', 'Vit ')}: {fmt}{d.unit}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           {dayEntries.length > 0 && (
             <div style={{ marginTop: 10, borderTop: '1px solid #E4DCC8', paddingTop: 8 }}>
-              {dayEntries.map((e: any) => (
-                <div key={e.id} className="between" style={{ padding: '3px 0' }}>
-                  <span className="small">{e.name}</span>
-                  <span className="mono tiny muted">{e.protein}p · {e.carbs}c · {e.fat}f · {e.calories}cal</span>
-                </div>
-              ))}
+              {dayEntries.map((e: any) => {
+                const eMicros = MICRO_DEFS.filter(d => (e[d.key] || 0) > 0);
+                return (
+                  <div key={e.id} style={{ padding: '4px 0', borderBottom: '1px solid #F0EAD8' }}>
+                    <div className="between">
+                      <span className="small">{e.name}</span>
+                      <span className="mono tiny muted">{e.protein}p · {e.carbs}c · {e.fat}f · {e.calories}cal</span>
+                    </div>
+                    {eMicros.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 8px', marginTop: 2 }}>
+                        {eMicros.map(d => {
+                          const v = e[d.key];
+                          const fmt = v < 10 ? Math.round(v * 10) / 10 : Math.round(v);
+                          return <span key={d.key} className="mono tiny" style={{ color: d.limit ? '#B8460E' : '#4A6741' }}>{d.label.replace('Vitamin ', 'Vit ')}: {fmt}{d.unit}</span>;
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -3571,9 +3614,33 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
       <div className="small" style={{ fontWeight: 600, marginBottom: 2 }}>{review.name}</div>
       {review.source && <div className="muted tiny" style={{ marginBottom: 8 }}>{review.source}</div>}
       <QtyStepper qty={qty} setQty={setQty} />
-      <div className="mono tiny muted" style={{ marginBottom: 10 }}>
-        {(() => { const s = scaled(review, qty); return `${s.protein}p · ${s.carbs}c · ${s.fat}f · ${s.calories}cal`; })()}
-      </div>
+      {(() => {
+        const s = scaled(review, qty);
+        const microHits = MICRO_DEFS.filter(d => (s[d.key] || 0) > 0);
+        return (
+          <>
+            <div className="mono tiny muted" style={{ marginBottom: microHits.length ? 6 : 10 }}>
+              {`${s.protein}p · ${s.carbs}c · ${s.fat}f · ${s.calories}cal`}
+            </div>
+            {microHits.length > 0 && (
+              <div style={{ marginBottom: 10, paddingTop: 6, borderTop: '1px solid #C8D9C0' }}>
+                <div className="mono tiny muted" style={{ marginBottom: 4 }}>MICROS</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px 10px' }}>
+                  {microHits.map(d => {
+                    const v: number = (s as any)[d.key];
+                    const fmt = v < 10 ? Math.round(v * 10) / 10 : Math.round(v);
+                    return (
+                      <span key={d.key} className="mono tiny" style={{ color: d.limit ? '#B8460E' : '#4A6741' }}>
+                        {d.label.replace('Vitamin ', 'Vit ')}: {fmt}{d.unit}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </>
+        );
+      })()}
       <button className="btn" style={{ width: '100%', marginBottom: 6 }} onClick={() => logItem(review, qty)}>
         <Plus size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Log to today
       </button>
