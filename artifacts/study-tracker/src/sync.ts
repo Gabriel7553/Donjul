@@ -182,33 +182,55 @@ if (typeof window !== "undefined") {
   });
 }
 
+async function pullForUser(userId: string): Promise<Record<string, { value: unknown; updatedAt?: string }>> {
+  const ctrl = new AbortController();
+  const timeoutId = setTimeout(() => ctrl.abort(), HYDRATE_TIMEOUT_MS);
+  const resp = await fetch(`${API}/sync/pull`, {
+    headers: { "Content-Type": "application/json", "x-user-id": userId },
+    signal: ctrl.signal,
+  });
+  clearTimeout(timeoutId);
+  if (!resp.ok) return {};
+  const json = (await resp.json()) as { data?: Record<string, { value: unknown; updatedAt?: string }> };
+  return json.data ?? {};
+}
+
+function applyData(data: Record<string, { value: unknown; updatedAt?: string }>): void {
+  for (const [key, entry] of Object.entries(data)) {
+    if (!shouldSync(key)) continue;
+    const remoteTs = entry.updatedAt ? Date.parse(entry.updatedAt) : 0;
+    const localTs = getLocalTs(key);
+    if (localTs && localTs > remoteTs) continue;
+    try {
+      localStorage.setItem(key, JSON.stringify(entry.value));
+      if (remoteTs) localStorage.setItem(LOCAL_TS_PREFIX + key, String(remoteTs));
+    } catch { /* quota */ }
+  }
+}
+
 export async function hydrate(): Promise<void> {
   try {
-    const ctrl = new AbortController();
-    const timeoutId = setTimeout(() => ctrl.abort(), HYDRATE_TIMEOUT_MS);
-    const resp = await fetch(`${API}/sync/pull`, {
-      headers: headers(),
-      signal: ctrl.signal,
-    });
-    clearTimeout(timeoutId);
-    if (!resp.ok) return;
-    const json = (await resp.json()) as {
-      data?: Record<string, { value: unknown; updatedAt?: string }>;
-    };
-    const data = json.data ?? {};
-    for (const [key, entry] of Object.entries(data)) {
-      if (!shouldSync(key)) continue;
-      const remoteTs = entry.updatedAt ? Date.parse(entry.updatedAt) : 0;
-      const localTs = getLocalTs(key);
-      // Only overwrite local if remote is newer (or no local timestamp recorded yet).
-      if (localTs && localTs > remoteTs) continue;
+    const data = await pullForUser(getUserId());
+
+    // Auto-recover: if no settings found for this UUID, find the most recent
+    // user on the server and switch to that ID automatically.
+    const hasSettings = Object.prototype.hasOwnProperty.call(data, "st:settings");
+    if (!hasSettings) {
       try {
-        localStorage.setItem(key, JSON.stringify(entry.value));
-        if (remoteTs) localStorage.setItem(LOCAL_TS_PREFIX + key, String(remoteTs));
-      } catch {
-        /* quota */
-      }
+        const latestResp = await fetch(`${API}/sync/latest`);
+        if (latestResp.ok) {
+          const { userId: latestId } = await latestResp.json() as { userId: string | null };
+          if (latestId && latestId !== getUserId()) {
+            localStorage.setItem(USER_ID_KEY, latestId);
+            const recovered = await pullForUser(latestId);
+            applyData(recovered);
+            return;
+          }
+        }
+      } catch { /* fall through to empty state */ }
     }
+
+    applyData(data);
   } catch {
     /* offline or timed out — use local data */
   }

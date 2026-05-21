@@ -53,6 +53,24 @@ router.get("/sync/pull", async (req, res): Promise<void> => {
   }
 });
 
+router.get("/sync/latest", async (req, res): Promise<void> => {
+  if (!hasDb) { res.status(503).json({ error: "Database not configured" }); return; }
+  try {
+    const { rows } = await getPool().query(
+      `SELECT user_id FROM kv_store
+       WHERE key = 'st:settings'
+         AND value->>'setupComplete' = 'true'
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+    );
+    if (rows.length === 0) { res.json({ userId: null }); return; }
+    res.json({ userId: rows[0].user_id });
+  } catch (err) {
+    logger.error({ err }, "sync/latest failed");
+    res.status(500).json({ error: "Latest failed" });
+  }
+});
+
 router.post("/sync/push", async (req, res): Promise<void> => {
   if (!hasDb) { res.status(503).json({ error: "Database not configured" }); return; }
   try {
