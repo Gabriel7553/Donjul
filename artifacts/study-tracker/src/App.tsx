@@ -615,15 +615,22 @@ function fmtPayoff(months: number): string {
   return rem > 0 ? `${years}yr ${rem}mo` : `${years}yr`;
 }
 
-// ────── TAX ESTIMATION (2025, California + Federal, Single) ──────────────────
-const FED_BRACKETS_25: [number, number][] = [
-  [11925, 0.10], [48475, 0.12], [103350, 0.22], [197300, 0.24],
-  [250525, 0.32], [626350, 0.35], [9_999_999, 0.37],
+// ────── TAX ENGINE (multi-year: California + Federal, Single filer) ──────────
+const CURRENT_TAX_YEAR = new Date().getFullYear();
+
+const FED_BRACKETS: Record<number, [number, number][]> = {
+  2024: [[11600,0.10],[47150,0.12],[100525,0.22],[191950,0.24],[243725,0.32],[609350,0.35],[9_999_999,0.37]],
+  2025: [[11925,0.10],[48475,0.12],[103350,0.22],[197300,0.24],[250525,0.32],[626350,0.35],[9_999_999,0.37]],
+  2026: [[12200,0.10],[49650,0.12],[105800,0.22],[202050,0.24],[256550,0.32],[641850,0.35],[9_999_999,0.37]],
+};
+const CA_BRACKETS: [number, number][] = [
+  [10756,0.01],[25499,0.02],[40245,0.04],[55866,0.06],
+  [70606,0.08],[360659,0.093],[432787,0.103],[721314,0.113],[9_999_999,0.123],
 ];
-const CA_BRACKETS_25: [number, number][] = [
-  [10756, 0.01], [25499, 0.02], [40245, 0.04], [55866, 0.06],
-  [70606, 0.08], [360659, 0.093], [432787, 0.103], [721314, 0.113], [9_999_999, 0.123],
-];
+const STD_DEDUCTION: Record<number, number> = { 2024: 14600, 2025: 15000, 2026: 15350 };
+const SS_WAGE_BASE: Record<number, number> = { 2024: 168600, 2025: 176100, 2026: 176100 };
+const CA_STD_DEDUCT = 5202;
+
 function applyBrackets(income: number, brackets: [number, number][]): number {
   let tax = 0, prev = 0;
   for (const [limit, rate] of brackets) {
@@ -633,36 +640,110 @@ function applyBrackets(income: number, brackets: [number, number][]): number {
   }
   return tax;
 }
+
+// Preset 1099 payers the user works with
+const PAYER_PRESETS = [
+  { id: 'vsolvit_w2', label: 'Vsolvit (W-2)', type: 'w2' },
+  { id: 'tpt', label: 'TPT (1099)', type: '1099' },
+  { id: 'mffu', label: 'MFFU (1099)', type: '1099' },
+  { id: 'apex', label: 'Apex Trader (1099)', type: '1099' },
+  { id: 'topstep', label: 'Topstep (1099)', type: '1099' },
+  { id: 'tradeday', label: 'TradeDay (1099)', type: '1099' },
+  { id: 'other_1099', label: 'Other (1099)', type: '1099' },
+  { id: 'other_w2', label: 'Other (W-2)', type: 'w2' },
+];
+
+const makeYearData = () => ({
+  w2GrossAnnual: 0, w2Employer: 'Vsolvit', w2YTDActual: 0,
+  w2WithheldFed: 0, w2WithheldCA: 0, w2WithheldSS: 0, w2WithheldMedicare: 0,
+  tradingExpenses: 0,
+  deductions: { homeOffice: 0, equipment: 0, software: 0, internet: 0, other: 0 } as Record<string, number>,
+  entries1099: [] as any[],
+  payments: [] as any[],
+});
+
 const DEFAULT_TAX = {
-  w2GrossAnnual: 0, w2Employer: '', w2WithheldFed: 0, w2WithheldCA: 0,
-  tradingExpenses: 0, entries1099: [] as any[], payments: [] as any[],
+  activeYear: CURRENT_TAX_YEAR,
+  years: { [CURRENT_TAX_YEAR]: makeYearData() } as Record<number, any>,
 };
+
 function migrateTax(t: any): any {
-  return { ...DEFAULT_TAX, ...(t || {}),
-    entries1099: Array.isArray(t?.entries1099) ? t.entries1099 : [],
-    payments: Array.isArray(t?.payments) ? t.payments : [],
+  if (!t) return DEFAULT_TAX;
+  if (t.years && typeof t.years === 'object') {
+    const years: Record<number, any> = {};
+    for (const yr of Object.keys(t.years)) {
+      const y = t.years[yr];
+      years[Number(yr)] = { ...makeYearData(), ...y,
+        entries1099: Array.isArray(y.entries1099) ? y.entries1099 : [],
+        payments: Array.isArray(y.payments) ? y.payments : [],
+        deductions: { ...makeYearData().deductions, ...(y.deductions || {}) },
+      };
+    }
+    if (!years[CURRENT_TAX_YEAR]) years[CURRENT_TAX_YEAR] = makeYearData();
+    return { activeYear: t.activeYear || CURRENT_TAX_YEAR, years };
+  }
+  // Migrate old flat format → treat as 2025 data
+  const old: any = { ...makeYearData(),
+    w2GrossAnnual: t.w2GrossAnnual || 0, w2Employer: t.w2Employer || 'Vsolvit',
+    w2WithheldFed: t.w2WithheldFed || 0, w2WithheldCA: t.w2WithheldCA || 0,
+    tradingExpenses: t.tradingExpenses || 0,
+    entries1099: Array.isArray(t.entries1099) ? t.entries1099 : [],
+    payments: Array.isArray(t.payments) ? t.payments : [],
   };
+  const years: Record<number, any> = { 2025: old };
+  if (CURRENT_TAX_YEAR !== 2025) years[CURRENT_TAX_YEAR] = makeYearData();
+  return { activeYear: CURRENT_TAX_YEAR, years };
 }
-function calcTaxEstimate(t: any) {
-  const income1099 = ((t.entries1099 as any[]) || []).reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
-  const w2Gross = Number(t.w2GrossAnnual) || 0;
-  const netTrading = Math.max(0, income1099 - (Number(t.tradingExpenses) || 0));
+
+function calcTaxEstimate(yd: any, year: number = CURRENT_TAX_YEAR, w2YTDOverride = 0) {
+  const fedBrackets = FED_BRACKETS[year] || FED_BRACKETS[2025];
+  const stdDeduct = STD_DEDUCTION[year] || 15000;
+  const ssWageBase = SS_WAGE_BASE[year] || 176100;
+
+  const income1099 = ((yd.entries1099 as any[]) || []).reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
+  const w2Gross = w2YTDOverride > 0 ? w2YTDOverride : (Number(yd.w2GrossAnnual) || 0);
+  const dedTotal = (Object.values(yd.deductions || {}) as number[]).reduce((s, v) => s + (Number(v) || 0), 0)
+    + (Number(yd.tradingExpenses) || 0);
+  const netTrading = Math.max(0, income1099 - dedTotal);
+
+  // Self-employment tax (both employer + employee halves)
   const seBase = netTrading * 0.9235;
-  const seTax = Math.min(seBase, 176100) * 0.124 + seBase * 0.029;
+  const seSS = Math.min(seBase, ssWageBase) * 0.124;
+  const seMed = seBase * 0.029;
+  const seTax = seSS + seMed;
   const halfSE = seTax / 2;
+
+  // W-2 payroll taxes (employee share shown for awareness)
+  const w2SS = Math.min(w2Gross, ssWageBase) * 0.062;
+  const w2Med = w2Gross * 0.0145 + Math.max(0, w2Gross - 200000) * 0.009;
+
   const totalGross = w2Gross + netTrading;
-  const agi = totalGross - halfSE;
-  const fedIncome = applyBrackets(Math.max(0, agi - 15000), FED_BRACKETS_25);
-  const caIncome = applyBrackets(Math.max(0, agi - 5202), CA_BRACKETS_25);
+  const fedAGI = Math.max(0, totalGross - halfSE - stdDeduct);
+  const caAGI = Math.max(0, totalGross - halfSE - CA_STD_DEDUCT);
+  const fedIncome = applyBrackets(fedAGI, fedBrackets);
+  const caIncome = applyBrackets(caAGI, CA_BRACKETS);
   const caSDI = totalGross * 0.011;
-  const totalFed = fedIncome + seTax;
-  const totalCA = caIncome + caSDI;
-  const totalTax = totalFed + totalCA;
-  const paidEst = ((t.payments as any[]) || []).reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
-  const withheld = (Number(t.w2WithheldFed) || 0) + (Number(t.w2WithheldCA) || 0) + paidEst;
-  const netOwed = Math.max(0, totalTax - withheld);
+
+  const w2WithheldFed = Number(yd.w2WithheldFed) || 0;
+  const w2WithheldCA = Number(yd.w2WithheldCA) || 0;
+  const w2WithheldSS = Number(yd.w2WithheldSS) || 0;
+  const w2WithheldMed = Number(yd.w2WithheldMedicare) || 0;
+  const qPaid = ((yd.payments as any[]) || []).reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
+  const totalWithheld = w2WithheldFed + w2WithheldCA + w2WithheldSS + w2WithheldMed + qPaid;
+
+  const totalTax = fedIncome + seTax + caIncome + caSDI;
+  const netOwed = Math.max(0, totalTax - totalWithheld);
   const effectiveRate = totalGross > 0 ? (totalTax / totalGross) * 100 : 0;
-  return { income1099, w2Gross, netTrading, seTax, totalGross, agi, fedIncome, caIncome, caSDI, totalFed, totalCA, totalTax, withheld, netOwed, effectiveRate, quarterly: netOwed / 4 };
+
+  return {
+    income1099, w2Gross, netTrading, dedTotal,
+    seBase, seSS, seMed, seTax, halfSE,
+    w2SS, w2Med,
+    totalGross, fedAGI, caAGI, stdDeduct,
+    fedIncome, caIncome, caSDI,
+    totalTax, totalWithheld, netOwed, effectiveRate,
+    quarterly: netOwed / 4,
+  };
 }
 
 const CUSTOM_CHALLENGE_EMOJIS = ['📖','🏋️','🧘','🚴','🥗','💧','💤','✍️','🎯','🎨','🎸','🧠','🔥','⚡','🌟'];
@@ -856,6 +937,25 @@ function GlobalStyles() {
         background: #1A1A26; border-color: #3A3A50; color: #E8E4DC;
       }
       .dark .swatch { opacity: 0.9; }
+      /* CSS custom properties for dark-mode-aware inline styles */
+      :root {
+        --text: #1A1A2E; --text-muted: #6B6457; --text-sub: #3B3B55;
+        --bg: #F5F0E6; --bg-card: #FBF7EE; --bg-inset: #F0EAD8;
+        --bg-inset2: #F9F5EC; --border: #E4DCC8; --border-muted: #D4CCB8;
+      }
+      .dark {
+        --text: #E8E4DC; --text-muted: #9A9590; --text-sub: #C0BAB0;
+        --bg: #14141C; --bg-card: #1C1C28; --bg-inset: #20202E;
+        --bg-inset2: #252535; --border: #2C2C3E; --border-muted: #3A3A50;
+      }
+      .dark .h1, .dark .h3 { color: #E8E4DC !important; }
+      .dark .small { color: #D8D4CC; }
+      .dark .tiny { color: #B0A9A0; }
+      .dark .mono { color: #E8E4DC; }
+      .dark .streak-flame { color: #E8A838; }
+      .dark .progress-marker { background: #E8E4DC; }
+      .dark .sparkline-bar { background: #C8603E; }
+      .dark .pill { border-color: #3A3A50; }
     `}</style>
   );
 }
@@ -4408,170 +4508,345 @@ function IncomePlannerModal({ spending, onSave, onClose }: any) {
 // ════════════════════════════════════════════════════════════════════════════════
 // MONEY — TAX TRACKER MODAL (1099 / California / Federal)
 // ════════════════════════════════════════════════════════════════════════════════
-function TaxModal({ tax, onSave, onClose }: any) {
-  const [view, setView] = useState<'estimate'|'income'|'setup'|'payments'>('estimate');
-  const [draft, setDraft] = useState({ ...tax });
-  const [newEntry, setNewEntry] = useState({ payer: '', amount: '', date: todayStr(), description: '' });
-  const [newPayment, setNewPayment] = useState({ quarter: 'Q1', year: '2025', amount: '', datePaid: todayStr() });
-  const est = calcTaxEstimate(draft);
+function TaxModal({ tax, spending, onSave, onClose }: any) {
+  const [view, setView] = useState<'estimate'|'income'|'deductions'|'payments'>('estimate');
+  const [draft, setDraft] = useState<any>(() => {
+    const t = migrateTax(tax);
+    return t;
+  });
 
-  const saveAll = () => { onSave(draft); onClose(); };
+  // Which year the user is viewing
+  const availableYears = Object.keys(draft.years || {}).map(Number).sort((a, b) => b - a);
+  const [viewYear, setViewYear] = useState<number>(draft.activeYear || CURRENT_TAX_YEAR);
+  const isCurrentYear = viewYear === CURRENT_TAX_YEAR;
+
+  // Year data shortcut + updater
+  const yd: any = draft.years?.[viewYear] || makeYearData();
+  const updateYD = (patch: Partial<ReturnType<typeof makeYearData>>) => {
+    setDraft((d: any) => ({ ...d, years: { ...d.years, [viewYear]: { ...yd, ...patch } } }));
+  };
+
+  // Auto-sync W2 YTD from Income Planner
+  const spendingW2YTD = Number((spending?.income || {}).w2YTD) || 0;
+  const spendingW2Employer = (spending?.income || {}).w2Employer || '';
+  const w2YTDForCalc = yd.w2YTDActual > 0 ? yd.w2YTDActual : spendingW2YTD;
+
+  const est = calcTaxEstimate(yd, viewYear, w2YTDForCalc);
+
+  // 1099 entry form
+  const [newPayerId, setNewPayerId] = useState('tpt');
+  const [newCustomPayer, setNewCustomPayer] = useState('');
+  const [newAmt, setNewAmt] = useState('');
+  const [newDate, setNewDate] = useState(todayStr());
+  const [newNote, setNewNote] = useState('');
+
+  // Quarterly payment form
+  const [newPayment, setNewPayment] = useState({ quarter: 'Q1', amount: '', datePaid: todayStr() });
+
+  const quarters = (yr: number) => [
+    { q: 'Q1', due: `Apr 15, ${yr}` },
+    { q: 'Q2', due: `Jun 15, ${yr}` },
+    { q: 'Q3', due: `Sep 15, ${yr}` },
+    { q: 'Q4', due: `Jan 15, ${yr + 1}` },
+  ];
 
   const addEntry = () => {
-    const amt = parseFloat(newEntry.amount);
+    const amt = parseFloat(newAmt);
     if (!amt || amt <= 0) { toast.error('Enter an amount'); return; }
-    const e = { id: `t1099_${Date.now()}_${Math.random().toString(36).slice(2,6)}`, payer: newEntry.payer.trim() || 'Prop Firm', amount: Math.round(amt * 100) / 100, date: newEntry.date, description: newEntry.description.trim() };
-    setDraft({ ...draft, entries1099: [...(draft.entries1099 || []), e] });
-    setNewEntry({ payer: '', amount: '', date: todayStr(), description: '' });
-    toast('Entry added');
+    const preset = PAYER_PRESETS.find(p => p.id === newPayerId);
+    const payerName = newPayerId === 'other_1099' || newPayerId === 'other_w2'
+      ? (newCustomPayer.trim() || 'Other')
+      : (preset?.label.split(' (')[0] || newCustomPayer.trim() || 'Unknown');
+    const e = {
+      id: `t1099_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+      payerId: newPayerId, payer: payerName, incomeType: preset?.type || '1099',
+      amount: Math.round(amt * 100) / 100, date: newDate, description: newNote.trim(),
+    };
+    updateYD({ entries1099: [...(yd.entries1099 || []), e] });
+    setNewAmt(''); setNewNote(''); setNewDate(todayStr());
+    toast('Entry added — tax estimate updated');
   };
 
   const addPayment = () => {
     const amt = parseFloat(newPayment.amount);
     if (!amt || amt <= 0) { toast.error('Enter an amount'); return; }
-    const p = { id: `qp_${Date.now()}_${Math.random().toString(36).slice(2,6)}`, quarter: newPayment.quarter, year: newPayment.year, amount: Math.round(amt * 100) / 100, datePaid: newPayment.datePaid };
-    setDraft({ ...draft, payments: [...(draft.payments || []), p] });
-    setNewPayment({ quarter: 'Q1', year: '2025', amount: '', datePaid: todayStr() });
+    const p = { id: `qp_${Date.now()}_${Math.random().toString(36).slice(2,6)}`, quarter: newPayment.quarter, year: String(viewYear), amount: Math.round(amt * 100) / 100, datePaid: newPayment.datePaid };
+    updateYD({ payments: [...(yd.payments || []), p] });
+    setNewPayment({ quarter: 'Q1', amount: '', datePaid: todayStr() });
     toast('Payment recorded');
   };
 
-  const QUARTERS = [
-    { q: 'Q1', due: 'Apr 15, 2025' }, { q: 'Q2', due: 'Jun 16, 2025' },
-    { q: 'Q3', due: 'Sep 15, 2025' }, { q: 'Q4', due: 'Jan 15, 2026' },
-  ];
+  const saveAll = () => { onSave({ ...draft, activeYear: draft.activeYear }); onClose(); };
+  const addYear = (yr: number) => {
+    if (draft.years?.[yr]) { setViewYear(yr); return; }
+    setDraft((d: any) => ({ ...d, years: { ...d.years, [yr]: makeYearData() } }));
+    setViewYear(yr);
+  };
+
+  const qs = quarters(viewYear);
+  const preset = PAYER_PRESETS.find(p => p.id === newPayerId);
 
   return (
-    <ModalShell title="Tax tracker 2025" onClose={onClose}>
+    <ModalShell title={`Tax Tracker`} onClose={onClose}>
+      {/* Year selector */}
+      <div style={{ background: 'var(--bg-inset)', borderRadius: 10, padding: '8px 10px', marginBottom: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+          {availableYears.map(yr => (
+            <button key={yr} onClick={() => setViewYear(yr)} className="tap" style={{ fontSize: 12, padding: '4px 10px', background: viewYear === yr ? '#8E4585' : 'transparent', color: viewYear === yr ? '#F5F0E6' : 'var(--text)', borderColor: viewYear === yr ? '#8E4585' : 'var(--border)' }}>
+              {yr}{yr === CURRENT_TAX_YEAR ? ' ★' : ''}
+            </button>
+          ))}
+        </div>
+        {!draft.years?.[viewYear - 1] && (
+          <button className="tap" onClick={() => addYear(viewYear - 1)} style={{ fontSize: 11, padding: '4px 8px', whiteSpace: 'nowrap', color: 'var(--text-muted)', borderColor: 'var(--border)' }}>
+            + {viewYear - 1}
+          </button>
+        )}
+      </div>
+
+      {/* View tabs */}
       <div className="row" style={{ gap: 4, marginBottom: 14, flexWrap: 'wrap' }}>
-        {([['estimate','📊 Estimate'],['income','💰 1099'],['setup','⚙️ W2 Setup'],['payments','💸 Payments']] as [string,string][]).map(([v,label]) => (
-          <button key={v} className="tap" onClick={() => setView(v as any)} style={{ fontSize: 11, padding: '5px 10px', background: view === v ? '#8E4585' : 'transparent', color: view === v ? '#F5F0E6' : '#1A1A2E', borderColor: view === v ? '#8E4585' : '#E4DCC8' }}>{label}</button>
+        {([['estimate','📊 Estimate'],['income','💰 Income'],['deductions','✂️ Deductions'],['payments','💸 Payments']] as [string,string][]).map(([v,label]) => (
+          <button key={v} className="tap" onClick={() => setView(v as any)} style={{ fontSize: 11, padding: '5px 10px', background: view === v ? '#8E4585' : 'transparent', color: view === v ? '#F5F0E6' : 'var(--text)', borderColor: view === v ? '#8E4585' : 'var(--border)' }}>{label}</button>
         ))}
       </div>
 
+      {/* ── ESTIMATE ── */}
       {view === 'estimate' && (
         <>
           {est.totalGross === 0 ? (
             <div style={{ textAlign: 'center', padding: '24px 16px' }}>
               <div style={{ fontSize: 32, marginBottom: 8 }}>📊</div>
-              <div className="small muted">Add your 1099 income entries and W2 setup to see your 2025 tax estimate.</div>
+              <div className="small muted">Add income entries to see your {viewYear} tax estimate.</div>
+              <div className="tiny muted" style={{ marginTop: 6 }}>
+                {spendingW2YTD > 0 ? `Income Planner W-2 YTD: ${fmtMoney(spendingW2YTD)} (synced)` : 'Go to Income tab to log your W-2 or 1099 income.'}
+              </div>
             </div>
           ) : (
             <>
+              {/* Header total */}
               <div style={{ background: '#8E458515', border: '1px solid #8E458530', borderRadius: 10, padding: '12px 14px', marginBottom: 14 }}>
-                <div className="tiny muted" style={{ marginBottom: 4 }}>Total estimated 2025 tax</div>
-                <div className="mono" style={{ fontSize: 24, fontWeight: 700, color: '#8E4585' }}>{fmtMoney(est.totalTax)}</div>
-                <div className="tiny muted">Effective rate: {est.effectiveRate.toFixed(1)}% · AGI: {fmtMoney(est.agi)}</div>
+                <div className="h2" style={{ marginBottom: 4 }}>Total estimated {viewYear} tax</div>
+                <div className="mono" style={{ fontSize: 26, fontWeight: 700, color: '#8E4585' }}>{fmtMoney(est.totalTax)}</div>
+                <div className="tiny muted" style={{ marginTop: 4 }}>Effective rate: {est.effectiveRate.toFixed(1)}% · Total gross: {fmtMoney(est.totalGross)}</div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
-                {[['Federal income', est.fedIncome, '#1A1A2E'], ['Self-employment', est.seTax, '#B8460E'], ['CA income tax', est.caIncome, '#3B5C6B'], ['CA SDI (1.1%)', est.caSDI, '#6B6457']].map(([label, val, color]) => (
-                  <div key={label as string} style={{ background: '#F9F5EC', borderRadius: 8, padding: '10px 12px' }}>
-                    <div className="tiny muted" style={{ marginBottom: 2 }}>{label as string}</div>
-                    <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: color as string }}>{fmtMoney(val as number)}</div>
+
+              {/* Tax breakdown grid */}
+              <div className="h2" style={{ marginBottom: 8 }}>Federal</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 12 }}>
+                {([
+                  ['Income tax', est.fedIncome, '#3B5C6B'],
+                  ['SE — Social Security', est.seSS, '#B8460E'],
+                  ['SE — Medicare', est.seMed, '#B8460E'],
+                  ['½ SE deduction', -est.halfSE, '#3F7A4F'],
+                ] as [string, number, string][]).map(([label, val, color]) => (
+                  <div key={label} style={{ background: 'var(--bg-inset2)', borderRadius: 8, padding: '9px 11px' }}>
+                    <div className="tiny muted" style={{ marginBottom: 2 }}>{label}</div>
+                    <div className="mono" style={{ fontSize: 13, fontWeight: 700, color }}>{val < 0 ? `−${fmtMoney(-val)}` : fmtMoney(val)}</div>
                   </div>
                 ))}
               </div>
-              <div style={{ background: '#F0EAD8', borderRadius: 8, padding: '10px 12px', marginBottom: 14 }}>
-                {[['W2 gross + 1099 net', fmtMoney(est.totalGross)], ['AGI (after ½ SE deduct.)', fmtMoney(est.agi)], ['Total withheld/paid', `-${fmtMoney(est.withheld)}`]].map(([l,v]) => (
+              <div className="h2" style={{ marginBottom: 8 }}>California</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 14 }}>
+                {([
+                  ['CA Income tax', est.caIncome, '#3B5C6B'],
+                  ['CA SDI (1.1%)', est.caSDI, '#6B6457'],
+                ] as [string, number, string][]).map(([label, val, color]) => (
+                  <div key={label} style={{ background: 'var(--bg-inset2)', borderRadius: 8, padding: '9px 11px' }}>
+                    <div className="tiny muted" style={{ marginBottom: 2 }}>{label}</div>
+                    <div className="mono" style={{ fontSize: 13, fontWeight: 700, color }}>{fmtMoney(val)}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Summary */}
+              <div style={{ background: 'var(--bg-inset)', borderRadius: 8, padding: '10px 12px', marginBottom: 14 }}>
+                {[
+                  ['W-2 gross YTD', fmtMoney(est.w2Gross), w2YTDForCalc > 0 && spendingW2YTD > 0 && yd.w2YTDActual === 0 ? ' (synced)' : ''],
+                  ['1099 net (after deductions)', fmtMoney(est.netTrading), ''],
+                  [`Std. deduction ${viewYear}`, `−${fmtMoney(est.stdDeduct)}`, ''],
+                  ['Federal AGI', fmtMoney(est.fedAGI), ''],
+                  ['Total withheld/paid', `−${fmtMoney(est.totalWithheld)}`, ''],
+                ].map(([l, v, note]) => (
                   <div key={l as string} className="between" style={{ marginBottom: 5 }}>
-                    <span className="tiny muted">{l as string}</span><span className="mono tiny">{v as string}</span>
+                    <span className="tiny muted">{l as string}{note ? <span style={{ color: '#3F7A4F', fontSize: 10 }}>{note}</span> : ''}</span>
+                    <span className="mono tiny" style={{ color: 'var(--text)' }}>{v as string}</span>
                   </div>
                 ))}
-                <div className="between" style={{ paddingTop: 6, borderTop: '1px solid #D4CCB8' }}>
-                  <span className="small" style={{ fontWeight: 600 }}>Still owed</span>
+                <div className="between" style={{ paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+                  <span className="small" style={{ fontWeight: 600, color: 'var(--text)' }}>Still owed</span>
                   <span className="mono small" style={{ fontWeight: 700, color: est.netOwed > 0 ? '#B8460E' : '#3F7A4F' }}>{est.netOwed > 0 ? fmtMoney(est.netOwed) : '✓ Covered!'}</span>
                 </div>
               </div>
+
               {est.netOwed > 0 && (
                 <div style={{ background: '#C8932E15', border: '1px solid #C8932E40', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
-                  <div className="tiny muted">Recommended quarterly est. payment</div>
+                  <div className="tiny muted">Recommended quarterly payment</div>
                   <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: '#C8932E' }}>{fmtMoney(est.quarterly)}/quarter</div>
-                  <div className="tiny muted">= {fmtMoney(est.totalTax / 12)}/mo set aside</div>
+                  <div className="tiny muted">= {fmtMoney(est.totalTax / 12)}/mo to set aside</div>
                 </div>
               )}
-              <div className="tiny muted" style={{ textAlign: 'center' }}>2025 CA + Federal brackets · Single filer · 15.3% SE tax</div>
+              <div className="tiny muted" style={{ textAlign: 'center' }}>{viewYear} CA + Federal brackets · Single filer · Self-employed 15.3% SE tax</div>
             </>
           )}
+          <button className="btn" style={{ width: '100%', marginTop: 14 }} onClick={saveAll}><Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save</button>
         </>
       )}
 
+      {/* ── INCOME ── */}
       {view === 'income' && (
         <>
-          <div className="h3" style={{ marginBottom: 8 }}>Add 1099 entry</div>
-          <div className="row" style={{ gap: 8, marginBottom: 8 }}>
-            <div style={{ flex: 1 }}><label>Payer</label><input type="text" value={newEntry.payer} onChange={(e) => setNewEntry({ ...newEntry, payer: e.target.value })} placeholder="Apex, Topstep…" /></div>
-            <div style={{ flex: 1 }}><label>Amount</label><div className="row" style={{ gap: 6, alignItems: 'center' }}><span className="mono muted">$</span><input type="number" step="0.01" value={newEntry.amount} onChange={(e) => setNewEntry({ ...newEntry, amount: e.target.value })} placeholder="0.00" style={{ flex: 1 }} /></div></div>
+          {/* W-2 setup */}
+          <div style={{ background: 'var(--bg-inset)', borderRadius: 10, padding: '12px 14px', marginBottom: 14 }}>
+            <div className="h3" style={{ marginBottom: 10, color: 'var(--text)' }}>💼 W-2 Income</div>
+            <label>Employer</label>
+            <input type="text" value={yd.w2Employer || ''} onChange={(e) => updateYD({ w2Employer: e.target.value })} placeholder="Vsolvit" style={{ marginBottom: 10 }} />
+            <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+              <div style={{ flex: 1 }}>
+                <label>Annual gross (projected)</label>
+                <div className="row" style={{ gap: 4 }}><span className="mono muted">$</span><input type="number" step="100" value={yd.w2GrossAnnual || ''} onChange={(e) => updateYD({ w2GrossAnnual: parseFloat(e.target.value) || 0 })} placeholder="0" style={{ flex: 1 }} /></div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label>Actual W-2 gross YTD</label>
+                <div className="row" style={{ gap: 4 }}><span className="mono muted">$</span><input type="number" step="0.01" value={yd.w2YTDActual || ''} onChange={(e) => updateYD({ w2YTDActual: parseFloat(e.target.value) || 0 })} placeholder={spendingW2YTD > 0 ? `${spendingW2YTD} (synced)` : '0.00'} style={{ flex: 1 }} /></div>
+              </div>
+            </div>
+            {spendingW2YTD > 0 && yd.w2YTDActual === 0 && (
+              <div style={{ background: '#3F7A4F18', border: '1px solid #3F7A4F33', borderRadius: 6, padding: '6px 10px', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span className="tiny" style={{ color: '#3F7A4F' }}>📌 Income Planner YTD: {fmtMoney(spendingW2YTD)}{spendingW2Employer ? ` · ${spendingW2Employer}` : ''}</span>
+                <button className="tap" onClick={() => updateYD({ w2YTDActual: spendingW2YTD, w2Employer: spendingW2Employer || yd.w2Employer })} style={{ fontSize: 10, padding: '3px 8px', color: '#3F7A4F', borderColor: '#3F7A4F' }}>Use this</button>
+              </div>
+            )}
+            <div className="h3" style={{ margin: '10px 0 8px', color: 'var(--text)' }}>Withholding (from paystub YTD)</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              {([['Federal income tax', 'w2WithheldFed'],['CA income tax', 'w2WithheldCA'],['Social Security (6.2%)', 'w2WithheldSS'],['Medicare (1.45%)', 'w2WithheldMedicare']] as [string, keyof ReturnType<typeof makeYearData>][]).map(([label, key]) => (
+                <div key={key}>
+                  <label>{label}</label>
+                  <div className="row" style={{ gap: 4 }}><span className="mono muted">$</span><input type="number" step="0.01" value={(yd[key] as number) || ''} onChange={(e) => updateYD({ [key]: parseFloat(e.target.value) || 0 })} placeholder="0.00" style={{ flex: 1 }} /></div>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="row" style={{ gap: 8, marginBottom: 10 }}>
-            <div style={{ flex: 1 }}><label>Date</label><input type="date" value={newEntry.date} onChange={(e) => setNewEntry({ ...newEntry, date: e.target.value })} /></div>
-            <div style={{ flex: 1 }}><label>Note</label><input type="text" value={newEntry.description} onChange={(e) => setNewEntry({ ...newEntry, description: e.target.value })} placeholder="Optional" /></div>
+
+          {/* 1099 add form */}
+          <div style={{ background: 'var(--bg-inset)', borderRadius: 10, padding: '12px 14px', marginBottom: 14 }}>
+            <div className="h3" style={{ marginBottom: 10, color: 'var(--text)' }}>📈 Add 1099 / Prop Firm Payout</div>
+            <label>Income source</label>
+            <select value={newPayerId} onChange={(e) => setNewPayerId(e.target.value)} style={{ width: '100%', marginBottom: 8 }}>
+              {PAYER_PRESETS.filter(p => p.type === '1099').map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+              <optgroup label="W-2">
+                {PAYER_PRESETS.filter(p => p.type === 'w2').map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+              </optgroup>
+            </select>
+            {(newPayerId === 'other_1099' || newPayerId === 'other_w2') && (
+              <input type="text" value={newCustomPayer} onChange={(e) => setNewCustomPayer(e.target.value)} placeholder="Enter payer name" style={{ marginBottom: 8 }} />
+            )}
+            <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+              <div style={{ flex: 1 }}><label>Amount (gross payout)</label><div className="row" style={{ gap: 4 }}><span className="mono muted">$</span><input type="number" step="0.01" value={newAmt} onChange={(e) => setNewAmt(e.target.value)} placeholder="0.00" style={{ flex: 1 }} /></div></div>
+              <div style={{ flex: 1 }}><label>Date received</label><input type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} /></div>
+            </div>
+            <input type="text" value={newNote} onChange={(e) => setNewNote(e.target.value)} placeholder="Note (optional)" style={{ marginBottom: 10 }} />
+            <button className="btn" style={{ width: '100%' }} onClick={addEntry}><Plus size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} /> Add {preset?.type === 'w2' ? 'W-2' : '1099'} entry</button>
           </div>
-          <button className="btn" style={{ width: '100%', marginBottom: 16 }} onClick={addEntry}><Plus size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} /> Add entry</button>
+
+          {/* Entries list */}
           <div className="between" style={{ marginBottom: 8 }}>
-            <div className="h3">YTD entries</div>
+            <div className="h3" style={{ color: 'var(--text)' }}>YTD {viewYear} entries</div>
             <span className="mono small" style={{ color: '#3F7A4F', fontWeight: 700 }}>{fmtMoney(est.income1099)} total</span>
           </div>
-          {(draft.entries1099 || []).length === 0 && <p className="small muted">No entries yet — include all payout dates from earlier this year.</p>}
-          {[...(draft.entries1099 || [])].sort((a: any, b: any) => b.date.localeCompare(a.date)).map((e: any) => (
-            <div key={e.id} className="between" style={{ padding: '8px 0', borderBottom: '1px solid #F0EAD8' }}>
-              <div><div className="small" style={{ fontWeight: 600 }}>{e.payer}</div><div className="tiny muted">{fmtShortDate(e.date)}{e.description ? ` · ${e.description}` : ''}</div></div>
-              <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+          {(yd.entries1099 || []).length === 0 && <p className="small muted">No entries yet — log each payout by source.</p>}
+          {[...(yd.entries1099 || [])].sort((a: any, b: any) => b.date.localeCompare(a.date)).map((e: any) => (
+            <div key={e.id} className="between" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+              <div>
+                <div className="small" style={{ fontWeight: 600, color: 'var(--text)' }}>{e.payer}</div>
+                <div className="tiny muted">{fmtShortDate(e.date)} · {e.incomeType === 'w2' ? 'W-2' : '1099'}{e.description ? ` · ${e.description}` : ''}</div>
+              </div>
+              <div className="row" style={{ gap: 10 }}>
                 <span className="mono small" style={{ fontWeight: 700, color: '#3F7A4F' }}>{fmtMoney(e.amount)}</span>
-                <button className="tap" onClick={() => setDraft({ ...draft, entries1099: (draft.entries1099 || []).filter((x: any) => x.id !== e.id) })} style={{ padding: '3px 6px', color: '#B8460E' }}><Trash2 size={11} /></button>
+                <button className="tap" onClick={() => updateYD({ entries1099: (yd.entries1099 || []).filter((x: any) => x.id !== e.id) })} style={{ padding: '3px 6px', color: '#B8460E' }}><Trash2 size={11} /></button>
               </div>
             </div>
           ))}
+          <button className="btn" style={{ width: '100%', marginTop: 14 }} onClick={saveAll}><Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save</button>
         </>
       )}
 
-      {view === 'setup' && (
+      {/* ── DEDUCTIONS ── */}
+      {view === 'deductions' && (
         <>
-          <div className="h3" style={{ marginBottom: 8 }}>W2 info</div>
-          <label>Employer</label>
-          <input type="text" value={draft.w2Employer || ''} onChange={(e) => setDraft({ ...draft, w2Employer: e.target.value })} placeholder="Company name" style={{ marginBottom: 12 }} />
-          <div className="row" style={{ gap: 8, marginBottom: 12 }}>
-            <div style={{ flex: 1 }}><label>Annual W2 gross</label><div className="row" style={{ gap: 6, alignItems: 'center' }}><span className="mono muted">$</span><input type="number" step="100" value={draft.w2GrossAnnual || ''} onChange={(e) => setDraft({ ...draft, w2GrossAnnual: parseFloat(e.target.value) || 0 })} placeholder="0" style={{ flex: 1 }} /></div></div>
-            <div style={{ flex: 1 }}><label>Federal withheld YTD</label><div className="row" style={{ gap: 6, alignItems: 'center' }}><span className="mono muted">$</span><input type="number" step="0.01" value={draft.w2WithheldFed || ''} onChange={(e) => setDraft({ ...draft, w2WithheldFed: parseFloat(e.target.value) || 0 })} placeholder="0.00" style={{ flex: 1 }} /></div></div>
+          <p className="small muted" style={{ marginBottom: 14 }}>These reduce your 1099 taxable income. Keep receipts for all deductions.</p>
+          <div className="h3" style={{ marginBottom: 8, color: 'var(--text)' }}>🏠 Trading & Business Deductions</div>
+          <div style={{ marginBottom: 8 }}>
+            <label>Platform / data fees (Apex, NinjaTrader, etc.)</label>
+            <div className="row" style={{ gap: 4 }}><span className="mono muted">$</span><input type="number" step="0.01" value={yd.tradingExpenses || ''} onChange={(e) => updateYD({ tradingExpenses: parseFloat(e.target.value) || 0 })} placeholder="0.00" /></div>
           </div>
-          <div className="row" style={{ gap: 8, marginBottom: 12 }}>
-            <div style={{ flex: 1 }}><label>CA withheld YTD</label><div className="row" style={{ gap: 6, alignItems: 'center' }}><span className="mono muted">$</span><input type="number" step="0.01" value={draft.w2WithheldCA || ''} onChange={(e) => setDraft({ ...draft, w2WithheldCA: parseFloat(e.target.value) || 0 })} placeholder="0.00" style={{ flex: 1 }} /></div></div>
-            <div style={{ flex: 1 }}><label>Trading expenses</label><div className="row" style={{ gap: 6, alignItems: 'center' }}><span className="mono muted">$</span><input type="number" step="0.01" value={draft.tradingExpenses || ''} onChange={(e) => setDraft({ ...draft, tradingExpenses: parseFloat(e.target.value) || 0 })} placeholder="Platform, data…" style={{ flex: 1 }} /></div></div>
+          {([['homeOffice', 'Home office (% of rent/mortgage)'],['equipment', 'Equipment (computer, monitors, desk)'],['software', 'Software subscriptions'],['internet', 'Internet (business %)'],['other', 'Other deductions']] as [string, string][]).map(([key, label]) => (
+            <div key={key} style={{ marginBottom: 8 }}>
+              <label>{label}</label>
+              <div className="row" style={{ gap: 4 }}><span className="mono muted">$</span><input type="number" step="0.01" value={(yd.deductions?.[key]) || ''} onChange={(e) => updateYD({ deductions: { ...yd.deductions, [key]: parseFloat(e.target.value) || 0 } })} placeholder="0.00" /></div>
+            </div>
+          ))}
+          <div style={{ background: 'var(--bg-inset)', borderRadius: 8, padding: '10px 12px', marginTop: 8, marginBottom: 14 }}>
+            <div className="between">
+              <span className="small" style={{ color: 'var(--text)' }}>Total deductions</span>
+              <span className="mono small" style={{ fontWeight: 700, color: '#3F7A4F' }}>{fmtMoney(est.dedTotal)}</span>
+            </div>
+            <div className="between" style={{ marginTop: 4 }}>
+              <span className="tiny muted">1099 net taxable income</span>
+              <span className="mono tiny" style={{ color: 'var(--text)' }}>{fmtMoney(est.netTrading)}</span>
+            </div>
           </div>
-          <div className="tiny muted" style={{ padding: '8px 12px', background: '#F0EAD8', borderRadius: 8, marginBottom: 16 }}>Trading expenses reduce your 1099 taxable income. Deductible: platform fees, data subscriptions, home office (% of rent).</div>
-          <button className="btn" style={{ width: '100%' }} onClick={saveAll}><Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save setup</button>
+          <button className="btn" style={{ width: '100%' }} onClick={saveAll}><Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save deductions</button>
         </>
       )}
 
+      {/* ── PAYMENTS ── */}
       {view === 'payments' && (
         <>
-          <div className="h3" style={{ marginBottom: 8 }}>Record payment</div>
+          <div className="h3" style={{ marginBottom: 8, color: 'var(--text)' }}>Record estimated payment</div>
           <div className="row" style={{ gap: 8, marginBottom: 8 }}>
-            <div style={{ flex: 1 }}><label>Quarter</label><select value={newPayment.quarter} onChange={(e) => setNewPayment({ ...newPayment, quarter: e.target.value })} style={{ width: '100%' }}>{QUARTERS.map((q) => <option key={q.q} value={q.q}>{q.q} 2025 (due {q.due})</option>)}</select></div>
-            <div style={{ flex: 1 }}><label>Amount</label><div className="row" style={{ gap: 6, alignItems: 'center' }}><span className="mono muted">$</span><input type="number" step="0.01" value={newPayment.amount} onChange={(e) => setNewPayment({ ...newPayment, amount: e.target.value })} placeholder="0.00" style={{ flex: 1 }} /></div></div>
+            <div style={{ flex: 1 }}>
+              <label>Quarter</label>
+              <select value={newPayment.quarter} onChange={(e) => setNewPayment({ ...newPayment, quarter: e.target.value })} style={{ width: '100%' }}>
+                {qs.map((q) => <option key={q.q} value={q.q}>{q.q} {viewYear} (due {q.due})</option>)}
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label>Amount</label>
+              <div className="row" style={{ gap: 4 }}><span className="mono muted">$</span><input type="number" step="0.01" value={newPayment.amount} onChange={(e) => setNewPayment({ ...newPayment, amount: e.target.value })} placeholder="0.00" style={{ flex: 1 }} /></div>
+            </div>
           </div>
-          <div className="row" style={{ gap: 8, marginBottom: 12 }}><div style={{ flex: 1 }}><label>Date paid</label><input type="date" value={newPayment.datePaid} onChange={(e) => setNewPayment({ ...newPayment, datePaid: e.target.value })} /></div></div>
-          <button className="btn" style={{ width: '100%', marginBottom: 16 }} onClick={addPayment}><Plus size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} /> Record</button>
-          <div className="h3" style={{ marginBottom: 8 }}>2025 schedule</div>
-          {QUARTERS.map((q) => {
-            const paid = (draft.payments || []).filter((p: any) => p.quarter === q.q && p.year === '2025');
+          <div style={{ marginBottom: 12 }}><label>Date paid</label><input type="date" value={newPayment.datePaid} onChange={(e) => setNewPayment({ ...newPayment, datePaid: e.target.value })} /></div>
+          <button className="btn" style={{ width: '100%', marginBottom: 16 }} onClick={addPayment}><Plus size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} /> Record payment</button>
+
+          <div className="h3" style={{ marginBottom: 8, color: 'var(--text)' }}>{viewYear} payment schedule</div>
+          {qs.map((q) => {
+            const paid = (yd.payments || []).filter((p: any) => p.quarter === q.q);
             const total = paid.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
             return (
-              <div key={q.q} style={{ padding: '10px 0', borderBottom: '1px solid #F0EAD8' }}>
+              <div key={q.q} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
                 <div className="between">
-                  <div><div className="small" style={{ fontWeight: 600 }}>{q.q} 2025</div><div className="tiny muted">Due {q.due}</div></div>
+                  <div>
+                    <div className="small" style={{ fontWeight: 600, color: 'var(--text)' }}>{q.q} {viewYear}</div>
+                    <div className="tiny muted">Due {q.due}</div>
+                  </div>
                   <div style={{ textAlign: 'right' }}>{total > 0 ? <span className="mono small" style={{ color: '#3F7A4F', fontWeight: 700 }}>✓ {fmtMoney(total)}</span> : <span className="tiny muted">—</span>}</div>
                 </div>
                 {paid.map((p: any) => (
                   <div key={p.id} className="between" style={{ paddingLeft: 12, marginTop: 4 }}>
                     <span className="tiny muted">{fmtShortDate(p.datePaid)}</span>
-                    <div className="row" style={{ gap: 8 }}><span className="mono tiny">{fmtMoney(p.amount)}</span><button className="tap" onClick={() => setDraft({ ...draft, payments: (draft.payments||[]).filter((x:any)=>x.id!==p.id) })} style={{ padding: '2px 5px', color: '#B8460E' }}><Trash2 size={10} /></button></div>
+                    <div className="row" style={{ gap: 8 }}>
+                      <span className="mono tiny" style={{ color: 'var(--text)' }}>{fmtMoney(p.amount)}</span>
+                      <button className="tap" onClick={() => updateYD({ payments: (yd.payments || []).filter((x: any) => x.id !== p.id) })} style={{ padding: '2px 5px', color: '#B8460E' }}><Trash2 size={10} /></button>
+                    </div>
                   </div>
                 ))}
               </div>
             );
           })}
-          <div className="between" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid #F0EAD8' }}>
-            <span className="small muted">Total paid</span>
-            <span className="mono small" style={{ fontWeight: 700, color: '#3F7A4F' }}>{fmtMoney((draft.payments||[]).reduce((s:number,p:any)=>s+(Number(p.amount)||0),0))}</span>
+          <div className="between" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+            <span className="small muted">Total paid {viewYear}</span>
+            <span className="mono small" style={{ fontWeight: 700, color: '#3F7A4F' }}>{fmtMoney((yd.payments || []).reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0))}</span>
           </div>
           <button className="btn" style={{ width: '100%', marginTop: 12 }} onClick={saveAll}><Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save</button>
         </>
@@ -6760,7 +7035,7 @@ export default function App() {
       {modal?.type === 'addOwed' && <AddOwedModal item={modal.item} onSave={upsertOwed} onDelete={deleteOwed} onClose={() => setModal(null)} />}
       {modal?.type === 'accountTransfer' && <AccountTransferModal spending={spending} onSave={doTransfer} onClose={() => setModal(null)} />}
       {modal?.type === 'incomePlanner' && <IncomePlannerModal spending={spending} onSave={saveSpending} onClose={() => setModal(null)} />}
-      {modal?.type === 'taxModal' && <TaxModal tax={tax} onSave={saveTax} onClose={() => setModal(null)} />}
+      {modal?.type === 'taxModal' && <TaxModal tax={tax} spending={spending} onSave={saveTax} onClose={() => setModal(null)} />}
       {modal?.type === 'customChallenges' && <CustomChallengesModal challenges={customChallenges} settings={settings} onSave={saveCustomChallenges} onClose={() => setModal(null)} />}
       {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, journal, challengeHistory, busyPresets, weeklyAck, spending }} onImport={async (d: any) => {
         if (d.spending) { const sp = migrateSpending(d.spending); setSpending(sp); await safeSet(K.spending, sp); }
