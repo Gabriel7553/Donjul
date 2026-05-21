@@ -3410,7 +3410,7 @@ function PlanDayModal({ date, plans, onSave, onClose }: any) {
   );
 }
 
-function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSubject, onChallenge, onCustomChallenges, onExportImport, onResetDay }: any) {
+function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSubject, onChallenge, onCustomChallenges, onExportImport, onResetDay, onSyncTransfer }: any) {
   const [draft, setDraft] = useState(settings);
   const [subTab, setSubTab] = useState<'active' | 'archived' | 'deleted'>('active');
   const latestBody = body?.entries?.[body.entries.length - 1];
@@ -3692,6 +3692,11 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
       <button className="tap" onClick={onExportImport} style={{ width: '100%', marginBottom: 8, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
         <Download size={14} color="#3B5C6B" />
         <span style={{ flex: 1 }}>Backup / restore data</span>
+        <ChevronRight size={14} color="#6B6457" />
+      </button>
+      <button className="tap" onClick={onSyncTransfer} style={{ width: '100%', marginBottom: 8, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Users size={14} color="#8E4585" />
+        <span style={{ flex: 1 }}>Sync to another device</span>
         <ChevronRight size={14} color="#6B6457" />
       </button>
       <button className="tap" onClick={onResetDay} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>

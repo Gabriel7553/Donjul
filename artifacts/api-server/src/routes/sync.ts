@@ -5,6 +5,7 @@ import { logger } from "../lib/logger";
 const router: IRouter = Router();
 
 const DEFAULT_USER = "default";
+const TRANSFER_PREFIX = "sync-";
 
 function userIdFrom(req: any): string {
   const h = req.header("x-user-id");
@@ -17,6 +18,21 @@ function userIdFrom(req: any): string {
   }
   return DEFAULT_USER;
 }
+
+router.post("/sync/claim", async (req, res): Promise<void> => {
+  if (!hasDb) { res.status(503).json({ error: "Database not configured" }); return; }
+  try {
+    const { transferKey } = req.body ?? {};
+    if (typeof transferKey !== "string" || !transferKey.startsWith(TRANSFER_PREFIX) || transferKey.length < 12 || transferKey.length > 128) {
+      res.status(400).json({ error: "Invalid transfer key" }); return;
+    }
+    const userId = `u:${transferKey}`;
+    res.json({ ok: true, userId });
+  } catch (err) {
+    logger.error({ err }, "sync/claim failed");
+    res.status(500).json({ error: "Claim failed" });
+  }
+});
 
 router.get("/sync/pull", async (req, res): Promise<void> => {
   if (!hasDb) { res.status(503).json({ error: "Database not configured" }); return; }

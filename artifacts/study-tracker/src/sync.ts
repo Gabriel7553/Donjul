@@ -1,6 +1,7 @@
 const BASE = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
 const API = `${BASE}/api`;
 const USER_ID_KEY = "st:userId";
+const TRANSFER_KEY = "st:transferKey";
 const LOCAL_TS_PREFIX = "st:_ts:";
 const SYNC_PREFIX = "st:";
 const NO_SYNC_KEYS = new Set(["st:backups", USER_ID_KEY]);
@@ -29,6 +30,28 @@ export function shouldSync(key: string): boolean {
     !NO_SYNC_KEYS.has(key) &&
     !key.startsWith(LOCAL_TS_PREFIX)
   );
+}
+
+export function getSyncId(): string {
+  return getUserId();
+}
+
+export function setSyncId(next: string): void {
+  const id = String(next || "").trim();
+  if (!id) throw new Error("Invalid sync id");
+  localStorage.setItem(USER_ID_KEY, id);
+}
+
+export function getTransferKey(): string {
+  let key = localStorage.getItem(TRANSFER_KEY);
+  if (!key) {
+    key =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `t-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem(TRANSFER_KEY, key);
+  }
+  return key;
 }
 
 function markLocalTs(key: string): void {
