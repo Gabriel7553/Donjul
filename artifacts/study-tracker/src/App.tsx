@@ -484,15 +484,22 @@ const DEFAULT_WORKOUT_SPLIT = [
 ];
 
 // Backup plan from Lean & Strong Playbook — 4-round AMRAP circuit for days you can't make the gym.
+const HOME_CIRCUIT_EXERCISES = [
+  { name: 'Push-Ups', sets: 4, reps: 'AMRAP', weight: '' },
+  { name: 'Bodyweight Squats', sets: 4, reps: 'AMRAP', weight: '' },
+  { name: 'Sit-Ups', sets: 4, reps: 'AMRAP', weight: '' },
+  { name: 'Reverse Lunges (each leg)', sets: 4, reps: '15/leg', weight: '' },
+  { name: 'Plank Hold', sets: 4, reps: '45-60s', weight: '' },
+  { name: 'Jumping Jacks / Mountain Climbers', sets: 4, reps: '60 sec', weight: '' },
+];
 const HOME_WORKOUT_SPLIT = [
-  { day: 0, name: 'AMRAP Circuit — Backup Plan', rest: false, exercises: [
-    { name: 'Push-Ups', sets: 4, reps: 'AMRAP', notes: 'Slow 2s down, full range — track reps each round' },
-    { name: 'Bodyweight Squats', sets: 4, reps: 'AMRAP', notes: 'Go to parallel or deeper' },
-    { name: 'Sit-Ups or Crunches', sets: 4, reps: 'AMRAP', notes: 'Slow and controlled' },
-    { name: 'Reverse Lunges (each leg)', sets: 4, reps: '15/leg', notes: 'Step back, knee almost to floor' },
-    { name: 'Plank Hold', sets: 4, reps: '45-60s', notes: 'Straight line, no sagging' },
-    { name: 'Jumping Jacks or Mountain Climbers', sets: 4, reps: '60 sec', notes: 'Keep moving the whole time' },
-  ]},
+  { day: 0, name: 'Rest', rest: true, exercises: [] },
+  { day: 1, name: 'The Circuit', rest: false, exercises: HOME_CIRCUIT_EXERCISES },
+  { day: 2, name: 'The Circuit', rest: false, exercises: HOME_CIRCUIT_EXERCISES },
+  { day: 3, name: 'The Circuit', rest: false, exercises: HOME_CIRCUIT_EXERCISES },
+  { day: 4, name: 'The Circuit', rest: false, exercises: HOME_CIRCUIT_EXERCISES },
+  { day: 5, name: 'The Circuit', rest: false, exercises: HOME_CIRCUIT_EXERCISES },
+  { day: 6, name: 'Rest', rest: true, exercises: [] },
 ];
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -1046,6 +1053,7 @@ function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, 
           <StatusBar daily={daily} onBusy={onBusy} onBack={onBack} onSwitch={onSwitch} nowMins={nowMins} now={now} sleepTime={settings.sleepTime} />
           {daily.focus && <FocusTimerCard focus={daily.focus} subject={settings.subjects[daily.focus.subject]} onStop={onFocusStop} />}
           <Schedule settings={settings} daily={daily} onLog={onLogTime} subjectKeys={subjectKeys} nowMins={nowMins} checkins={checkins} />
+          <CatchUpBanner settings={settings} totals={totals} daily={daily} subjectKeys={subjectKeys} />
           <Progress settings={settings} totals={totals} daily={daily} streaks={streaks} subjectKeys={subjectKeys} onLogExtra={onLogTime} checkins={checkins} onMarkDone={onMarkDone} onFocusStart={onFocusStart} focus={daily.focus} />
           <ChallengeCard settings={settings} workout={workout} />
           <CustomChallengesCard challenges={customChallenges} settings={settings} onRestDay={onRestDay} onManage={onManageChallenges} />
@@ -1320,6 +1328,40 @@ function Schedule({ settings, daily, onLog, subjectKeys, nowMins, checkins }: an
   );
 }
 
+function CatchUpBanner({ settings, totals, daily, subjectKeys }: any) {
+  const behind = (subjectKeys as string[]).flatMap((k: string) => {
+    const s = settings.subjects[k];
+    if (!s || s.archived || s.deletedAt || s.trackingMode === 'checkoff' || !s.deadline) return [];
+    const totalDone = (totals[k] || 0) + (daily.completed[k] || 0);
+    const deficit = expectedTotal(k, settings) - totalDone;
+    if (deficit < 5) return [];
+    return [{ key: k, name: s.name, accent: s.accent, mins: Math.round(deficit) }];
+  });
+  if (behind.length === 0) return null;
+  return (
+    <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid #B8460E', padding: '12px 14px' }}>
+      <div className="row" style={{ gap: 6, marginBottom: 8 }}>
+        <AlertTriangle size={14} color="#B8460E" />
+        <span className="h2" style={{ color: '#B8460E' }}>Catch-up needed</span>
+      </div>
+      {behind.map((b: any) => {
+        const h = Math.floor(b.mins / 60), m = b.mins % 60;
+        const fmt = h > 0 ? `${h}h${m > 0 ? ` ${m}m` : ''}` : `${m}m`;
+        return (
+          <div key={b.key} className="between" style={{ padding: '3px 0' }}>
+            <div className="row" style={{ gap: 6 }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: b.accent, flexShrink: 0 }} />
+              <span className="small">{b.name}</span>
+            </div>
+            <span className="mono small" style={{ color: '#B8460E', fontWeight: 600 }}>↑ {fmt}</span>
+          </div>
+        );
+      })}
+      <p className="muted tiny" style={{ marginTop: 6, lineHeight: 1.4 }}>Log extra time today to get back on track.</p>
+    </div>
+  );
+}
+
 function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, checkins, onMarkDone, onFocusStart, focus }: any) {
   return (
     <div className="card">
@@ -1388,10 +1430,24 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, c
             )}
 
             {showPace ? (
-              <div className="progress-bar">
-                <div className="progress-fill" style={{ width: `${pct}%`, background: subj.accent }} />
-                <div className="progress-marker" style={{ left: `${expectedPct}%` }} />
-              </div>
+              <>
+                <div className="progress-bar">
+                  <div className="progress-fill" style={{ width: `${pct}%`, background: subj.accent }} />
+                  <div className="progress-marker" style={{ left: `${expectedPct}%` }} />
+                </div>
+                {diff < 0 && (() => {
+                  const mins = Math.round(Math.abs(diff));
+                  const h = Math.floor(mins / 60);
+                  const m = mins % 60;
+                  const fmt = h > 0 ? `${h}h${m > 0 ? ` ${m}m` : ''}` : `${m}m`;
+                  return (
+                    <div className="row" style={{ gap: 5, marginTop: 4 }}>
+                      <AlertTriangle size={11} color="#B8460E" />
+                      <span className="mono tiny" style={{ color: '#B8460E' }}>Make up {fmt} to get back on pace</span>
+                    </div>
+                  );
+                })()}
+              </>
             ) : goalKind === 'count' ? (
               <div className="progress-bar">
                 <div className="progress-fill" style={{ width: `${Math.min(100, (sessionsDone / Math.max(subj.countTotal || 1, 1)) * 100)}%`, background: subj.accent }} />
@@ -2600,7 +2656,7 @@ function ModalShell({ title, onClose, children, icon = null, color = '#1A1A2E' }
   );
 }
 
-function DayDetailModal({ date, settings, totals, workout, meals, body, activity, checkins, spending,
+function DayDetailModal({ date, settings, totals, workout, meals, body, activity, checkins, spending, customChallenges,
   onSaveMeals, onSaveWorkout, onSaveTotals, onSaveCheckins, onClose }: any) {
   const [subView, setSubView] = useState<null | 'workout' | 'meals' | 'study'>(null);
 
@@ -2987,6 +3043,40 @@ function DayDetailModal({ date, settings, totals, workout, meals, body, activity
           </div>
         </>
       )}
+
+      {(() => {
+        const dayChallenges = (customChallenges || []).filter((c: any) => {
+          if (!c.startDate || c.startDate > date) return false;
+          if (c.completedDate && c.completedDate < date) return false;
+          return true;
+        });
+        if (dayChallenges.length === 0) return null;
+        return (
+          <>
+            <div className="h2" style={{ marginBottom: 8, marginTop: 4 }}>Challenges</div>
+            <div className="card" style={{ padding: 12, marginBottom: 14 }}>
+              {dayChallenges.map((ch: any) => {
+                const sub = settings.subjects?.[ch.subjectKey];
+                const logged = (checkins?.[ch.subjectKey] || []).includes(date);
+                const isRest = (ch.restDates || []).includes(date);
+                const dayNum = diffDays(date, ch.startDate) + 1;
+                const isOpen = !ch.days || ch.days === 0;
+                return (
+                  <div key={ch.id} className="between" style={{ padding: '6px 0', borderBottom: '1px solid #F0EAD8' }}>
+                    <div>
+                      <div className="small" style={{ fontWeight: 500 }}>{ch.name}</div>
+                      <div className="mono tiny muted">{isOpen ? `Day ${dayNum}` : `Day ${dayNum}/${ch.days}`} · {sub?.name || ch.subjectKey}</div>
+                    </div>
+                    <span className="mono tiny" style={{ color: logged ? '#4A6741' : isRest ? '#6B6457' : '#B8460E', fontWeight: 600 }}>
+                      {logged ? '✓ Done' : isRest ? '😴 Rest' : '✗ Missed'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        );
+      })()}
     </ModalShell>
   );
 }
@@ -7660,7 +7750,7 @@ export default function App() {
       {modal?.type === 'logMeal' && <LogMealModal meals={meals} settings={settings} onSave={saveMeals} onClose={() => setModal(null)} />}
       {modal?.type === 'nutritionCoach' && <NutritionCoachModal settings={settings} meals={meals} body={body} onLogItem={async (item: any) => { await saveMeals(addMealEntry(meals, todayStr(), { qty: 1, ...item })); toast(`Logged ${item.name}`); }} onClose={() => setModal(null)} />}
       {modal?.type === 'planDay' && <PlanDayModal date={modal.date} plans={plans} onSave={savePlans} onClose={() => setModal(null)} />}
-      {modal?.type === 'dayDetail' && <DayDetailModal date={modal.date} settings={settings} totals={totals} workout={workout} meals={meals} body={body} activity={activity} checkins={checkins} spending={spending} onSaveMeals={saveMeals} onSaveWorkout={saveWorkout} onSaveTotals={saveTotals} onSaveCheckins={saveCheckins} onClose={() => setModal(null)} />}
+      {modal?.type === 'dayDetail' && <DayDetailModal date={modal.date} settings={settings} totals={totals} workout={workout} meals={meals} body={body} activity={activity} checkins={checkins} spending={spending} customChallenges={customChallenges} onSaveMeals={saveMeals} onSaveWorkout={saveWorkout} onSaveTotals={saveTotals} onSaveCheckins={saveCheckins} onClose={() => setModal(null)} />}
       {modal?.type === 'addTransaction' && <AddTransactionModal entry={modal.entry} defaultType={modal.defaultType} spending={spending} onSave={upsertTransaction} onDelete={deleteTransaction} onClose={() => setModal(null)} />}
       {modal?.type === 'moneyGoals' && <MoneyGoalsModal spending={spending} onSave={saveSpending} onClose={() => setModal(null)} />}
       {modal?.type === 'moneyCategories' && <MoneyCategoriesModal spending={spending} onSave={saveSpending} onClose={() => setModal(null)} />}
