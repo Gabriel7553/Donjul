@@ -259,6 +259,7 @@ function normalizeSubject(s: any) {
     weeklyDays: 5,
     deadline: null,
     countTotal: null,
+    courseHours: null,
     archived: false,
     deletedAt: null,
     ...s,
@@ -358,7 +359,7 @@ function projectedDate(subjectKey: string, settings: any, totals: any, daily: an
 const SUBJECTS_DEFAULT: Record<string, any> = {
   spanish: { name: 'Spanish', icon: 'languages', accent: '#B8460E', tools: 'Duolingo + Babbel + Input', description: '', trackingMode: 'time', target: 95, weeklyDays: 6, deadline: '2026-12-31', countTotal: null, archived: false, deletedAt: null },
   guitar: { name: 'Guitar', icon: 'music', accent: '#4A6741', tools: 'Simply Guitar', description: '', trackingMode: 'time', target: 30, weeklyDays: 5, deadline: '2026-12-31', countTotal: null, archived: false, deletedAt: null },
-  cysa: { name: 'CySA+', icon: 'shield', accent: '#3B5C6B', tools: 'Jason Dion · Udemy', description: '', trackingMode: 'time', target: 45, weeklyDays: 7, deadline: '2026-06-16', countTotal: null, archived: false, deletedAt: null },
+  cysa: { name: 'CySA+', icon: 'shield', accent: '#3B5C6B', tools: 'Jason Dion · Udemy', description: '', trackingMode: 'time', target: 45, weeklyDays: 7, deadline: '2026-06-16', countTotal: null, courseHours: 36, archived: false, deletedAt: null },
   running: { name: 'Running', icon: 'activity', accent: '#8E4585', tools: 'Easy pace, 25-30 min', description: '', trackingMode: 'time', target: 28, weeklyDays: 3, deadline: '2026-12-31', countTotal: null, archived: false, deletedAt: null },
 };
 
@@ -508,12 +509,19 @@ const HOME_WORKOUT_SPLIT = [
 function expectedTotal(subjectKey: string, settings: any) {
   const s = settings.subjects[subjectKey];
   if (!s) return 0;
+  if (s.courseHours && s.deadline) {
+    const totalMins = s.courseHours * 60;
+    const totalDays = Math.max(1, diffDays(s.deadline, settings.startDate) + 1);
+    const elapsedDays = Math.max(0, diffDays(todayStr(), settings.startDate));
+    return Math.round((elapsedDays / totalDays) * totalMins);
+  }
   const days = Math.max(0, diffDays(todayStr(), settings.startDate));
   return Math.round(days * s.target * (s.weeklyDays / 7));
 }
 function targetTotalByDeadline(subjectKey: string, settings: any) {
   const s = settings.subjects[subjectKey];
   if (!s || !s.deadline) return 0;
+  if (s.courseHours) return Math.round(s.courseHours * 60);
   const totalDays = Math.max(1, diffDays(s.deadline, settings.startDate) + 1);
   return Math.round(totalDays * s.target * (s.weeklyDays / 7));
 }
@@ -4475,7 +4483,28 @@ function EditSubjectModal({ subjectKey, settings, onSave, onClose }: any) {
             ))}
           </div>
           {goalSel === 'deadline' && (
-            <input type="date" value={draft.deadline || addMonth(todayStr(), 3)} onChange={(e) => set({ deadline: e.target.value })} style={{ marginBottom: 8 }} />
+            <>
+              <input type="date" value={draft.deadline || addMonth(todayStr(), 3)} onChange={(e) => set({ deadline: e.target.value })} style={{ marginBottom: 10 }} />
+              {draft.trackingMode === 'time' && (
+                <>
+                  <label>Total course hours <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>(optional — overrides deadline math for progress bar)</span></label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={draft.courseHours ?? ''}
+                    onChange={(e) => set({ courseHours: e.target.value === '' ? null : parseFloat(e.target.value) || null })}
+                    placeholder="e.g. 36"
+                    style={{ marginBottom: 8 }}
+                  />
+                  {draft.courseHours > 0 && (
+                    <p className="muted tiny" style={{ marginBottom: 8, lineHeight: 1.5 }}>
+                      Progress bar tracks {draft.courseHours}h ({Math.round(draft.courseHours * 60)}min) of actual content, not estimated study time.
+                    </p>
+                  )}
+                </>
+              )}
+            </>
           )}
           {goalSel === 'count' && (
             <>
