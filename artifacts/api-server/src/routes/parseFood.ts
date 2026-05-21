@@ -1,16 +1,21 @@
 import { Router } from "express";
 import { logger } from "../lib/logger";
 import { getOpenAI, hasOpenAI, extractJson } from "../lib/openai";
+import { aiRateLimit } from "../middlewares/rateLimit";
+import { MAX_TEXT_LEN } from "../lib/validate";
 
 const router = Router();
 
-router.post("/parse-food", async (req, res) => {
+router.post("/parse-food", aiRateLimit, async (req, res) => {
   if (!hasOpenAI) {
     return res.status(503).json({ error: "Food parsing isn't configured on the server yet (missing OpenAI key)." });
   }
   const { text: input } = req.body as { text?: string };
-  if (!input || !input.trim()) {
+  if (typeof input !== "string" || !input.trim()) {
     return res.status(400).json({ error: "No food description provided." });
+  }
+  if (input.length > MAX_TEXT_LEN) {
+    return res.status(400).json({ error: "That description is too long. Keep it under a couple of sentences." });
   }
 
   const prompt = `Estimate the total nutrition for this food description. Sum everything described into one total.
@@ -32,6 +37,7 @@ Use realistic estimates. Numbers only for macro values.`;
     const response = await getOpenAI().chat.completions.create({
       model: "gpt-4o",
       max_tokens: 300,
+      response_format: { type: "json_object" },
       messages: [{ role: "user", content: prompt }],
     });
     out = response.choices[0]?.message?.content?.trim() || "";

@@ -43,6 +43,18 @@ const K = {
 const BACKUP_KEYS = ['settings', 'totals', 'body', 'workout', 'meals', 'plans', 'streaks', 'journal', 'challengeHistory', 'busyPresets', 'activity', 'checkins'] as const;
 const MAX_BACKUPS = 10;
 
+// Guard against importing junk: must be a plain object with at least one recognized key.
+// Returns an error message, or null when the payload looks like a valid backup.
+function validateBackup(parsed: any): string | null {
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return "That doesn't look like a backup. Paste exactly what you copied from Export.";
+  }
+  if (!BACKUP_KEYS.some((k) => parsed[k] !== undefined)) {
+    return 'No recognizable data found in that backup.';
+  }
+  return null;
+}
+
 async function safeGet(key: string, fallback: any): Promise<any> {
   try {
     const r = localStorage.getItem(key);
@@ -192,6 +204,22 @@ function migrateMeals(meals: any): any {
 // Cloud sync (optional): localStorage stays the source of truth + offline cache,
 // and we mirror it to the server so data survives browser/device changes.
 let SYNC_AVAILABLE = false;
+// Optional access code sent to the server when cloud sync is protected by a shared secret.
+// Stored only on this device (never inside the synced state blob).
+let SYNC_SECRET: string | null = null;
+function loadSyncSecret(): void {
+  try { SYNC_SECRET = localStorage.getItem('st:syncSecret') || null; } catch { SYNC_SECRET = null; }
+}
+function setSyncSecret(value: string): void {
+  SYNC_SECRET = value.trim() || null;
+  try {
+    if (SYNC_SECRET) localStorage.setItem('st:syncSecret', SYNC_SECRET);
+    else localStorage.removeItem('st:syncSecret');
+  } catch {}
+}
+function syncHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return SYNC_SECRET ? { ...extra, Authorization: 'Bearer ' + SYNC_SECRET } : extra;
+}
 function snapshotData(): Record<string, any> {
   const data: Record<string, any> = {};
   for (const name of BACKUP_KEYS) {
@@ -202,9 +230,10 @@ function snapshotData(): Record<string, any> {
 }
 // On load: pull server state; if it's newer than what we last synced, hydrate localStorage from it.
 async function syncPull(): Promise<void> {
+  loadSyncSecret();
   try {
-    const resp = await fetch('/api/state');
-    if (resp.status === 503) { SYNC_AVAILABLE = false; return; }
+    const resp = await fetch('/api/state', { headers: syncHeaders() });
+    if (resp.status === 503 || resp.status === 401) { SYNC_AVAILABLE = false; return; }
     SYNC_AVAILABLE = resp.ok;
     if (!resp.ok) return;
     const { data, updatedAt } = await resp.json();
@@ -220,7 +249,7 @@ async function syncPull(): Promise<void> {
 async function syncPush(): Promise<void> {
   if (!SYNC_AVAILABLE) return;
   try {
-    const resp = await fetch('/api/state', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: snapshotData() }) });
+    const resp = await fetch('/api/state', { method: 'PUT', headers: syncHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ data: snapshotData() }) });
     if (!resp.ok) return;
     const { updatedAt } = await resp.json();
     if (updatedAt) await safeSet('st:syncUpdatedAt', updatedAt);
@@ -3406,9 +3435,13 @@ function ExportImportModal({ data, onImport, onClose }: any) {
   const [importText, setImportText] = useState('');
   const [copied, setCopied] = useState(false);
   const [backups, setBackups] = useState<any[]>([]);
+  const [secret, setSecret] = useState('');
   const exportJson = JSON.stringify(data, null, 2);
 
-  useEffect(() => { (async () => setBackups(await safeGet(K.backups, [])))(); }, []);
+  useEffect(() => {
+    (async () => setBackups(await safeGet(K.backups, [])))();
+    try { setSecret(localStorage.getItem('st:syncSecret') || ''); } catch {}
+  }, []);
 
   const handleCopy = async () => {
     try {
@@ -3419,12 +3452,19 @@ function ExportImportModal({ data, onImport, onClose }: any) {
   };
 
   const handleImport = () => {
+    let parsed: any;
     try {
-      const parsed = JSON.parse(importText);
-      onImport(parsed);
+      parsed = JSON.parse(importText);
     } catch (e) {
-      alert('Invalid JSON. Paste only what you copied from Export.');
+      toast.error('Invalid JSON. Paste only what you copied from Export.');
+      return;
     }
+    const err = validateBackup(parsed);
+    if (err) {
+      toast.error(err);
+      return;
+    }
+    onImport(parsed);
   };
 
   return (
@@ -3450,6 +3490,20 @@ function ExportImportModal({ data, onImport, onClose }: any) {
           Heads up: your data lives only in this browser. Export it somewhere safe, or it can be lost if you clear the browser or switch devices.
         </p>
       )}
+
+      <div style={{ marginBottom: 14 }}>
+        <label className="muted tiny" style={{ display: 'block', marginBottom: 4 }}>Sync access code (optional)</label>
+        <input
+          type="password"
+          value={secret}
+          placeholder="Only if your server requires one"
+          onChange={(e) => { setSecret(e.target.value); setSyncSecret(e.target.value); }}
+          style={{ width: '100%', fontFamily: 'JetBrains Mono', fontSize: 12, padding: 8 }}
+        />
+        <p className="muted tiny" style={{ marginTop: 4, lineHeight: 1.4 }}>
+          Stays on this device. Set it to match your server's sync secret, then reload to connect.
+        </p>
+      </div>
 
       {mode === 'backups' && (
         <>
@@ -3506,16 +3560,23 @@ function Setup({ onComplete, onImport }: any) {
 
   const handleImport = async () => {
     setImportError('');
+    let parsed: any;
     try {
-      const parsed = JSON.parse(importText);
-      if (!parsed.settings) {
-        setImportError('Backup is missing settings. Paste the full export.');
-        return;
-      }
-      await onImport(parsed);
+      parsed = JSON.parse(importText);
     } catch (e) {
       setImportError('Invalid JSON. Paste exactly what you copied from Export.');
+      return;
     }
+    const err = validateBackup(parsed);
+    if (err) {
+      setImportError(err);
+      return;
+    }
+    if (!parsed.settings) {
+      setImportError('Backup is missing settings. Paste the full export.');
+      return;
+    }
+    await onImport(parsed);
   };
 
   const steps = [

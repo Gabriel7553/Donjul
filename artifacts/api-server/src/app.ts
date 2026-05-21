@@ -6,6 +6,10 @@ import { logger } from "./lib/logger";
 
 const app: Express = express();
 
+// Trust the first proxy hop (e.g. the platform's load balancer) so req.ip
+// reflects the real client address for rate limiting.
+app.set("trust proxy", 1);
+
 app.use(
   pinoHttp({
     logger,

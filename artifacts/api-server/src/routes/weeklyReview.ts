@@ -1,12 +1,17 @@
 import { Router } from "express";
 import { logger } from "../lib/logger";
 import { getOpenAI, hasOpenAI, extractJson } from "../lib/openai";
+import { aiRateLimit } from "../middlewares/rateLimit";
+import { isPlainObject } from "../lib/validate";
 
 const router = Router();
 
-router.post("/weekly-review", async (req, res) => {
+router.post("/weekly-review", aiRateLimit, async (req, res) => {
   if (!hasOpenAI) {
     return res.status(503).json({ error: "The weekly review isn't configured on the server yet (missing OpenAI key)." });
+  }
+  if (!isPlainObject(req.body)) {
+    return res.status(400).json({ error: "Invalid request body." });
   }
   const { subjects, workoutsThisWeek, avgProtein, proteinTarget, bodyTrend, streaks } = req.body as any;
 
@@ -30,6 +35,7 @@ Respond with ONLY a JSON object:
     const response = await getOpenAI().chat.completions.create({
       model: "gpt-4o",
       max_tokens: 500,
+      response_format: { type: "json_object" },
       messages: [{ role: "user", content: prompt }],
     });
     text = response.choices[0]?.message?.content?.trim() || "";
