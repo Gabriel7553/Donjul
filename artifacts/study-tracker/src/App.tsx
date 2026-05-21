@@ -6,13 +6,22 @@ import {
   Download, Upload, History, Repeat, Zap, Play, AlertTriangle, RotateCcw, MapPin, Building2, TreePine,
   Camera, BookMarked, TrendingUp as Journal, DollarSign, ShoppingCart, Briefcase, Car, ChevronUp, Trophy, Archive, Infinity, Mic,
   Wallet, PiggyBank, CreditCard, PieChart, Receipt, Pencil, ArrowUpRight, ArrowDownRight, Sparkles,
-  ArrowRightLeft, Users, Banknote, BadgeAlert, CircleDollarSign, HandCoins
+  ArrowRightLeft, Users, Banknote, BadgeAlert, CircleDollarSign, HandCoins, GripVertical
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import confetti from 'canvas-confetti';
 import { motion } from 'framer-motion';
 import { pushKey as syncPushKey } from './sync';
+import {
+  DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor,
+  useSensor, useSensors, type DragEndEvent
+} from '@dnd-kit/core';
+import {
+  arrayMove, SortableContext, sortableKeyboardCoordinates,
+  useSortable, verticalListSortingStrategy
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 function haptic(ms = 12) { try { (navigator as any).vibrate?.(ms); } catch {} }
 function celebrate() {
@@ -545,6 +554,7 @@ const DEFAULT_SPENDING = {
   monthlyBudget: 0,
   savingsGoal: 0,
   income: { w2Monthly: 0, w2Employer: '', expectedTrading: 0, w2YTD: 0 } as any,
+  sectionOrder: [] as string[],
 };
 
 function migrateSpending(s: any): any {
@@ -561,6 +571,7 @@ function migrateSpending(s: any): any {
   base.monthlyBudget = Number(base.monthlyBudget) || 0;
   base.savingsGoal = Number(base.savingsGoal) || 0;
   if (!base.income || typeof base.income !== 'object') base.income = { w2Monthly: 0, w2Employer: '', expectedTrading: 0 };
+  if (!Array.isArray(base.sectionOrder)) base.sectionOrder = [];
   return base;
 }
 
@@ -714,6 +725,50 @@ function spendingByMonth(entries: any[], ym: string) {
   }
   return { income, spent, net: income - spent, byCat };
 }
+
+// ════════════════════════════════════════════════════════════════════════════════
+// DND — REUSABLE SORTABLE ROW
+// ════════════════════════════════════════════════════════════════════════════════
+function SortableRow({ id, children }: { id: string; children: React.ReactNode }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.45 : 1, position: 'relative', zIndex: isDragging ? 20 : undefined }}>
+      <span {...attributes} {...listeners} style={{ position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)', cursor: 'grab', color: '#C0B8A8', padding: '4px 2px', touchAction: 'none', display: 'flex', alignItems: 'center' }}>
+        <GripVertical size={15} />
+      </span>
+      {children}
+    </div>
+  );
+}
+
+function useDndSensors() {
+  return useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+}
+
+// ── Money section constants ──────────────────────────────────────────────────
+const MONEY_DEFAULT_ORDER = [
+  'ytd','accounts','budget','savings','trend','daily',
+  'debt','income_payoff','tax','categories','recurring','owed','transactions',
+];
+const MONEY_LABELS: Record<string, string> = {
+  ytd: '💰 YTD Income',
+  accounts: '🏦 Accounts',
+  budget: '📊 Budget',
+  savings: '🐷 Savings Goal',
+  trend: '📈 6-Month Trend',
+  daily: '📅 Daily Spending',
+  debt: '💳 Debt Tracker',
+  income_payoff: '💼 Income & Payoff',
+  tax: '🧾 Tax Tracker',
+  categories: '🥧 Where It Went',
+  recurring: '🔁 Recurring',
+  owed: '🤝 People Owe Me',
+  transactions: '🧾 Transactions',
+};
 
 // ════════════════════════════════════════════════════════════════════════════════
 // GLOBAL STYLES
@@ -3275,11 +3330,22 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
     setDraft(nd); onSave(nd);
   };
 
+  const subjectSensors = useDndSensors();
   const allKeys: string[] = draft.subjectOrder.filter((k: string) => draft.subjects[k]);
   const activeKeys = allKeys.filter((k) => !draft.subjects[k].archived && !draft.subjects[k].deletedAt);
   const archivedKeys = allKeys.filter((k) => draft.subjects[k].archived && !draft.subjects[k].deletedAt);
   const deletedKeys = allKeys.filter((k) => draft.subjects[k].deletedAt);
   const shownKeys = subTab === 'active' ? activeKeys : subTab === 'archived' ? archivedKeys : deletedKeys;
+  const handleSubjectDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    const oldIdx = activeKeys.indexOf(String(active.id));
+    const newIdx = activeKeys.indexOf(String(over.id));
+    if (oldIdx === -1 || newIdx === -1) return;
+    const reordered = arrayMove(activeKeys, oldIdx, newIdx);
+    const fullOrder = [...reordered, ...draft.subjectOrder.filter((x: string) => !activeKeys.includes(x))];
+    const nd = { ...draft, subjectOrder: fullOrder };
+    setDraft(nd); onSave(nd);
+  };
 
   return (
     <ModalShell title="Settings" onClose={onClose}>
@@ -3310,7 +3376,35 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
         <button className={`tap ${subTab === 'deleted' ? 'active' : ''}`} style={{ flex: 1, fontSize: 12 }} onClick={() => setSubTab('deleted')}>Deleted ({deletedKeys.length})</button>
       </div>
       {shownKeys.length === 0 && <p className="muted small" style={{ padding: '8px 0' }}>{subTab === 'active' ? 'No active subjects.' : subTab === 'archived' ? 'Nothing archived.' : 'Nothing deleted.'}</p>}
-      {shownKeys.map((k: string) => {
+      {subTab === 'active' ? (
+        <DndContext sensors={subjectSensors} collisionDetection={closestCenter} onDragEnd={handleSubjectDragEnd}>
+          <SortableContext items={activeKeys} strategy={verticalListSortingStrategy}>
+            {activeKeys.map((k: string) => {
+              const s = draft.subjects[k];
+              const Icon = ICON_MAP[s.icon] || Languages;
+              const kind = subjectGoalKind(s);
+              const meta = s.trackingMode === 'checkoff' ? `Check-off · ${s.weeklyDays}x/wk` : `${s.target}min/day · ${s.weeklyDays}x/wk`;
+              return (
+                <SortableRow key={k} id={k}>
+                  <div className="between" style={{ padding: '10px 0', paddingLeft: 22, borderBottom: '1px solid #E4DCC8' }}>
+                    <div className="row" style={{ gap: 10, flex: 1, minWidth: 0 }}>
+                      <div className="icon-wrap" style={{ background: s.accent, width: 28, height: 28 }}><Icon size={14} /></div>
+                      <div style={{ minWidth: 0 }}>
+                        <div className="small" style={{ fontWeight: 600 }}>{s.name}</div>
+                        <div className="mono tiny muted">{meta}{kind === 'deadline' ? ` · ${fmtShortDate(s.deadline)}` : kind === 'count' ? ` · ${s.countTotal} sessions` : ''}</div>
+                      </div>
+                    </div>
+                    <div className="row" style={{ gap: 4 }}>
+                      <button onClick={() => onEditSubject(k)} className="tap" style={{ padding: '4px 8px' }} title="Edit"><Edit3 size={13} /></button>
+                      <button onClick={() => applySubjectChange(k, { archived: true })} className="tap" style={{ padding: '4px 8px' }} title="Archive"><Archive size={13} /></button>
+                    </div>
+                  </div>
+                </SortableRow>
+              );
+            })}
+          </SortableContext>
+        </DndContext>
+      ) : shownKeys.map((k: string) => {
         const s = draft.subjects[k];
         const Icon = ICON_MAP[s.icon] || Languages;
         const kind = subjectGoalKind(s);
@@ -3321,17 +3415,11 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
             <div className="row" style={{ gap: 10, flex: 1, minWidth: 0 }}>
               <div className="icon-wrap" style={{ background: s.accent, width: 28, height: 28 }}><Icon size={14} /></div>
               <div style={{ minWidth: 0 }}>
-                <div className="small" style={{ fontWeight: 600, opacity: subTab === 'active' ? 1 : 0.6 }}>{s.name}</div>
+                <div className="small" style={{ fontWeight: 600, opacity: 0.6 }}>{s.name}</div>
                 <div className="mono tiny muted">{meta}{kind === 'deadline' ? ` · ${fmtShortDate(s.deadline)}` : kind === 'count' ? ` · ${s.countTotal} sessions` : ''}{s.deletedAt ? ` · deletes in ${daysLeft}d` : ''}</div>
               </div>
             </div>
             <div className="row" style={{ gap: 4 }}>
-              {subTab === 'active' && (
-                <>
-                  <button onClick={() => onEditSubject(k)} className="tap" style={{ padding: '4px 8px' }} title="Edit"><Edit3 size={13} /></button>
-                  <button onClick={() => applySubjectChange(k, { archived: true })} className="tap" style={{ padding: '4px 8px' }} title="Archive"><Archive size={13} /></button>
-                </>
-              )}
               {subTab === 'archived' && (
                 <>
                   <button onClick={() => applySubjectChange(k, { archived: false })} className="tap" style={{ padding: '4px 10px', fontSize: 11 }}>Unarchive</button>
@@ -4272,25 +4360,31 @@ function Setup({ onComplete, onImport }: any) {
 function IncomePlannerModal({ spending, onSave, onClose }: any) {
   const inc = spending.income || {};
   const [w2Monthly, setW2Monthly] = useState(String(inc.w2Monthly || ''));
+  const [w2YTD, setW2YTD] = useState(String(inc.w2YTD || ''));
   const [w2Employer, setW2Employer] = useState(inc.w2Employer || '');
   const [expectedTrading, setExpectedTrading] = useState(String(inc.expectedTrading || ''));
 
   const save = () => {
-    onSave({ ...spending, income: { w2Monthly: parseFloat(w2Monthly) || 0, w2Employer: w2Employer.trim(), expectedTrading: parseFloat(expectedTrading) || 0 } });
+    onSave({ ...spending, income: { w2Monthly: parseFloat(w2Monthly) || 0, w2YTD: parseFloat(w2YTD) || 0, w2Employer: w2Employer.trim(), expectedTrading: parseFloat(expectedTrading) || 0 } });
     onClose();
   };
   const total = (parseFloat(w2Monthly) || 0) + (parseFloat(expectedTrading) || 0);
 
   return (
     <ModalShell title="Income setup" onClose={onClose}>
-      <p className="small muted" style={{ marginBottom: 16 }}>Set your expected monthly take-home so Donjul can project debt payoff and coverage.</p>
-      <div className="h3" style={{ marginBottom: 8 }}>💼 W2 / Guaranteed</div>
+      <p className="small muted" style={{ marginBottom: 16 }}>Set your income so Donjul can track YTD totals and project debt payoff.</p>
+      <div className="h3" style={{ marginBottom: 8 }}>💼 W-2 / Guaranteed</div>
       <label>Employer</label>
       <input type="text" value={w2Employer} onChange={(e) => setW2Employer(e.target.value)} placeholder="Your employer" style={{ marginBottom: 12 }} />
-      <label>Monthly take-home (after tax)</label>
-      <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 16 }}>
-        <span className="mono muted">$</span>
-        <input type="number" step="0.01" value={w2Monthly} onChange={(e) => setW2Monthly(e.target.value)} placeholder="0.00" style={{ flex: 1 }} />
+      <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+        <div style={{ flex: 1 }}>
+          <label>Monthly net (after tax)</label>
+          <div className="row" style={{ gap: 6, alignItems: 'center' }}><span className="mono muted">$</span><input type="number" step="0.01" value={w2Monthly} onChange={(e) => setW2Monthly(e.target.value)} placeholder="0.00" style={{ flex: 1 }} /></div>
+        </div>
+        <div style={{ flex: 1 }}>
+          <label>W-2 gross YTD (from paystub)</label>
+          <div className="row" style={{ gap: 6, alignItems: 'center' }}><span className="mono muted">$</span><input type="number" step="0.01" value={w2YTD} onChange={(e) => setW2YTD(e.target.value)} placeholder="e.g. 34120.40" style={{ flex: 1 }} /></div>
+        </div>
       </div>
       <div className="h3" style={{ marginBottom: 8 }}>📈 1099 / Trading</div>
       <label>Average monthly trading profit (pre-tax)</label>
@@ -4298,12 +4392,12 @@ function IncomePlannerModal({ spending, onSave, onClose }: any) {
         <span className="mono muted">$</span>
         <input type="number" step="0.01" value={expectedTrading} onChange={(e) => setExpectedTrading(e.target.value)} placeholder="0.00 (avg)" style={{ flex: 1 }} />
       </div>
-      <div className="tiny muted" style={{ marginBottom: 16 }}>Track exact 1099 payouts in the Tax Tracker for a precise tax estimate.</div>
+      <div className="tiny muted" style={{ marginBottom: 16 }}>Add exact 1099 payouts in the Tax Tracker — they'll auto-appear in your YTD summary.</div>
       {total > 0 && (
         <div style={{ background: '#3F7A4F15', border: '1px solid #3F7A4F33', borderRadius: 8, padding: '10px 14px', marginBottom: 16 }}>
           <div className="tiny muted">Expected monthly</div>
           <div className="mono" style={{ fontSize: 18, fontWeight: 700, color: '#3F7A4F' }}>{fmtMoney(total)}/mo</div>
-          <div className="tiny muted">{fmtMoney(parseFloat(w2Monthly)||0)} W2 + {fmtMoney(parseFloat(expectedTrading)||0)} trading</div>
+          {(parseFloat(w2Monthly)||0) > 0 && (parseFloat(expectedTrading)||0) > 0 && <div className="tiny muted">{fmtMoney(parseFloat(w2Monthly)||0)} W2 + {fmtMoney(parseFloat(expectedTrading)||0)} trading</div>}
         </div>
       )}
       <button className="btn" style={{ width: '100%' }} onClick={save}><Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save</button>
@@ -4666,10 +4760,13 @@ function CustomChallengesModal({ challenges, settings, onSave, onClose }: any) {
 // ════════════════════════════════════════════════════════════════════════════════
 // MONEY TAB — manual personal-finance tracker (Rocket Money inspired)
 // ════════════════════════════════════════════════════════════════════════════════
-function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories, onAddAccount, onEditAccount, onAddDebt, onEditDebt, onAddOwed, onEditOwed, onTransfer, onEditIncome, onTaxModal, onCustomChallenges }: any) {
+function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onCategories, onAddAccount, onEditAccount, onAddDebt, onEditDebt, onAddOwed, onEditOwed, onTransfer, onEditIncome, onTaxModal, onCustomChallenges, onSaveLayout }: any) {
   const today = todayStr();
   const thisMonth = monthKey(today);
   const [viewMonth, setViewMonth] = useState(thisMonth);
+  const [txFilter, setTxFilter] = useState('');
+  const [reorderOpen, setReorderOpen] = useState(false);
+  const sensors = useDndSensors();
   const cur = spendingByMonth(spending.entries, viewMonth);
   const prev = spendingByMonth(spending.entries, prevMonth(viewMonth));
   const catMap = useMemo(() => Object.fromEntries(spending.categories.map((c: any) => [c.id, c])), [spending.categories]);
@@ -4722,13 +4819,47 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories, o
     return arr;
   }, [spending.entries, thisMonth]);
 
-  const topCats = useMemo(() => {
+  const allCats = useMemo(() => {
     return Object.entries(cur.byCat)
       .map(([id, amt]: any) => ({ id, amount: amt as number, cat: catMap[id] }))
       .filter((x) => x.cat)
-      .sort((a, b) => b.amount - a.amount)
-      .slice(0, 6);
+      .sort((a, b) => b.amount - a.amount);
   }, [cur.byCat, catMap]);
+
+  const catMonthlyAvg = useMemo(() => {
+    const avgs: Record<string, number> = {};
+    const pastMonths: string[] = [];
+    let c = prevMonth(thisMonth);
+    for (let i = 0; i < 5; i++) { pastMonths.push(c); c = prevMonth(c); }
+    for (const cat of spending.categories) {
+      const vals = pastMonths.map(ym => spendingByMonth(spending.entries, ym).byCat[cat.id] || 0).filter(v => v > 0);
+      avgs[cat.id] = vals.length > 0 ? vals.reduce((s, v) => s + v, 0) / vals.length : 0;
+    }
+    return avgs;
+  }, [spending.entries, spending.categories, thisMonth]);
+
+  const currentYear = today.slice(0, 4);
+  const w2YTD = Number((spending.income || {}).w2YTD) || 0;
+  const income1099YTD = useMemo(() => {
+    return ((tax?.entries1099 || []) as any[])
+      .filter((e: any) => e.date?.startsWith(currentYear))
+      .reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
+  }, [tax, currentYear]);
+  const totalYTD = w2YTD + income1099YTD;
+
+  const filteredRecent = useMemo(() => {
+    if (!txFilter.trim()) return recent;
+    const q = txFilter.toLowerCase();
+    return recent.filter((e: any) => {
+      const cat = catMap[e.categoryId];
+      return (e.name || '').toLowerCase().includes(q) || (cat?.name || '').toLowerCase().includes(q);
+    });
+  }, [recent, txFilter, catMap]);
+
+  const sectionOrder = useMemo(() => {
+    const saved: string[] = spending.sectionOrder || [];
+    return [...saved.filter((x: string) => MONEY_DEFAULT_ORDER.includes(x)), ...MONEY_DEFAULT_ORDER.filter((x) => !saved.includes(x))];
+  }, [spending.sectionOrder]);
 
   const netDelta = cur.net - prev.net;
   const spentDelta = prev.spent > 0 ? ((cur.spent - prev.spent) / prev.spent) * 100 : 0;
@@ -4736,13 +4867,426 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories, o
   const empty = spending.entries.length === 0;
   const negativeMonth = cur.net < 0 && !empty;
 
+  const renderMoneySection = (id: string): React.ReactNode => {
+    switch (id) {
+      case 'ytd':
+        if (w2YTD === 0 && income1099YTD === 0) return null;
+        return (
+          <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid #3F7A4F' }}>
+            <div className="between" style={{ marginBottom: 12 }}>
+              <div className="row" style={{ gap: 6 }}><DollarSign size={14} color="#3F7A4F" /><span className="h2">YTD Income · {currentYear}</span></div>
+              <button className="tap" onClick={onEditIncome} style={{ padding: '4px 10px', fontSize: 11 }}><Pencil size={10} style={{ marginRight: 3, verticalAlign: 'middle' }} /> Edit</button>
+            </div>
+            <div className="row" style={{ gap: 8 }}>
+              {w2YTD > 0 && (
+                <div style={{ flex: 1, background: '#F9F5EC', borderRadius: 8, padding: '10px 12px' }}>
+                  <div className="tiny muted" style={{ marginBottom: 2 }}>W-2 Gross YTD</div>
+                  <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: '#1A1A2E' }}>{fmtMoney(w2YTD)}</div>
+                  {spending.income?.w2Employer && <div className="tiny muted">{spending.income.w2Employer}</div>}
+                </div>
+              )}
+              {income1099YTD > 0 && (
+                <div style={{ flex: 1, background: '#F9F5EC', borderRadius: 8, padding: '10px 12px' }}>
+                  <div className="tiny muted" style={{ marginBottom: 2 }}>1099 YTD</div>
+                  <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: '#3B5C6B' }}>{fmtMoney(income1099YTD)}</div>
+                  <div className="tiny muted">prop firm / trading</div>
+                </div>
+              )}
+            </div>
+            {w2YTD > 0 && income1099YTD > 0 && (
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #E4DCC8', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <span className="small muted">Total combined YTD</span>
+                <span className="mono" style={{ fontSize: 18, fontWeight: 700, color: '#3F7A4F' }}>{fmtMoney(totalYTD)}</span>
+              </div>
+            )}
+          </div>
+        );
+
+      case 'accounts':
+        return (
+          <div style={{ marginBottom: 14 }}>
+            <div className="between" style={{ marginBottom: 10 }}>
+              <div className="row" style={{ gap: 6 }}><Wallet size={14} color="#1A1A2E" /><span className="h2">Accounts</span></div>
+              <button className="tap" onClick={onAddAccount} style={{ padding: '4px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Plus size={11} /> Add</button>
+            </div>
+            {accounts.length === 0 ? (
+              <button className="tap" onClick={onAddAccount} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', textAlign: 'left' }}>
+                <CreditCard size={14} color="#6B6457" /><span className="small" style={{ flex: 1 }}>Add a bank account or credit card</span><ChevronRight size={14} color="#6B6457" />
+              </button>
+            ) : (
+              <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none' }}>
+                {accounts.map((acc: any) => {
+                  const isCredit = acc.type === 'credit';
+                  const limit = Number(acc.creditLimit) || 0;
+                  const bal = Number(acc.balance) || 0;
+                  const utilPct = isCredit && limit > 0 ? Math.min(100, (bal / limit) * 100) : 0;
+                  const available = limit - bal;
+                  return (
+                    <button key={acc.id} onClick={() => onEditAccount(acc)} style={{ flexShrink: 0, width: 172, padding: 16, borderRadius: 14, border: 'none', cursor: 'pointer', textAlign: 'left', background: isCredit ? '#F5F0E6' : (acc.color || '#1A1A2E'), boxShadow: '0 2px 10px rgba(0,0,0,0.13)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: isCredit ? '#6B6457' : 'rgba(245,240,230,0.65)' }}>{isCredit ? 'Credit' : acc.type === 'savings' ? 'Savings' : 'Checking'}</span>
+                        {isCredit ? <CreditCard size={13} color="#6B6457" /> : <Wallet size={13} color="rgba(245,240,230,0.6)" />}
+                      </div>
+                      <div style={{ fontSize: 11, color: isCredit ? '#6B6457' : 'rgba(245,240,230,0.7)', marginBottom: 3 }}>{acc.bank || acc.name}</div>
+                      {!isCredit && <div style={{ fontSize: 10, color: 'rgba(245,240,230,0.55)', marginBottom: 4 }}>{acc.name}</div>}
+                      <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: isCredit ? '#B8460E' : '#F5F0E6', lineHeight: 1.1, marginBottom: isCredit ? 10 : 0 }}>{fmtMoney(bal)}</div>
+                      {isCredit && limit > 0 && (<><div style={{ height: 4, background: '#E4DCC8', borderRadius: 2, overflow: 'hidden', marginBottom: 5 }}><div style={{ width: `${utilPct}%`, height: '100%', background: utilPct > 80 ? '#B8460E' : utilPct > 50 ? '#C8932E' : '#3F7A4F', borderRadius: 2 }} /></div><div style={{ fontSize: 10, color: '#6B6457' }}>{fmtMoney(available)} avail · {Math.round(utilPct)}%</div>{acc.dueDay && <div style={{ fontSize: 10, color: '#8E4585', marginTop: 3 }}>Due day {acc.dueDay}</div>}</>)}
+                      {isCredit && !acc.name.includes(acc.bank || '') && <div style={{ fontSize: 10, color: '#6B6457', marginTop: 4, opacity: 0.75 }}>{acc.name}</div>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+
+      case 'budget':
+        return budget > 0 ? (
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="between" style={{ marginBottom: 8 }}>
+              <div className="row" style={{ gap: 6 }}><PieChart size={14} color="#8E4585" /><span className="h2">Monthly budget</span></div>
+              <span className="mono small">{fmtMoney(cur.spent)} / {fmtMoney(budget)}</span>
+            </div>
+            <div style={{ height: 10, background: '#F5F0E6', borderRadius: 6, overflow: 'hidden', marginBottom: 6 }}>
+              <div style={{ width: `${spentPct}%`, height: '100%', background: spentPct >= 100 ? '#B8460E' : spentPct >= 80 ? '#C8932E' : '#3F7A4F', transition: 'width 0.3s' }} />
+            </div>
+            <div className="between tiny muted">
+              <span>{spentPct >= 100 ? `Over by ${fmtMoney(cur.spent - budget)}` : `${fmtMoney(budget - cur.spent)} left`}</span>
+              <span>{Math.round(spentPct)}% used</span>
+            </div>
+          </div>
+        ) : (
+          <button className="tap" onClick={onBudget} style={{ width: '100%', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', textAlign: 'left' }}>
+            <Target size={14} color="#8E4585" /><span className="small" style={{ flex: 1 }}>Set a monthly budget to track spending</span><ChevronRight size={14} color="#6B6457" />
+          </button>
+        );
+
+      case 'savings':
+        return goal > 0 ? (
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="between" style={{ marginBottom: 8 }}>
+              <div className="row" style={{ gap: 6 }}><PiggyBank size={14} color="#3F7A4F" /><span className="h2">Savings goal</span></div>
+              <span className="mono small">{fmtMoney(savedThisMonth)} / {fmtMoney(goal)}</span>
+            </div>
+            <div style={{ height: 10, background: '#F5F0E6', borderRadius: 6, overflow: 'hidden', marginBottom: 6 }}>
+              <div style={{ width: `${savedPct}%`, height: '100%', background: '#3F7A4F', transition: 'width 0.3s' }} />
+            </div>
+            <div className="tiny muted">{savedPct >= 100 ? `Goal hit — ${fmtMoney(savedThisMonth - goal)} over` : `${fmtMoney(goal - savedThisMonth)} to go`}</div>
+          </div>
+        ) : null;
+
+      case 'trend':
+        return empty ? null : (
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="between" style={{ marginBottom: 12 }}>
+              <div className="row" style={{ gap: 6 }}><TrendingUp size={14} color="#3B5C6B" /><span className="h2">6-month trend</span></div>
+              {prev.spent > 0 && <span className="tiny mono" style={{ color: spentDelta > 0 ? '#B8460E' : '#3F7A4F' }}>{spentDelta > 0 ? '+' : ''}{Math.round(spentDelta)}% spend</span>}
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', height: 90, marginBottom: 8 }}>
+              {trend.map((t) => (
+                <div key={t.ym} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                  <div style={{ display: 'flex', gap: 2, alignItems: 'flex-end', height: 70, width: '100%', justifyContent: 'center' }}>
+                    <div title={`Income ${fmtMoney(t.income)}`} style={{ width: '40%', height: `${(t.income / trendMax) * 100}%`, background: '#3F7A4F', borderRadius: '3px 3px 0 0', minHeight: t.income > 0 ? 2 : 0 }} />
+                    <div title={`Spent ${fmtMoney(t.spent)}`} style={{ width: '40%', height: `${(t.spent / trendMax) * 100}%`, background: '#B8460E', borderRadius: '3px 3px 0 0', minHeight: t.spent > 0 ? 2 : 0 }} />
+                  </div>
+                  <div className="tiny muted" style={{ fontSize: 10 }}>{monthShort(t.ym)}</div>
+                </div>
+              ))}
+            </div>
+            <div className="row" style={{ gap: 14, fontSize: 11 }}>
+              <span className="row" style={{ gap: 4 }}><span style={{ width: 8, height: 8, background: '#3F7A4F', borderRadius: 2 }} /> <span className="muted">Income</span></span>
+              <span className="row" style={{ gap: 4 }}><span style={{ width: 8, height: 8, background: '#B8460E', borderRadius: 2 }} /> <span className="muted">Spent</span></span>
+            </div>
+          </div>
+        );
+
+      case 'daily': {
+        if (empty || viewMonth !== thisMonth) return null;
+        const days30: { label: string; spent: number; date: string }[] = [];
+        for (let i = 29; i >= 0; i--) {
+          const d = new Date(today + 'T00:00:00');
+          d.setDate(d.getDate() - i);
+          const ds = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+          days30.push({ label: i === 0 ? 'today' : `${d.getMonth() + 1}/${d.getDate()}`, date: ds, spent: 0 });
+        }
+        for (const e of spending.entries) {
+          if (e.type !== 'out') continue;
+          const idx = days30.findIndex(d => d.date === e.date);
+          if (idx !== -1) days30[idx].spent += Number(e.amount) || 0;
+        }
+        if (!days30.some(d => d.spent > 0)) return null;
+        const chartData = days30.filter((_, i) => i % 3 === 2 || i === 29).map(d => ({ label: d.label, spent: Math.round(d.spent) }));
+        return (
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="row" style={{ gap: 6, marginBottom: 10 }}><Receipt size={14} color="#8E4585" /><span className="h2">Daily spending · last 30 days</span></div>
+            <ResponsiveContainer width="100%" height={120}>
+              <BarChart data={chartData} margin={{ top: 4, right: 6, left: -28, bottom: 0 }}>
+                <XAxis dataKey="label" tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} interval={0} />
+                <YAxis tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} />
+                <Tooltip contentStyle={{ fontFamily: 'JetBrains Mono', fontSize: 11, borderRadius: 8 }} formatter={(v: any) => [`$${v}`, 'Spent']} />
+                <Bar dataKey="spent" fill="#8E4585" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        );
+      }
+
+      case 'debt': {
+        const creditCardAccounts = accounts.filter((a: any) => a.type === 'credit');
+        const allDebtItems = [...creditCardAccounts.map((a: any) => ({ ...a, _isCreditAcc: true })), ...debts];
+        const totalDailyInterest = allDebtItems.reduce((s, item) => s + calcDailyInterest(Number(item.balance) || 0, Number(item.rate) || 0), 0);
+        const totalMonthlyInterest = allDebtItems.reduce((s, item) => s + calcMonthlyInterest(Number(item.balance) || 0, Number(item.rate) || 0), 0);
+        const totalAccrued = allDebtItems.reduce((s, item) => s + (Number(item.accruedInterest) || 0), 0);
+        const avalancheTarget = allDebtItems.filter((item) => Number(item.balance) > 0 && Number(item.rate) > 0).sort((a, b) => Number(b.rate) - Number(a.rate))[0];
+        return (
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="between" style={{ marginBottom: totalDailyInterest > 0 ? 8 : 10 }}>
+              <div className="row" style={{ gap: 6 }}><Banknote size={14} color="#B8460E" /><span className="h2">Debt tracker</span></div>
+              <button className="tap" onClick={onAddDebt} style={{ padding: '4px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Plus size={11} /> Add</button>
+            </div>
+            {totalDailyInterest > 0 && (
+              <div style={{ background: '#B8460E10', border: '1px solid #B8460E30', borderRadius: 8, padding: '8px 12px', marginBottom: 12 }}>
+                <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: 120 }}><div className="tiny muted" style={{ marginBottom: 1 }}>Costing you today</div><div className="mono" style={{ fontSize: 17, fontWeight: 700, color: '#B8460E' }}>{fmtMoney(totalDailyInterest)}<span style={{ fontSize: 11, fontWeight: 400, color: '#6B6457' }}>/day</span></div></div>
+                  <div style={{ width: 1, background: '#B8460E25' }} />
+                  <div style={{ flex: 1, minWidth: 100 }}><div className="tiny muted" style={{ marginBottom: 1 }}>Monthly interest</div><div className="mono" style={{ fontSize: 14, fontWeight: 600, color: '#B8460E' }}>~{fmtMoney(totalMonthlyInterest)}<span style={{ fontSize: 11, fontWeight: 400, color: '#6B6457' }}>/mo</span></div></div>
+                  {totalAccrued > 0 && (<><div style={{ width: 1, background: '#B8460E25' }} /><div style={{ flex: 1, minWidth: 100 }}><div className="tiny muted" style={{ marginBottom: 1 }}>Accrued</div><div className="mono" style={{ fontSize: 14, fontWeight: 600, color: '#6B6457' }}>{fmtMoney(totalAccrued)}</div></div></>)}
+                </div>
+              </div>
+            )}
+            {allDebtItems.length === 0 ? (
+              <button className="tap" onClick={onAddDebt} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', textAlign: 'left', background: 'transparent', border: 'none' }}>
+                <CircleDollarSign size={14} color="#6B6457" /><span className="small muted" style={{ flex: 1 }}>Track a loan or credit card balance</span><ChevronRight size={14} color="#6B6457" />
+              </button>
+            ) : (
+              <>
+                {creditCardAccounts.map((acc: any) => {
+                  const limit = Number(acc.creditLimit) || 0;
+                  const bal = Number(acc.balance) || 0;
+                  const apr = Number(acc.rate) || 0;
+                  const daily = calcDailyInterest(bal, apr);
+                  const monthly = calcMonthlyInterest(bal, apr);
+                  const payoffMo = calcPayoffMonths(bal, apr, Number(acc.minPayment) || 0);
+                  const totalInterest = calcTotalInterestAtMin(bal, apr, Number(acc.minPayment) || 0);
+                  const accrued = Number(acc.accruedInterest) || 0;
+                  const utilPct = limit > 0 ? Math.min(100, (bal / limit) * 100) : 0;
+                  return (
+                    <div key={acc.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid #F0EAD8' }}>
+                      <div className="between" style={{ marginBottom: 6 }}>
+                        <div><div className="small" style={{ fontWeight: 600 }}>{acc.name}{acc.bank ? ` · ${acc.bank}` : ''}</div><div className="tiny muted">Credit Card{apr > 0 ? ` · ${apr}% APR` : ''}{acc.dueDay ? ` · due day ${acc.dueDay}` : ''}</div></div>
+                        <div style={{ textAlign: 'right' }}><div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(bal)}</div>{limit > 0 && <div className="tiny muted">of {fmtMoney(limit)} limit</div>}</div>
+                      </div>
+                      {limit > 0 && <div style={{ height: 5, background: '#F0EAD8', borderRadius: 3, overflow: 'hidden', marginBottom: 6 }}><div style={{ width: `${utilPct}%`, height: '100%', background: utilPct > 80 ? '#B8460E' : utilPct > 50 ? '#C8932E' : '#3F7A4F', borderRadius: 3 }} /></div>}
+                      {apr > 0 && bal > 0 && (<div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 4 }}><span style={{ background: '#B8460E15', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11, fontWeight: 600 }} className="mono">{fmtMoney(daily)}/day</span><span style={{ background: '#B8460E10', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11 }} className="mono">~{fmtMoney(monthly)}/mo</span>{payoffMo > 0 && <span style={{ background: '#F0EAD8', color: '#6B6457', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>payoff {fmtPayoff(payoffMo)}</span>}{isFinite(totalInterest) && totalInterest > 0 && <span style={{ background: '#F0EAD8', color: '#8E4585', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>+{fmtMoney(totalInterest)} total</span>}</div>)}
+                      {accrued > 0 && <div className="tiny" style={{ color: '#B8460E', opacity: 0.7 }}>~{fmtMoney(accrued)} accrued</div>}
+                      {limit > 0 && <div className="tiny muted">{fmtMoney(limit - bal)} available</div>}
+                    </div>
+                  );
+                })}
+                {debts.map((debt: any) => {
+                  const original = Number(debt.originalAmount) || Number(debt.balance) || 1;
+                  const bal = Number(debt.balance) || 0;
+                  const apr = Number(debt.rate) || 0;
+                  const paid = original - bal;
+                  const paidPct = Math.max(0, Math.min(100, (paid / original) * 100));
+                  const daily = calcDailyInterest(bal, apr);
+                  const monthly = calcMonthlyInterest(bal, apr);
+                  const payoffMo = calcPayoffMonths(bal, apr, Number(debt.minPayment) || 0);
+                  const totalInterest = calcTotalInterestAtMin(bal, apr, Number(debt.minPayment) || 0);
+                  const accrued = Number(debt.accruedInterest) || 0;
+                  return (
+                    <div key={debt.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid #F0EAD8' }}>
+                      <div className="between" style={{ marginBottom: 6 }}>
+                        <div><div className="small" style={{ fontWeight: 600 }}>{debt.name}</div><div className="tiny muted">{DEBT_TYPES.find(t => t.id === debt.type)?.label || 'Loan'}{apr > 0 ? ` · ${apr}% APR` : ''}</div></div>
+                        <div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(bal)}</div>
+                      </div>
+                      {original > bal && <><div style={{ height: 4, background: '#F0EAD8', borderRadius: 2, overflow: 'hidden', marginBottom: 4 }}><div style={{ width: `${paidPct}%`, height: '100%', background: '#3F7A4F', borderRadius: 2 }} /></div><div className="tiny muted" style={{ marginBottom: 4 }}>{Math.round(paidPct)}% paid off</div></>}
+                      {apr > 0 && <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 4 }}><span style={{ background: '#B8460E15', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11 }} className="mono">{fmtMoney(daily)}/day</span><span style={{ background: '#B8460E10', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11 }} className="mono">~{fmtMoney(monthly)}/mo</span>{payoffMo > 0 && <span style={{ background: '#F0EAD8', color: '#6B6457', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>payoff {fmtPayoff(payoffMo)}</span>}{isFinite(totalInterest) && totalInterest > 0 && <span style={{ background: '#F0EAD8', color: '#8E4585', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>+{fmtMoney(totalInterest)} total</span>}</div>}
+                      {accrued > 0 && <div className="tiny" style={{ color: '#B8460E', opacity: 0.7 }}>~{fmtMoney(accrued)} accrued</div>}
+                    </div>
+                  );
+                })}
+                {avalancheTarget && allDebtItems.filter((i) => Number(i.balance) > 0 && Number(i.rate) > 0).length > 1 && (
+                  <div style={{ background: '#8E458510', border: '1px solid #8E458530', borderRadius: 8, padding: '8px 12px', marginTop: 4 }}>
+                    <div className="tiny" style={{ fontWeight: 600, color: '#8E4585', marginBottom: 2 }}>💡 Avalanche tip</div>
+                    <div className="tiny muted">Pay extra on <strong>{avalancheTarget.name}</strong> first ({avalancheTarget.rate}% APR) to save the most in interest.</div>
+                  </div>
+                )}
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #F0EAD8', display: 'flex', gap: 12 }}>
+                  <div style={{ flex: 1 }}><div className="tiny muted">Total debt</div><div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(totalLiabilities)}</div></div>
+                  {totalDailyInterest > 0 && <><div style={{ flex: 1 }}><div className="tiny muted">Daily cost</div><div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(totalDailyInterest)}</div></div><div style={{ flex: 1 }}><div className="tiny muted">Monthly cost</div><div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>~{fmtMoney(totalMonthlyInterest)}</div></div></>}
+                </div>
+              </>
+            )}
+          </div>
+        );
+      }
+
+      case 'income_payoff': {
+        const inc = spending.income || {};
+        const w2Monthly = Number(inc.w2Monthly) || 0;
+        const expTrading = Number(inc.expectedTrading) || 0;
+        const totalExpected = w2Monthly + expTrading;
+        const minObligations = [...debts.map((d: any) => Number(d.minPayment) || 0), ...accounts.filter((a: any) => a.type === 'credit').map((a: any) => Number(a.minPayment) || 0)].reduce((s, v) => s + v, 0);
+        const surplus = cur.income - cur.spent - minObligations;
+        const canCover = cur.income >= minObligations;
+        const availExtra = Math.max(0, surplus);
+        const totalMonthlyPayment = minObligations + availExtra;
+        const roughMonths = totalMonthlyPayment > 0 && totalLiabilities > 0 ? Math.ceil(totalLiabilities / totalMonthlyPayment) : 0;
+        return (
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="between" style={{ marginBottom: 12 }}>
+              <div className="row" style={{ gap: 6 }}><TrendingUp size={14} color="#3F7A4F" /><span className="h2">Income & payoff</span></div>
+              <button className="tap" onClick={onEditIncome} style={{ padding: '4px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Pencil size={10} /> Edit</button>
+            </div>
+            {totalExpected === 0 ? (
+              <button className="tap" onClick={onEditIncome} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', textAlign: 'left', background: 'transparent', border: 'none' }}>
+                <TrendingUp size={14} color="#6B6457" /><span className="small muted" style={{ flex: 1 }}>Set your income to see debt payoff projections</span><ChevronRight size={14} color="#6B6457" />
+              </button>
+            ) : (
+              <>
+                <div className="row" style={{ gap: 8, marginBottom: 10 }}>
+                  <div style={{ flex: 1, background: '#F9F5EC', borderRadius: 8, padding: '10px 12px' }}><div className="tiny muted" style={{ marginBottom: 2 }}>Expected/mo</div><div className="mono" style={{ fontSize: 15, fontWeight: 700, color: '#3F7A4F' }}>{fmtMoney(totalExpected)}</div>{w2Monthly > 0 && expTrading > 0 && <div className="tiny muted">{fmtMoney(w2Monthly)} W2 + {fmtMoney(expTrading)} trading</div>}</div>
+                  <div style={{ flex: 1, background: '#F9F5EC', borderRadius: 8, padding: '10px 12px' }}><div className="tiny muted" style={{ marginBottom: 2 }}>Realized this month</div><div className="mono" style={{ fontSize: 15, fontWeight: 700, color: cur.income >= totalExpected * 0.8 ? '#3F7A4F' : '#C8932E' }}>{fmtMoney(cur.income)}</div></div>
+                </div>
+                {minObligations > 0 && (<div style={{ marginBottom: 10 }}><div className="between" style={{ marginBottom: 4 }}><span className="small muted">Min debt payments/mo</span><span className="mono small" style={{ color: '#B8460E' }}>{fmtMoney(minObligations)}</span></div><div style={{ height: 4, background: '#F0EAD8', borderRadius: 2, overflow: 'hidden', marginBottom: 4 }}><div style={{ height: '100%', width: `${Math.min(100, cur.income > 0 ? (minObligations/cur.income)*100 : 100)}%`, background: canCover ? '#3F7A4F' : '#B8460E', borderRadius: 2 }} /></div><div className="tiny" style={{ color: canCover ? '#3F7A4F' : '#B8460E' }}>{canCover ? `✓ Covered — ${fmtMoney(Math.abs(surplus))} ${surplus >= 0 ? 'surplus' : 'short'} after expenses` : `⚠ Income this month is ${fmtMoney(Math.abs(surplus))} short`}</div></div>)}
+                {roughMonths > 0 && totalLiabilities > 0 && (<div style={{ background: '#3F7A4F15', border: '1px solid #3F7A4F33', borderRadius: 8, padding: '8px 12px' }}><div className="tiny muted" style={{ marginBottom: 2 }}>Debt-free estimate at current pace</div><div className="row" style={{ alignItems: 'baseline', gap: 6 }}><span className="mono" style={{ fontSize: 16, fontWeight: 700, color: '#3F7A4F' }}>{fmtPayoff(roughMonths)}</span>{availExtra > 0 && <span className="tiny muted">(incl. {fmtMoney(availExtra)}/mo extra)</span>}</div></div>)}
+                {totalLiabilities === 0 && debts.length + accounts.filter((a: any) => a.type === 'credit').length > 0 && (<div style={{ background: '#3F7A4F15', border: '1px solid #3F7A4F33', borderRadius: 8, padding: '8px 12px', textAlign: 'center' }}><span className="small" style={{ color: '#3F7A4F', fontWeight: 600 }}>🎉 Debt free!</span></div>)}
+              </>
+            )}
+          </div>
+        );
+      }
+
+      case 'tax':
+        return (
+          <button className="tap" onClick={onTaxModal} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', textAlign: 'left', borderRadius: 10, marginBottom: 14 }}>
+            <span style={{ fontSize: 22 }}>🧾</span>
+            <div style={{ flex: 1 }}><div className="small" style={{ fontWeight: 600 }}>Tax tracker</div><div className="tiny muted">1099 entries · CA + Federal estimate · Quarterly payments</div></div>
+            <ChevronRight size={14} color="#6B6457" />
+          </button>
+        );
+
+      case 'categories':
+        return allCats.length > 0 ? (
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="between" style={{ marginBottom: 12 }}>
+              <div className="row" style={{ gap: 6 }}><PieChart size={14} color="#B8460E" /><span className="h2">Where it went · {monthLabel(viewMonth)}</span></div>
+              <button className="tap" onClick={onCategories} style={{ padding: '4px 8px', fontSize: 10 }}><Pencil size={10} style={{ verticalAlign: 'middle', marginRight: 3 }} /> Categories</button>
+            </div>
+            {allCats.map((c) => {
+              const pct = cur.spent > 0 ? (c.amount / cur.spent) * 100 : 0;
+              const avg = catMonthlyAvg[c.id] || 0;
+              const vsAvg = avg > 0 ? ((c.amount - avg) / avg) * 100 : 0;
+              return (
+                <div key={c.id} style={{ marginBottom: 12 }}>
+                  <div className="between" style={{ marginBottom: 4 }}>
+                    <span className="small"><span className="swatch" style={{ background: c.cat.color }} />{c.cat.name}</span>
+                    <div style={{ textAlign: 'right' }}>
+                      <span className="mono small">{fmtMoney(c.amount)}</span>
+                      {avg > 0 && <span className="mono tiny" style={{ marginLeft: 8, color: vsAvg > 15 ? '#B8460E' : vsAvg < -15 ? '#3F7A4F' : '#6B6457' }}>{vsAvg > 0 ? '+' : ''}{Math.round(vsAvg)}% vs avg</span>}
+                    </div>
+                  </div>
+                  <div style={{ height: 6, background: '#F5F0E6', borderRadius: 4, overflow: 'hidden' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: c.cat.color, transition: 'width 0.3s' }} />
+                  </div>
+                  {avg > 0 && <div className="tiny muted" style={{ marginTop: 2 }}>avg {fmtMoney(avg)}/mo</div>}
+                </div>
+              );
+            })}
+          </div>
+        ) : null;
+
+      case 'recurring':
+        return recurring.length > 0 ? (
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="row" style={{ gap: 6, marginBottom: 12 }}><Repeat size={14} color="#6E5C8E" /><span className="h2">Recurring</span><span className="mono tiny muted" style={{ marginLeft: 'auto' }}>~{fmtMoney(recurring.reduce((s, r) => s + Number(r.amount || 0), 0))}/mo</span></div>
+            {recurring.map((r) => {
+              const cat = catMap[r.categoryId];
+              return (
+                <div key={r.id} className="between" style={{ padding: '6px 0', borderBottom: '1px solid #F0EAD8' }}>
+                  <div className="row" style={{ gap: 8 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: cat?.color || '#6B6457' }} /><div><div className="small" style={{ fontWeight: 500 }}>{r.name || 'Untitled'}</div><div className="tiny muted">{cat?.name || 'Other'}</div></div></div>
+                  <span className="mono small">{fmtMoney(r.amount)}</span>
+                </div>
+              );
+            })}
+          </div>
+        ) : null;
+
+      case 'owed':
+        return (
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="between" style={{ marginBottom: 10 }}>
+              <div className="row" style={{ gap: 6 }}><HandCoins size={14} color="#3F7A4F" /><span className="h2">People owe me</span>{totalOwed > 0 && <span className="mono tiny" style={{ marginLeft: 4, background: '#3F7A4F22', color: '#3F7A4F', padding: '2px 6px', borderRadius: 6 }}>{fmtMoney(totalOwed)}</span>}</div>
+              <button className="tap" onClick={onAddOwed} style={{ padding: '4px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Plus size={11} /> Add</button>
+            </div>
+            {owed.length === 0 ? (
+              <div className="muted small" style={{ textAlign: 'center', padding: '8px 0' }}>No IOUs tracked — add someone who owes you.</div>
+            ) : (
+              owed.map((item: any) => (
+                <button key={item.id} className="tap" onClick={() => onEditOwed(item)} style={{ width: '100%', textAlign: 'left', padding: '10px 8px', borderBottom: '1px solid #F0EAD8', background: 'transparent', borderRadius: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 8, background: item.paid ? '#3F7A4F22' : '#C8932E22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Users size={14} color={item.paid ? '#3F7A4F' : '#C8932E'} /></div>
+                  <div style={{ flex: 1, minWidth: 0 }}><div className="small" style={{ fontWeight: 600, color: item.paid ? '#6B6457' : '#1A1A2E', textDecoration: item.paid ? 'line-through' : 'none' }}>{item.name}</div><div className="tiny muted">{item.note ? `${item.note} · ` : ''}{item.dueDate ? `Due ${item.dueDate}` : item.dateAdded ? `Added ${item.dateAdded}` : ''}</div></div>
+                  <span className="mono small" style={{ fontWeight: 700, color: item.paid ? '#6B6457' : '#3F7A4F' }}>{fmtMoney(item.amount)}</span>
+                </button>
+              ))
+            )}
+          </div>
+        );
+
+      case 'transactions':
+        return (
+          <div className="card">
+            <div className="between" style={{ marginBottom: 10 }}>
+              <div className="row" style={{ gap: 6 }}><Receipt size={14} color="#1A1A2E" /><span className="h2">Transactions</span></div>
+              <span className="tiny muted mono">{recent.length} this month</span>
+            </div>
+            <div style={{ position: 'relative', marginBottom: 10 }}>
+              <input type="text" value={txFilter} onChange={(e) => setTxFilter(e.target.value)} placeholder="Search by name or category…" style={{ paddingLeft: 32, fontSize: 13, padding: '8px 10px 8px 32px' }} />
+              <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6B6457', fontSize: 14 }}>🔍</span>
+              {txFilter && <button onClick={() => setTxFilter('')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#6B6457' }}><X size={14} /></button>}
+            </div>
+            {filteredRecent.length === 0 ? (
+              <div className="muted small" style={{ padding: '12px 0', textAlign: 'center' }}>
+                {recent.length === 0 ? <><Sparkles size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />No transactions yet — add income or an expense above.</> : `No results for "${txFilter}"`}
+              </div>
+            ) : (
+              filteredRecent.map((e: any) => {
+                const cat = catMap[e.categoryId];
+                const isIn = e.type === 'in';
+                const acct = accounts.find((a: any) => a.id === e.accountId);
+                return (
+                  <button key={e.id} className="tap" onClick={() => onEdit(e)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 8px', textAlign: 'left', borderBottom: '1px solid #F0EAD8', background: 'transparent', borderRadius: 0 }}>
+                    <div style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, background: (cat?.color || '#6B6457') + '22', color: cat?.color || '#6B6457', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{isIn ? <ArrowDownRight size={15} /> : <ArrowUpRight size={15} />}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="small" style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name || (isIn ? 'Income' : 'Expense')}</div>
+                      <div className="tiny muted">{cat?.name || 'Other'} · {e.date}{e.recurring ? ' · recurring' : ''}{acct ? ` · ${acct.name}` : ''}</div>
+                    </div>
+                    <span className="mono small" style={{ color: isIn ? '#3F7A4F' : '#B8460E', fontWeight: 600 }}>{isIn ? '+' : '−'}{fmtMoney(e.amount).replace('−', '')}</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
   return (
     <>
       <div className="between" style={{ marginBottom: 6 }}>
         <h1 className="h1">Money.</h1>
-        <button className="tap" onClick={onBudget} style={{ padding: '6px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-          <Target size={12} /> Goals
-        </button>
+        <div className="row" style={{ gap: 6 }}>
+          <button className="tap" onClick={() => setReorderOpen(true)} style={{ padding: '6px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <GripVertical size={12} /> Layout
+          </button>
+          <button className="tap" onClick={onBudget} style={{ padding: '6px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <Target size={12} /> Goals
+          </button>
+        </div>
       </div>
       <div className="between" style={{ marginBottom: 16 }}>
         <button
@@ -4851,570 +5395,60 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories, o
         )}
       </div>
 
-      {/* ACCOUNTS */}
-      <div style={{ marginBottom: 14 }}>
-        <div className="between" style={{ marginBottom: 10 }}>
-          <div className="row" style={{ gap: 6 }}>
-            <Wallet size={14} color="#1A1A2E" />
-            <span className="h2">Accounts</span>
-          </div>
-          <button className="tap" onClick={onAddAccount} style={{ padding: '4px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            <Plus size={11} /> Add
-          </button>
-        </div>
-        {accounts.length === 0 ? (
-          <button className="tap" onClick={onAddAccount} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', textAlign: 'left' }}>
-            <CreditCard size={14} color="#6B6457" />
-            <span className="small" style={{ flex: 1 }}>Add a bank account or credit card</span>
-            <ChevronRight size={14} color="#6B6457" />
-          </button>
-        ) : (
-          <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none' }}>
-            {accounts.map((acc: any) => {
-              const isCredit = acc.type === 'credit';
-              const limit = Number(acc.creditLimit) || 0;
-              const bal = Number(acc.balance) || 0;
-              const utilPct = isCredit && limit > 0 ? Math.min(100, (bal / limit) * 100) : 0;
-              const available = limit - bal;
-              return (
-                <button
-                  key={acc.id}
-                  onClick={() => onEditAccount(acc)}
-                  style={{
-                    flexShrink: 0, width: 172, padding: 16, borderRadius: 14, border: 'none', cursor: 'pointer', textAlign: 'left',
-                    background: isCredit ? '#F5F0E6' : (acc.color || '#1A1A2E'),
-                    boxShadow: '0 2px 10px rgba(0,0,0,0.13)',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: isCredit ? '#6B6457' : 'rgba(245,240,230,0.65)' }}>
-                      {isCredit ? 'Credit' : acc.type === 'savings' ? 'Savings' : 'Checking'}
-                    </span>
-                    {isCredit ? <CreditCard size={13} color="#6B6457" /> : <Wallet size={13} color="rgba(245,240,230,0.6)" />}
-                  </div>
-                  <div style={{ fontSize: 11, color: isCredit ? '#6B6457' : 'rgba(245,240,230,0.7)', marginBottom: 3 }}>{acc.bank || acc.name}</div>
-                  {!isCredit && <div style={{ fontSize: 10, color: 'rgba(245,240,230,0.55)', marginBottom: 4 }}>{acc.name}</div>}
-                  <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: isCredit ? '#B8460E' : '#F5F0E6', lineHeight: 1.1, marginBottom: isCredit ? 10 : 0 }}>
-                    {fmtMoney(bal)}
-                  </div>
-                  {isCredit && limit > 0 && (
-                    <>
-                      <div style={{ height: 4, background: '#E4DCC8', borderRadius: 2, overflow: 'hidden', marginBottom: 5 }}>
-                        <div style={{ width: `${utilPct}%`, height: '100%', background: utilPct > 80 ? '#B8460E' : utilPct > 50 ? '#C8932E' : '#3F7A4F', borderRadius: 2 }} />
-                      </div>
-                      <div style={{ fontSize: 10, color: '#6B6457' }}>{fmtMoney(available)} avail · {Math.round(utilPct)}%</div>
-                      {acc.dueDay && <div style={{ fontSize: 10, color: '#8E4585', marginTop: 3 }}>Due day {acc.dueDay}</div>}
-                    </>
-                  )}
-                  {isCredit && !acc.name.includes(acc.bank || '') && <div style={{ fontSize: 10, color: '#6B6457', marginTop: 4, opacity: 0.75 }}>{acc.name}</div>}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* BUDGET PROGRESS */}
-      {budget > 0 ? (
-        <div className="card" style={{ marginBottom: 14 }}>
-          <div className="between" style={{ marginBottom: 8 }}>
-            <div className="row" style={{ gap: 6 }}>
-              <PieChart size={14} color="#8E4585" />
-              <span className="h2">Monthly budget</span>
-            </div>
-            <span className="mono small">{fmtMoney(cur.spent)} / {fmtMoney(budget)}</span>
-          </div>
-          <div style={{ height: 10, background: '#F5F0E6', borderRadius: 6, overflow: 'hidden', marginBottom: 6 }}>
-            <div style={{ width: `${spentPct}%`, height: '100%', background: spentPct >= 100 ? '#B8460E' : spentPct >= 80 ? '#C8932E' : '#3F7A4F', transition: 'width 0.3s' }} />
-          </div>
-          <div className="between tiny muted">
-            <span>{spentPct >= 100 ? `Over by ${fmtMoney(cur.spent - budget)}` : `${fmtMoney(budget - cur.spent)} left`}</span>
-            <span>{Math.round(spentPct)}% used</span>
-          </div>
-        </div>
-      ) : (
-        <button className="tap" onClick={onBudget} style={{ width: '100%', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', textAlign: 'left' }}>
-          <Target size={14} color="#8E4585" />
-          <span className="small" style={{ flex: 1 }}>Set a monthly budget to track spending</span>
-          <ChevronRight size={14} color="#6B6457" />
-        </button>
+      {sectionOrder.map((id) => <React.Fragment key={id}>{renderMoneySection(id)}</React.Fragment>)}
+      {reorderOpen && (
+        <MoneyReorderModal
+          order={sectionOrder}
+          onSave={(o: string[]) => { if (onSaveLayout) onSaveLayout(o); }}
+          onClose={() => setReorderOpen(false)}
+        />
       )}
-
-      {/* SAVINGS GOAL */}
-      {goal > 0 && (
-        <div className="card" style={{ marginBottom: 14 }}>
-          <div className="between" style={{ marginBottom: 8 }}>
-            <div className="row" style={{ gap: 6 }}>
-              <PiggyBank size={14} color="#3F7A4F" />
-              <span className="h2">Savings goal</span>
-            </div>
-            <span className="mono small">{fmtMoney(savedThisMonth)} / {fmtMoney(goal)}</span>
-          </div>
-          <div style={{ height: 10, background: '#F5F0E6', borderRadius: 6, overflow: 'hidden', marginBottom: 6 }}>
-            <div style={{ width: `${savedPct}%`, height: '100%', background: '#3F7A4F', transition: 'width 0.3s' }} />
-          </div>
-          <div className="tiny muted">{savedPct >= 100 ? `Goal hit — ${fmtMoney(savedThisMonth - goal)} over` : `${fmtMoney(goal - savedThisMonth)} to go`}</div>
-        </div>
-      )}
-
-      {/* 6-MONTH TREND */}
-      {!empty && (
-        <div className="card" style={{ marginBottom: 14 }}>
-          <div className="between" style={{ marginBottom: 12 }}>
-            <div className="row" style={{ gap: 6 }}>
-              <TrendingUp size={14} color="#3B5C6B" />
-              <span className="h2">6-month trend</span>
-            </div>
-            {prev.spent > 0 && (
-              <span className="tiny mono" style={{ color: spentDelta > 0 ? '#B8460E' : '#3F7A4F' }}>
-                {spentDelta > 0 ? '+' : ''}{Math.round(spentDelta)}% spend
-              </span>
-            )}
-          </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', height: 90, marginBottom: 8 }}>
-            {trend.map((t) => (
-              <div key={t.ym} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                <div style={{ display: 'flex', gap: 2, alignItems: 'flex-end', height: 70, width: '100%', justifyContent: 'center' }}>
-                  <div title={`Income ${fmtMoney(t.income)}`} style={{ width: '40%', height: `${(t.income / trendMax) * 100}%`, background: '#3F7A4F', borderRadius: '3px 3px 0 0', minHeight: t.income > 0 ? 2 : 0 }} />
-                  <div title={`Spent ${fmtMoney(t.spent)}`} style={{ width: '40%', height: `${(t.spent / trendMax) * 100}%`, background: '#B8460E', borderRadius: '3px 3px 0 0', minHeight: t.spent > 0 ? 2 : 0 }} />
-                </div>
-                <div className="tiny muted" style={{ fontSize: 10 }}>{monthShort(t.ym)}</div>
-              </div>
-            ))}
-          </div>
-          <div className="row" style={{ gap: 14, fontSize: 11 }}>
-            <span className="row" style={{ gap: 4 }}><span style={{ width: 8, height: 8, background: '#3F7A4F', borderRadius: 2 }} /> <span className="muted">Income</span></span>
-            <span className="row" style={{ gap: 4 }}><span style={{ width: 8, height: 8, background: '#B8460E', borderRadius: 2 }} /> <span className="muted">Spent</span></span>
-          </div>
-        </div>
-      )}
-
-      {/* 30-DAY DAILY SPEND CHART — only relevant when viewing current month */}
-      {!empty && viewMonth === thisMonth && (() => {
-        const days30: { label: string; spent: number; date: string }[] = [];
-        for (let i = 29; i >= 0; i--) {
-          const d = new Date(today + 'T00:00:00');
-          d.setDate(d.getDate() - i);
-          const ds = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-          const label = i === 0 ? 'today' : `${d.getMonth() + 1}/${d.getDate()}`;
-          days30.push({ label, date: ds, spent: 0 });
-        }
-        for (const e of spending.entries) {
-          if (e.type !== 'out') continue;
-          const idx = days30.findIndex(d => d.date === e.date);
-          if (idx !== -1) days30[idx].spent += Number(e.amount) || 0;
-        }
-        if (!days30.some(d => d.spent > 0)) return null;
-        const chartData = days30.filter((_, i) => i % 3 === 2 || i === 29).map(d => ({ label: d.label, spent: Math.round(d.spent) }));
-        return (
-          <div className="card" style={{ marginBottom: 14 }}>
-            <div className="row" style={{ gap: 6, marginBottom: 10 }}>
-              <Receipt size={14} color="#8E4585" />
-              <span className="h2">Daily spending · last 30 days</span>
-            </div>
-            <ResponsiveContainer width="100%" height={120}>
-              <BarChart data={chartData} margin={{ top: 4, right: 6, left: -28, bottom: 0 }}>
-                <XAxis dataKey="label" tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} interval={0} />
-                <YAxis tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} />
-                <Tooltip contentStyle={{ fontFamily: 'JetBrains Mono', fontSize: 11, borderRadius: 8 }} formatter={(v: any) => [`$${v}`, 'Spent']} />
-                <Bar dataKey="spent" fill="#8E4585" radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        );
-      })()}
-
-      {/* DEBT TRACKER */}
-      {(() => {
-        const creditCardAccounts = accounts.filter((a: any) => a.type === 'credit');
-        const allDebtItems = [
-          ...creditCardAccounts.map((a: any) => ({ ...a, _isCreditAcc: true })),
-          ...debts,
-        ];
-        const totalDailyInterest = allDebtItems.reduce((s, item) => {
-          const bal = Number(item.balance) || 0;
-          const apr = Number(item.rate) || 0;
-          return s + calcDailyInterest(bal, apr);
-        }, 0);
-        const totalMonthlyInterest = allDebtItems.reduce((s, item) => {
-          const bal = Number(item.balance) || 0;
-          const apr = Number(item.rate) || 0;
-          return s + calcMonthlyInterest(bal, apr);
-        }, 0);
-        const totalAccrued = allDebtItems.reduce((s, item) => s + (Number(item.accruedInterest) || 0), 0);
-        // Avalanche: highest APR debt with a balance > 0
-        const avalancheTarget = allDebtItems
-          .filter((item) => Number(item.balance) > 0 && Number(item.rate) > 0)
-          .sort((a, b) => Number(b.rate) - Number(a.rate))[0];
-
-        return (
-          <div className="card" style={{ marginBottom: 14 }}>
-            <div className="between" style={{ marginBottom: totalDailyInterest > 0 ? 8 : 10 }}>
-              <div className="row" style={{ gap: 6 }}>
-                <Banknote size={14} color="#B8460E" />
-                <span className="h2">Debt tracker</span>
-              </div>
-              <button className="tap" onClick={onAddDebt} style={{ padding: '4px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <Plus size={11} /> Add
-              </button>
-            </div>
-
-            {/* Daily interest summary banner */}
-            {totalDailyInterest > 0 && (
-              <div style={{ background: '#B8460E10', border: '1px solid #B8460E30', borderRadius: 8, padding: '8px 12px', marginBottom: 12 }}>
-                <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-                  <div style={{ flex: 1, minWidth: 120 }}>
-                    <div className="tiny muted" style={{ marginBottom: 1 }}>Costing you today</div>
-                    <div className="mono" style={{ fontSize: 17, fontWeight: 700, color: '#B8460E' }}>{fmtMoney(totalDailyInterest)}<span style={{ fontSize: 11, fontWeight: 400, color: '#6B6457' }}>/day</span></div>
-                  </div>
-                  <div style={{ width: 1, background: '#B8460E25' }} />
-                  <div style={{ flex: 1, minWidth: 100 }}>
-                    <div className="tiny muted" style={{ marginBottom: 1 }}>Monthly interest</div>
-                    <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: '#B8460E' }}>~{fmtMoney(totalMonthlyInterest)}<span style={{ fontSize: 11, fontWeight: 400, color: '#6B6457' }}>/mo</span></div>
-                  </div>
-                  {totalAccrued > 0 && (
-                    <>
-                      <div style={{ width: 1, background: '#B8460E25' }} />
-                      <div style={{ flex: 1, minWidth: 100 }}>
-                        <div className="tiny muted" style={{ marginBottom: 1 }}>Accrued since tracking</div>
-                        <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: '#6B6457' }}>{fmtMoney(totalAccrued)}</div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {allDebtItems.length === 0 ? (
-              <button className="tap" onClick={onAddDebt} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', textAlign: 'left', background: 'transparent', border: 'none' }}>
-                <CircleDollarSign size={14} color="#6B6457" />
-                <span className="small muted" style={{ flex: 1 }}>Track a loan or credit card balance</span>
-                <ChevronRight size={14} color="#6B6457" />
-              </button>
-            ) : (
-              <>
-                {creditCardAccounts.map((acc: any) => {
-                  const limit = Number(acc.creditLimit) || 0;
-                  const bal = Number(acc.balance) || 0;
-                  const apr = Number(acc.rate) || 0;
-                  const daily = calcDailyInterest(bal, apr);
-                  const monthly = calcMonthlyInterest(bal, apr);
-                  const payoffMo = calcPayoffMonths(bal, apr, Number(acc.minPayment) || 0);
-                  const totalInterest = calcTotalInterestAtMin(bal, apr, Number(acc.minPayment) || 0);
-                  const accrued = Number(acc.accruedInterest) || 0;
-                  const utilPct = limit > 0 ? Math.min(100, (bal / limit) * 100) : 0;
-                  return (
-                    <div key={acc.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid #F0EAD8' }}>
-                      <div className="between" style={{ marginBottom: 6 }}>
-                        <div>
-                          <div className="small" style={{ fontWeight: 600 }}>{acc.name}{acc.bank ? ` · ${acc.bank}` : ''}</div>
-                          <div className="tiny muted">
-                            Credit Card{apr > 0 ? ` · ${apr}% APR` : ''}{acc.dueDay ? ` · due day ${acc.dueDay}` : ''}
-                          </div>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(bal)}</div>
-                          {limit > 0 && <div className="tiny muted">of {fmtMoney(limit)} limit</div>}
-                        </div>
-                      </div>
-                      {limit > 0 && (
-                        <div style={{ height: 5, background: '#F0EAD8', borderRadius: 3, overflow: 'hidden', marginBottom: 6 }}>
-                          <div style={{ width: `${utilPct}%`, height: '100%', background: utilPct > 80 ? '#B8460E' : utilPct > 50 ? '#C8932E' : '#3F7A4F', borderRadius: 3 }} />
-                        </div>
-                      )}
-                      {apr > 0 && bal > 0 && (
-                        <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
-                          <span style={{ background: '#B8460E15', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11, fontWeight: 600 }} className="mono">{fmtMoney(daily)}/day</span>
-                          <span style={{ background: '#B8460E10', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11 }} className="mono">~{fmtMoney(monthly)}/mo</span>
-                          {payoffMo > 0 && <span style={{ background: '#F0EAD8', color: '#6B6457', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>payoff {fmtPayoff(payoffMo)}</span>}
-                          {isFinite(totalInterest) && totalInterest > 0 && <span style={{ background: '#F0EAD8', color: '#8E4585', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>+{fmtMoney(totalInterest)} total interest</span>}
-                        </div>
-                      )}
-                      {accrued > 0 && <div className="tiny" style={{ color: '#B8460E', opacity: 0.7 }}>~{fmtMoney(accrued)} interest accrued since tracking</div>}
-                      {limit > 0 && <div className="tiny muted" style={{ marginTop: 2 }}>{fmtMoney(limit - bal)} available</div>}
-                    </div>
-                  );
-                })}
-
-                {debts.map((debt: any) => {
-                  const original = Number(debt.originalAmount) || Number(debt.balance) || 1;
-                  const bal = Number(debt.balance) || 0;
-                  const apr = Number(debt.rate) || 0;
-                  const paid = original - bal;
-                  const paidPct = Math.max(0, Math.min(100, (paid / original) * 100));
-                  const daily = calcDailyInterest(bal, apr);
-                  const monthly = calcMonthlyInterest(bal, apr);
-                  const payoffMo = calcPayoffMonths(bal, apr, Number(debt.minPayment) || 0);
-                  const totalInterest = calcTotalInterestAtMin(bal, apr, Number(debt.minPayment) || 0);
-                  const accrued = Number(debt.accruedInterest) || 0;
-                  const debtType = DEBT_TYPES.find((t) => t.id === debt.type);
-                  return (
-                    <button key={debt.id} className="tap" onClick={() => onEditDebt(debt)} style={{ width: '100%', textAlign: 'left', padding: '10px 0', borderBottom: '1px solid #F0EAD8', background: 'transparent', borderRadius: 0 }}>
-                      <div className="between" style={{ marginBottom: 6 }}>
-                        <div>
-                          <div className="small" style={{ fontWeight: 600 }}>{debt.name}</div>
-                          <div className="tiny muted">{debtType?.label || 'Debt'}{apr > 0 ? ` · ${apr}% APR` : ''}{debt.dueDay ? ` · due day ${debt.dueDay}` : ''}</div>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(bal)}</div>
-                          {debt.minPayment > 0 && <div className="tiny muted">min {fmtMoney(debt.minPayment)}/mo</div>}
-                        </div>
-                      </div>
-                      <div style={{ height: 5, background: '#F0EAD8', borderRadius: 3, overflow: 'hidden', marginBottom: 6 }}>
-                        <div style={{ width: `${paidPct}%`, height: '100%', background: '#3F7A4F', borderRadius: 3 }} />
-                      </div>
-                      <div className="tiny muted" style={{ marginBottom: apr > 0 ? 5 : 0 }}>{Math.round(paidPct)}% paid off · {fmtMoney(bal)} of {fmtMoney(original)} left</div>
-                      {apr > 0 && bal > 0 && (
-                        <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: accrued > 0 ? 4 : 0 }}>
-                          <span style={{ background: '#B8460E15', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11, fontWeight: 600 }} className="mono">{fmtMoney(daily)}/day</span>
-                          <span style={{ background: '#B8460E10', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11 }} className="mono">~{fmtMoney(monthly)}/mo</span>
-                          {payoffMo > 0 && <span style={{ background: '#F0EAD8', color: '#6B6457', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>payoff {fmtPayoff(payoffMo)}</span>}
-                          {isFinite(totalInterest) && totalInterest > 0 && <span style={{ background: '#F0EAD8', color: '#8E4585', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>+{fmtMoney(totalInterest)} total interest</span>}
-                        </div>
-                      )}
-                      {accrued > 0 && <div className="tiny" style={{ color: '#B8460E', opacity: 0.7 }}>~{fmtMoney(accrued)} accrued since tracking</div>}
-                    </button>
-                  );
-                })}
-
-                {/* Avalanche tip */}
-                {avalancheTarget && allDebtItems.filter((i) => Number(i.balance) > 0 && Number(i.rate) > 0).length > 1 && (
-                  <div style={{ background: '#8E458510', border: '1px solid #8E458530', borderRadius: 8, padding: '8px 12px', marginTop: 10 }}>
-                    <div className="tiny" style={{ fontWeight: 600, color: '#8E4585', marginBottom: 2 }}>💡 Avalanche tip</div>
-                    <div className="tiny muted">Pay extra on <strong>{avalancheTarget.name}</strong> first ({avalancheTarget.rate}% APR) — it's costing you the most per dollar. Pay it off before others to save the most in interest.</div>
-                  </div>
-                )}
-
-                {/* Bottom summary */}
-                <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #F0EAD8', display: 'flex', gap: 12 }}>
-                  <div style={{ flex: 1 }}>
-                    <div className="tiny muted">Total debt</div>
-                    <div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(totalLiabilities)}</div>
-                  </div>
-                  {totalDailyInterest > 0 && (
-                    <>
-                      <div style={{ flex: 1 }}>
-                        <div className="tiny muted">Daily cost</div>
-                        <div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(totalDailyInterest)}</div>
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <div className="tiny muted">Monthly cost</div>
-                        <div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>~{fmtMoney(totalMonthlyInterest)}</div>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* INCOME & PAYOFF PLANNER */}
-      {(() => {
-        const inc = spending.income || {};
-        const w2Monthly = Number(inc.w2Monthly) || 0;
-        const expTrading = Number(inc.expectedTrading) || 0;
-        const totalExpected = w2Monthly + expTrading;
-        const minObligations = [...debts.map((d: any) => Number(d.minPayment) || 0), ...accounts.filter((a: any) => a.type === 'credit').map((a: any) => Number(a.minPayment) || 0)].reduce((s, v) => s + v, 0);
-        const surplus = cur.income - cur.spent - minObligations;
-        const canCover = cur.income >= minObligations;
-        const availExtra = Math.max(0, surplus);
-        const totalMonthlyPayment = minObligations + availExtra;
-        const roughMonths = totalMonthlyPayment > 0 && totalLiabilities > 0 ? Math.ceil(totalLiabilities / totalMonthlyPayment) : 0;
-        return (
-          <div className="card" style={{ marginBottom: 14 }}>
-            <div className="between" style={{ marginBottom: 12 }}>
-              <div className="row" style={{ gap: 6 }}><TrendingUp size={14} color="#3F7A4F" /><span className="h2">Income & payoff</span></div>
-              <button className="tap" onClick={onEditIncome} style={{ padding: '4px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Pencil size={10} /> Edit</button>
-            </div>
-            {totalExpected === 0 ? (
-              <button className="tap" onClick={onEditIncome} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', textAlign: 'left', background: 'transparent', border: 'none' }}>
-                <TrendingUp size={14} color="#6B6457" />
-                <span className="small muted" style={{ flex: 1 }}>Set your income to see debt payoff projections</span>
-                <ChevronRight size={14} color="#6B6457" />
-              </button>
-            ) : (
-              <>
-                <div className="row" style={{ gap: 8, marginBottom: 10 }}>
-                  <div style={{ flex: 1, background: '#F9F5EC', borderRadius: 8, padding: '10px 12px' }}>
-                    <div className="tiny muted" style={{ marginBottom: 2 }}>Expected/mo</div>
-                    <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: '#3F7A4F' }}>{fmtMoney(totalExpected)}</div>
-                    {w2Monthly > 0 && expTrading > 0 && <div className="tiny muted">{fmtMoney(w2Monthly)} W2 + {fmtMoney(expTrading)} trading</div>}
-                  </div>
-                  <div style={{ flex: 1, background: '#F9F5EC', borderRadius: 8, padding: '10px 12px' }}>
-                    <div className="tiny muted" style={{ marginBottom: 2 }}>Realized this month</div>
-                    <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: cur.income >= totalExpected * 0.8 ? '#3F7A4F' : '#C8932E' }}>{fmtMoney(cur.income)}</div>
-                  </div>
-                </div>
-                {minObligations > 0 && (
-                  <div style={{ marginBottom: 10 }}>
-                    <div className="between" style={{ marginBottom: 4 }}>
-                      <span className="small muted">Min debt payments/mo</span>
-                      <span className="mono small" style={{ color: '#B8460E' }}>{fmtMoney(minObligations)}</span>
-                    </div>
-                    <div style={{ height: 4, background: '#F0EAD8', borderRadius: 2, overflow: 'hidden', marginBottom: 4 }}>
-                      <div style={{ height: '100%', width: `${Math.min(100, cur.income > 0 ? (minObligations/cur.income)*100 : 100)}%`, background: canCover ? '#3F7A4F' : '#B8460E', borderRadius: 2 }} />
-                    </div>
-                    <div className="tiny" style={{ color: canCover ? '#3F7A4F' : '#B8460E' }}>
-                      {canCover ? `✓ Covered — ${fmtMoney(Math.abs(surplus))} ${surplus >= 0 ? 'surplus' : 'short'} after expenses` : `⚠ Income this month is ${fmtMoney(Math.abs(surplus))} short of covering obligations`}
-                    </div>
-                  </div>
-                )}
-                {roughMonths > 0 && totalLiabilities > 0 && (
-                  <div style={{ background: '#3F7A4F15', border: '1px solid #3F7A4F33', borderRadius: 8, padding: '8px 12px' }}>
-                    <div className="tiny muted" style={{ marginBottom: 2 }}>Debt-free estimate at current pace</div>
-                    <div className="row" style={{ alignItems: 'baseline', gap: 6 }}>
-                      <span className="mono" style={{ fontSize: 16, fontWeight: 700, color: '#3F7A4F' }}>{fmtPayoff(roughMonths)}</span>
-                      {availExtra > 0 && <span className="tiny muted">(incl. {fmtMoney(availExtra)}/mo extra payments)</span>}
-                    </div>
-                  </div>
-                )}
-                {totalLiabilities === 0 && debts.length + accounts.filter((a: any) => a.type === 'credit').length > 0 && (
-                  <div style={{ background: '#3F7A4F15', border: '1px solid #3F7A4F33', borderRadius: 8, padding: '8px 12px', textAlign: 'center' }}>
-                    <span className="small" style={{ color: '#3F7A4F', fontWeight: 600 }}>🎉 Debt free!</span>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        );
-      })()}
-
-      {/* TAX TRACKER LINK */}
-      <button className="tap" onClick={onTaxModal} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', textAlign: 'left', borderRadius: 10, marginBottom: 14 }}>
-        <span style={{ fontSize: 22 }}>🧾</span>
-        <div style={{ flex: 1 }}>
-          <div className="small" style={{ fontWeight: 600 }}>Tax tracker</div>
-          <div className="tiny muted">1099 entries · CA + Federal estimate · Quarterly payments</div>
-        </div>
-        <ChevronRight size={14} color="#6B6457" />
-      </button>
-
-      {/* CATEGORY BREAKDOWN */}
-      {topCats.length > 0 && (
-        <div className="card" style={{ marginBottom: 14 }}>
-          <div className="between" style={{ marginBottom: 12 }}>
-            <div className="row" style={{ gap: 6 }}>
-              <PieChart size={14} color="#B8460E" />
-              <span className="h2">Where it went</span>
-            </div>
-            <button className="tap" onClick={onCategories} style={{ padding: '4px 8px', fontSize: 10 }}>
-              <Pencil size={10} style={{ verticalAlign: 'middle', marginRight: 3 }} /> Categories
-            </button>
-          </div>
-          {topCats.map((c) => {
-            const pct = cur.spent > 0 ? (c.amount / cur.spent) * 100 : 0;
-            return (
-              <div key={c.id} style={{ marginBottom: 10 }}>
-                <div className="between" style={{ marginBottom: 4 }}>
-                  <span className="small"><span className="swatch" style={{ background: c.cat.color }} />{c.cat.name}</span>
-                  <span className="mono small">{fmtMoney(c.amount)}</span>
-                </div>
-                <div style={{ height: 6, background: '#F5F0E6', borderRadius: 4, overflow: 'hidden' }}>
-                  <div style={{ width: `${pct}%`, height: '100%', background: c.cat.color, transition: 'width 0.3s' }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* RECURRING */}
-      {recurring.length > 0 && (
-        <div className="card" style={{ marginBottom: 14 }}>
-          <div className="row" style={{ gap: 6, marginBottom: 12 }}>
-            <Repeat size={14} color="#6E5C8E" />
-            <span className="h2">Recurring</span>
-            <span className="mono tiny muted" style={{ marginLeft: 'auto' }}>~{fmtMoney(recurring.reduce((s, r) => s + Number(r.amount || 0), 0))}/mo</span>
-          </div>
-          {recurring.map((r) => {
-            const cat = catMap[r.categoryId];
-            return (
-              <div key={r.id} className="between" style={{ padding: '6px 0', borderBottom: '1px solid #F0EAD8' }}>
-                <div className="row" style={{ gap: 8 }}>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: cat?.color || '#6B6457' }} />
-                  <div>
-                    <div className="small" style={{ fontWeight: 500 }}>{r.name || 'Untitled'}</div>
-                    <div className="tiny muted">{cat?.name || 'Other'}</div>
-                  </div>
-                </div>
-                <span className="mono small">{fmtMoney(r.amount)}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* PEOPLE OWE ME */}
-      <div className="card" style={{ marginBottom: 14 }}>
-        <div className="between" style={{ marginBottom: 10 }}>
-          <div className="row" style={{ gap: 6 }}>
-            <HandCoins size={14} color="#3F7A4F" />
-            <span className="h2">People owe me</span>
-            {totalOwed > 0 && <span className="mono tiny" style={{ marginLeft: 4, background: '#3F7A4F22', color: '#3F7A4F', padding: '2px 6px', borderRadius: 6 }}>{fmtMoney(totalOwed)}</span>}
-          </div>
-          <button className="tap" onClick={onAddOwed} style={{ padding: '4px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            <Plus size={11} /> Add
-          </button>
-        </div>
-        {owed.length === 0 ? (
-          <div className="muted small" style={{ textAlign: 'center', padding: '8px 0' }}>No IOUs tracked — add someone who owes you.</div>
-        ) : (
-          owed.map((item: any) => (
-            <button key={item.id} className="tap" onClick={() => onEditOwed(item)} style={{ width: '100%', textAlign: 'left', padding: '10px 8px', borderBottom: '1px solid #F0EAD8', background: 'transparent', borderRadius: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ width: 32, height: 32, borderRadius: 8, background: item.paid ? '#3F7A4F22' : '#C8932E22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <Users size={14} color={item.paid ? '#3F7A4F' : '#C8932E'} />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="small" style={{ fontWeight: 600, color: item.paid ? '#6B6457' : '#1A1A2E', textDecoration: item.paid ? 'line-through' : 'none' }}>{item.name}</div>
-                <div className="tiny muted">{item.note ? `${item.note} · ` : ''}{item.dueDate ? `Due ${item.dueDate}` : item.dateAdded ? `Added ${item.dateAdded}` : ''}</div>
-              </div>
-              <span className="mono small" style={{ fontWeight: 700, color: item.paid ? '#6B6457' : '#3F7A4F' }}>{fmtMoney(item.amount)}</span>
-            </button>
-          ))
-        )}
-      </div>
-
-      {/* RECENT TRANSACTIONS */}
-      <div className="card">
-        <div className="between" style={{ marginBottom: 10 }}>
-          <div className="row" style={{ gap: 6 }}>
-            <Receipt size={14} color="#1A1A2E" />
-            <span className="h2">Recent activity</span>
-          </div>
-          <span className="tiny muted mono">{spending.entries.length} total</span>
-        </div>
-        {recent.length === 0 ? (
-          <div className="muted small" style={{ padding: '12px 0', textAlign: 'center' }}>
-            <Sparkles size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />
-            No transactions yet — add income or an expense above.
-          </div>
-        ) : (
-          recent.map((e: any) => {
-            const cat = catMap[e.categoryId];
-            const isIn = e.type === 'in';
-            const acct = accounts.find((a: any) => a.id === e.accountId);
-            return (
-              <button key={e.id} className="tap" onClick={() => onEdit(e)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 8px', textAlign: 'left', borderBottom: '1px solid #F0EAD8', background: 'transparent', borderRadius: 0 }}>
-                <div style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, background: (cat?.color || '#6B6457') + '22', color: cat?.color || '#6B6457', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {isIn ? <ArrowDownRight size={15} /> : <ArrowUpRight size={15} />}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="small" style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name || (isIn ? 'Income' : 'Expense')}</div>
-                  <div className="tiny muted">{cat?.name || 'Other'} · {e.date}{e.recurring ? ' · recurring' : ''}{acct ? ` · ${acct.name}` : ''}</div>
-                </div>
-                <span className="mono small" style={{ color: isIn ? '#3F7A4F' : '#B8460E', fontWeight: 600 }}>
-                  {isIn ? '+' : '−'}{fmtMoney(e.amount).replace('−', '')}
-                </span>
-              </button>
-            );
-          })
-        )}
-      </div>
     </>
   );
 }
+
+// ════════════════════════════════════════════════════════════════════════════════
+// MONEY — SECTION REORDER MODAL
+// ════════════════════════════════════════════════════════════════════════════════
+function MoneyReorderModal({ order, onSave, onClose }: { order: string[]; onSave: (o: string[]) => void; onClose: () => void }) {
+  const [items, setItems] = useState<string[]>(order);
+  const sensors = useDndSensors();
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(26,26,46,0.55)', zIndex: 9999, display: 'flex', alignItems: 'flex-end', padding: '0 0 env(safe-area-inset-bottom)' }}
+      onClick={onClose}>
+      <div style={{ background: 'var(--bg)', borderRadius: '18px 18px 0 0', padding: '20px 20px 32px', width: '100%', maxHeight: '80vh', overflowY: 'auto' }}
+        onClick={(e) => e.stopPropagation()}>
+        <div className="between" style={{ marginBottom: 6 }}>
+          <span className="h2">Reorder sections</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6457', padding: 4 }}><X size={18} /></button>
+        </div>
+        <p className="small muted" style={{ marginBottom: 16 }}>Drag ⠿ to reorder. Sections that have nothing to show are hidden automatically.</p>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={({ active, over }: DragEndEvent) => {
+          if (over && active.id !== over.id) {
+            setItems((prev) => arrayMove(prev, prev.indexOf(String(active.id)), prev.indexOf(String(over.id))));
+          }
+        }}>
+          <SortableContext items={items} strategy={verticalListSortingStrategy}>
+            {items.map((id) => (
+              <SortableRow key={id} id={id}>
+                <div style={{ padding: '11px 12px 11px 28px', borderRadius: 8, marginBottom: 6, background: '#F9F5EC', border: '1px solid #E4DCC8', fontSize: 14, color: '#1A1A2E' }}>
+                  {MONEY_LABELS[id] || id}
+                </div>
+              </SortableRow>
+            ))}
+          </SortableContext>
+        </DndContext>
+        <button className="btn" style={{ width: '100%', marginTop: 14 }} onClick={() => { onSave(items); onClose(); }}>
+          <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save layout
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// PLACEHOLDER — old inline ACCOUNTS start (replaced by renderMoneySection)
+// ════════════════════════════════════════════════════════════════════════════════
 
 function AddTransactionModal({ entry, defaultType, spending, onSave, onDelete, onClose }: any) {
   const isEdit = !!entry;
@@ -6683,8 +6717,10 @@ export default function App() {
             onEditOwed={(item: any) => setModal({ type: 'addOwed', item })}
             onTransfer={() => setModal({ type: 'accountTransfer' })}
             onEditIncome={() => setModal({ type: 'incomePlanner' })}
+            tax={tax}
             onTaxModal={() => setModal({ type: 'taxModal' })}
             onCustomChallenges={() => setModal({ type: 'customChallenges' })}
+            onSaveLayout={(order: string[]) => saveSpending({ ...spending, sectionOrder: order })}
           />
         )}
         {tab === 'journal' && (
