@@ -55,7 +55,7 @@ const K = {
 };
 
 // Keys included in a full data snapshot (for auto-backup + export/restore).
-const BACKUP_KEYS = ['settings', 'totals', 'body', 'workout', 'meals', 'plans', 'streaks', 'journal', 'challengeHistory', 'busyPresets', 'activity', 'checkins', 'spending'] as const;
+const BACKUP_KEYS = ['settings', 'totals', 'body', 'workout', 'meals', 'plans', 'streaks', 'journal', 'challengeHistory', 'busyPresets', 'activity', 'checkins', 'spending', 'tax', 'customChallenges'] as const;
 const MAX_BACKUPS = 10;
 
 async function safeGet(key: string, fallback: any): Promise<any> {
@@ -2402,7 +2402,7 @@ function PlanRow({ date, plans, onClick, highlight }: any) {
 // ════════════════════════════════════════════════════════════════════════════════
 // HISTORY TAB
 // ════════════════════════════════════════════════════════════════════════════════
-function HistoryTab({ settings, totals, workout, meals, body, activity, streaks, checkins, onSelectDay }: any) {
+function HistoryTab({ settings, totals, workout, meals, body, activity, streaks, checkins, spending, onSelectDay }: any) {
   const [month, setMonth] = useState(() => {
     const d = new Date(todayStr() + 'T00:00:00');
     return { year: d.getFullYear(), month: d.getMonth() };
@@ -2461,6 +2461,7 @@ function HistoryTab({ settings, totals, workout, meals, body, activity, streaks,
             const hasMeasurement = body.entries?.some((e: any) => e.date === d);
             const hasActivity = !!(activity?.[d]?.length);
             const hasStudy = activeSubjectKeys.some((k: string) => (checkins?.[k] || []).includes(d));
+            const hasSpending = !!(spending?.entries?.some((e: any) => e.date === d));
             const isToday = d === todayStr();
             const isFuture = diffDays(d) > 0;
             return (
@@ -2486,6 +2487,7 @@ function HistoryTab({ settings, totals, workout, meals, body, activity, streaks,
                   {hasMeal && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#4A6741' }} />}
                   {hasMeasurement && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#B8460E' }} />}
                   {hasActivity && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#C8932E' }} />}
+                  {hasSpending && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#3F7A4F' }} />}
                 </div>
               </button>
             );
@@ -2498,6 +2500,7 @@ function HistoryTab({ settings, totals, workout, meals, body, activity, streaks,
           <span className="tiny muted"><span className="swatch" style={{ background: '#4A6741' }} />Meals</span>
           <span className="tiny muted"><span className="swatch" style={{ background: '#B8460E' }} />Measurement</span>
           <span className="tiny muted"><span className="swatch" style={{ background: '#C8932E' }} />Activity</span>
+          <span className="tiny muted"><span className="swatch" style={{ background: '#3F7A4F' }} />Spending</span>
         </div>
       </div>
 
@@ -2592,12 +2595,199 @@ function ModalShell({ title, onClose, children, icon = null, color = '#1A1A2E' }
   );
 }
 
-function DayDetailModal({ date, settings, totals, workout, meals, body, activity, onClose }: any) {
+function DayDetailModal({ date, settings, totals, workout, meals, body, activity, checkins, spending,
+  onSaveMeals, onSaveWorkout, onSaveTotals, onSaveCheckins, onClose }: any) {
+  const [subView, setSubView] = useState<null | 'workout' | 'meals' | 'study'>(null);
+
   const dayMeals = meals.log?.[date];
   const dayEntries = meals.entries?.[date] || [];
   const dayWorkout = workout.logs?.[date];
   const dayMeasurement = body.entries?.find((e: any) => e.date === date);
   const dayActivities = activity?.[date] || [];
+  const daySpending = (spending?.entries || []).filter((e: any) => e.date === date);
+
+  const activeSubjects = (settings.subjectOrder || []).filter(
+    (k: string) => settings.subjects[k] && !settings.subjects[k].archived && !settings.subjects[k].deletedAt,
+  );
+
+  // Workout sub-view
+  const activeSplit = workout.location === 'home'
+    ? (workout.homeSplit || HOME_WORKOUT_SPLIT)
+    : (workout.split || DEFAULT_WORKOUT_SPLIT);
+  const dow = new Date(date + 'T12:00:00').getDay();
+  const splitDay = activeSplit.find((d: any) => d.day === dow) || activeSplit[dow % activeSplit.length] || activeSplit[0];
+  const [wData, setWData] = useState<any>(() =>
+    dayWorkout || {
+      name: splitDay?.name || 'Workout', location: workout.location || 'gym',
+      exercises: (splitDay?.exercises || []).map((ex: any) => ({
+        name: ex.name, sets: Array(ex.sets || 3).fill(0).map(() => ({ weight: '', reps: '', rpe: '' })),
+      })),
+    },
+  );
+  const wSetSet = (exIdx: number, setIdx: number, field: string, value: string) =>
+    setWData((prev: any) => ({
+      ...prev,
+      exercises: prev.exercises.map((e: any, i: number) =>
+        i !== exIdx ? e : { ...e, sets: e.sets.map((s: any, j: number) => j !== setIdx ? s : { ...s, [field]: value }) },
+      ),
+    }));
+
+  // Meals sub-view
+  const [mManual, setMManual] = useState({ name: '', protein: '', carbs: '', fat: '', calories: '' });
+
+  // Study sub-view
+  const [studyMins, setStudyMins] = useState<Record<string, string>>({});
+
+  if (subView === 'workout') {
+    return (
+      <ModalShell title={`Workout · ${fmtDate(date)}`} onClose={onClose} icon={<Dumbbell size={18} color="#3B5C6B" />}>
+        <button className="tap" style={{ marginBottom: 14, fontSize: 12 }} onClick={() => setSubView(null)}>
+          <ChevronLeft size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Back to day
+        </button>
+        <p className="muted small" style={{ marginBottom: 14 }}>Log weight × reps. Leave blank to skip a set.</p>
+        {wData.exercises?.map((ex: any, i: number) => (
+          <div key={i} style={{ marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid #E4DCC8' }}>
+            <div className="small" style={{ fontWeight: 600, marginBottom: 8 }}>{ex.name}</div>
+            {ex.sets.map((s: any, j: number) => (
+              <div key={j} className="row" style={{ gap: 6, marginBottom: 6 }}>
+                <span className="mono tiny muted" style={{ width: 24 }}>S{j + 1}</span>
+                <input type="number" placeholder="wt" value={s.weight} onChange={(e) => wSetSet(i, j, 'weight', e.target.value)} style={{ flex: 1, padding: 6, fontSize: 13 }} />
+                <span className="muted tiny">×</span>
+                <input type="number" placeholder="reps" value={s.reps} onChange={(e) => wSetSet(i, j, 'reps', e.target.value)} style={{ flex: 1, padding: 6, fontSize: 13 }} />
+                <input type="number" placeholder="rpe" value={s.rpe} onChange={(e) => wSetSet(i, j, 'rpe', e.target.value)} style={{ width: 50, padding: 6, fontSize: 13 }} />
+              </div>
+            ))}
+          </div>
+        ))}
+        {(!wData.exercises || wData.exercises.length === 0) && (
+          <p className="muted small" style={{ marginBottom: 14 }}>No exercises configured for this day's split.</p>
+        )}
+        <button className="btn" style={{ width: '100%' }} onClick={async () => {
+          await onSaveWorkout({ ...workout, logs: { ...workout.logs, [date]: wData } });
+          setSubView(null);
+          toast('Workout saved for ' + fmtDate(date));
+        }}>
+          <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save workout
+        </button>
+      </ModalShell>
+    );
+  }
+
+  if (subView === 'meals') {
+    return (
+      <ModalShell title={`Meals · ${fmtDate(date)}`} onClose={onClose} icon={<Apple size={18} color="#4A6741" />}>
+        <button className="tap" style={{ marginBottom: 14, fontSize: 12 }} onClick={() => setSubView(null)}>
+          <ChevronLeft size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Back to day
+        </button>
+        {dayEntries.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div className="h2" style={{ marginBottom: 8 }}>Logged items</div>
+            {dayEntries.map((e: any) => (
+              <div key={e.id} className="between" style={{ padding: '6px 0', borderBottom: '1px solid #F0EAD8' }}>
+                <div>
+                  <div className="small">{e.name}</div>
+                  <div className="mono tiny muted">{e.protein}p · {e.carbs}c · {e.fat}f · {e.calories}cal</div>
+                </div>
+                <button onClick={async () => onSaveMeals(removeMealEntry(meals, date, e.id))}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 4 }}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="h2" style={{ marginBottom: 8 }}>Add entry</div>
+        <label>Name (optional)</label>
+        <input type="text" value={mManual.name} onChange={(e) => setMManual({ ...mManual, name: e.target.value })} placeholder="e.g. Lunch" style={{ marginBottom: 10 }} />
+        <div className="row" style={{ gap: 8 }}>
+          <div style={{ flex: 1 }}><label>Protein (g)</label><input type="number" value={mManual.protein} onChange={(e) => setMManual({ ...mManual, protein: e.target.value })} /></div>
+          <div style={{ flex: 1 }}><label>Carbs (g)</label><input type="number" value={mManual.carbs} onChange={(e) => setMManual({ ...mManual, carbs: e.target.value })} /></div>
+        </div>
+        <div className="row" style={{ gap: 8, marginTop: 10, marginBottom: 14 }}>
+          <div style={{ flex: 1 }}><label>Fat (g)</label><input type="number" value={mManual.fat} onChange={(e) => setMManual({ ...mManual, fat: e.target.value })} /></div>
+          <div style={{ flex: 1 }}><label>Calories</label><input type="number" value={mManual.calories} onChange={(e) => setMManual({ ...mManual, calories: e.target.value })} /></div>
+        </div>
+        <button className="btn" style={{ width: '100%', marginBottom: 16 }} onClick={async () => {
+          const entry = { name: mManual.name || 'Entry', source: 'Manual', protein: parseFloat(mManual.protein) || 0, carbs: parseFloat(mManual.carbs) || 0, fat: parseFloat(mManual.fat) || 0, calories: parseFloat(mManual.calories) || 0 };
+          await onSaveMeals(addMealEntry(meals, date, entry));
+          setMManual({ name: '', protein: '', carbs: '', fat: '', calories: '' });
+          toast('Entry added for ' + fmtDate(date));
+        }}>
+          <Plus size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Add entry
+        </button>
+        {meals.presets?.length > 0 && (
+          <>
+            <div className="h2" style={{ marginBottom: 8 }}>Quick add from presets</div>
+            {meals.presets.map((p: any) => (
+              <button key={p.id} className="tap" style={{ width: '100%', textAlign: 'left', padding: '8px 10px', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 10 }}
+                onClick={async () => { await onSaveMeals(addMealEntry(meals, date, { name: p.name, source: p.source || '', qty: 1, protein: p.protein, carbs: p.carbs, fat: p.fat, calories: p.calories })); toast(`${p.name} added`); }}>
+                <div style={{ flex: 1 }}>
+                  <div className="small" style={{ fontWeight: 500 }}>{p.name}</div>
+                  <div className="mono tiny muted">{p.protein}p · {p.carbs}c · {p.fat}f · {p.calories}cal</div>
+                </div>
+                <Plus size={14} color="#4A6741" />
+              </button>
+            ))}
+          </>
+        )}
+      </ModalShell>
+    );
+  }
+
+  if (subView === 'study') {
+    return (
+      <ModalShell title={`Study · ${fmtDate(date)}`} onClose={onClose} icon={<BookOpen size={18} color="#8E4585" />}>
+        <button className="tap" style={{ marginBottom: 14, fontSize: 12 }} onClick={() => setSubView(null)}>
+          <ChevronLeft size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Back to day
+        </button>
+        <p className="muted small" style={{ marginBottom: 14, lineHeight: 1.5 }}>
+          Time subjects add to your cumulative total. Check-off subjects mark the day done.
+        </p>
+        {activeSubjects.map((k: string) => {
+          const s = settings.subjects[k];
+          const Icon = ICON_MAP[s.icon] || Target;
+          const isCheckoff = s.trackingMode === 'checkoff';
+          const alreadyChecked = (checkins?.[k] || []).includes(date);
+          return (
+            <div key={k} style={{ marginBottom: 12, padding: '12px 14px', background: '#F9F5EC', borderRadius: 10, border: '1px solid #E4DCC8' }}>
+              <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+                <div className="icon-wrap" style={{ background: s.accent, width: 28, height: 28 }}><Icon size={14} /></div>
+                <span className="small" style={{ fontWeight: 600, flex: 1 }}>{s.name}</span>
+                {isCheckoff && alreadyChecked && <span className="mono tiny" style={{ color: '#4A6741', background: '#4A674122', padding: '2px 6px', borderRadius: 6 }}>✓ Done</span>}
+              </div>
+              {isCheckoff ? (
+                <button className={`tap ${alreadyChecked ? 'active' : ''}`} style={{ width: '100%' }} onClick={async () => {
+                  const list: string[] = checkins?.[k] || [];
+                  const next = alreadyChecked ? list.filter((d: string) => d !== date) : [...list, date];
+                  await onSaveCheckins({ ...checkins, [k]: next });
+                  toast(alreadyChecked ? `${s.name} unmarked` : `${s.name} marked done ✓`);
+                }}>
+                  {alreadyChecked
+                    ? <><X size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Unmark</>
+                    : <><Check size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Mark done</>}
+                </button>
+              ) : (
+                <div className="row" style={{ gap: 8 }}>
+                  <input type="number" min="0" placeholder={`minutes (target: ${s.target})`} value={studyMins[k] || ''} onChange={(e) => setStudyMins((p) => ({ ...p, [k]: e.target.value }))} style={{ flex: 1, padding: '6px 10px', fontSize: 13 }} />
+                  <button className="tap" style={{ padding: '6px 14px', flexShrink: 0 }} onClick={async () => {
+                    const mins = parseInt(studyMins[k] || '0') || 0;
+                    if (!mins) return;
+                    await onSaveTotals({ ...totals, [k]: (totals[k] || 0) + mins });
+                    const list: string[] = checkins?.[k] || [];
+                    if (!list.includes(date)) await onSaveCheckins({ ...checkins, [k]: [...list, date] });
+                    setStudyMins((p) => ({ ...p, [k]: '' }));
+                    toast(`+${mins} min logged for ${s.name}`);
+                  }}>
+                    <Plus size={13} style={{ verticalAlign: 'middle', marginRight: 3 }} />Add
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </ModalShell>
+    );
+  }
 
   return (
     <ModalShell title={fmtDate(date)} onClose={onClose} icon={<History size={18} color="#6B6457" />}>
@@ -2614,7 +2804,43 @@ function DayDetailModal({ date, settings, totals, workout, meals, body, activity
           </div>
         </>
       )}
-      <div className="h2" style={{ marginBottom: 8 }}>Nutrition</div>
+
+      <div className="between" style={{ marginBottom: 8 }}>
+        <div className="h2">Study</div>
+        <button className="tap" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setSubView('study')}>
+          <Pencil size={10} style={{ verticalAlign: 'middle', marginRight: 3 }} /> Log
+        </button>
+      </div>
+      {(() => {
+        const studied = activeSubjects.filter((k: string) => (checkins?.[k] || []).includes(date));
+        if (studied.length === 0) return (
+          <p className="muted small" style={{ marginBottom: 14 }}>No study logged.{' '}
+            <button className="tap" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => setSubView('study')}>+ Log</button>
+          </p>
+        );
+        return (
+          <div className="card" style={{ padding: 12, marginBottom: 14 }}>
+            {studied.map((k: string) => {
+              const s = settings.subjects[k];
+              const Icon = ICON_MAP[s.icon] || Target;
+              return (
+                <div key={k} className="row" style={{ gap: 8, padding: '4px 0' }}>
+                  <div className="icon-wrap" style={{ background: s.accent, width: 22, height: 22 }}><Icon size={11} /></div>
+                  <span className="small">{s.name}</span>
+                  <span className="mono tiny" style={{ marginLeft: 'auto', color: '#4A6741' }}>✓</span>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
+
+      <div className="between" style={{ marginBottom: 8 }}>
+        <div className="h2">Nutrition</div>
+        <button className="tap" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setSubView('meals')}>
+          <Pencil size={10} style={{ verticalAlign: 'middle', marginRight: 3 }} /> {dayMeals ? 'Edit' : 'Log'}
+        </button>
+      </div>
       {dayMeals && (dayMeals.protein || dayMeals.calories || dayMeals.carbs || dayMeals.fat) ? (
         <div className="card" style={{ padding: 12, marginBottom: 14 }}>
           <div className="row" style={{ gap: 16, flexWrap: 'wrap' }}>
@@ -2635,10 +2861,17 @@ function DayDetailModal({ date, settings, totals, workout, meals, body, activity
           )}
         </div>
       ) : (
-        <p className="muted small" style={{ marginBottom: 14 }}>No meals logged this day.</p>
+        <p className="muted small" style={{ marginBottom: 14 }}>No meals logged.{' '}
+          <button className="tap" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => setSubView('meals')}>+ Log</button>
+        </p>
       )}
 
-      <div className="h2" style={{ marginBottom: 8 }}>Workout</div>
+      <div className="between" style={{ marginBottom: 8 }}>
+        <div className="h2">Workout</div>
+        <button className="tap" style={{ fontSize: 11, padding: '4px 10px' }} onClick={() => setSubView('workout')}>
+          <Pencil size={10} style={{ verticalAlign: 'middle', marginRight: 3 }} /> {dayWorkout ? 'Edit' : 'Log'}
+        </button>
+      </div>
       {dayWorkout ? (
         <div className="card" style={{ padding: 12, marginBottom: 14 }}>
           <div className="h3" style={{ marginBottom: 8 }}>{dayWorkout.name}</div>
@@ -2654,13 +2887,15 @@ function DayDetailModal({ date, settings, totals, workout, meals, body, activity
           ))}
         </div>
       ) : (
-        <p className="muted small" style={{ marginBottom: 14 }}>No workout logged this day.</p>
+        <p className="muted small" style={{ marginBottom: 14 }}>No workout logged.{' '}
+          <button className="tap" style={{ fontSize: 11, padding: '2px 8px' }} onClick={() => setSubView('workout')}>+ Log</button>
+        </p>
       )}
 
       {dayMeasurement && (
         <>
           <div className="h2" style={{ marginBottom: 8 }}>Measurements</div>
-          <div className="card" style={{ padding: 12 }}>
+          <div className="card" style={{ padding: 12, marginBottom: 14 }}>
             {MEASUREMENT_FIELDS.map(f => {
               const v = dayMeasurement[f.key];
               if (v == null) return null;
@@ -2671,6 +2906,36 @@ function DayDetailModal({ date, settings, totals, workout, meals, body, activity
                 </div>
               );
             })}
+          </div>
+        </>
+      )}
+
+      {daySpending.length > 0 && (
+        <>
+          <div className="h2" style={{ marginBottom: 8 }}>Spending</div>
+          <div className="card" style={{ padding: 12, marginBottom: 14 }}>
+            {daySpending.map((e: any) => {
+              const cat = (spending?.categories || []).find((c: any) => c.id === e.categoryId);
+              const isIn = e.type === 'in';
+              return (
+                <div key={e.id} className="between" style={{ padding: '5px 0', borderBottom: '1px solid #F0EAD8' }}>
+                  <div>
+                    <div className="small" style={{ fontWeight: 500 }}>{e.name || (isIn ? 'Income' : 'Expense')}</div>
+                    {cat && <div className="tiny muted">{cat.name}</div>}
+                  </div>
+                  <span className="mono small" style={{ color: isIn ? '#3F7A4F' : '#B8460E', fontWeight: 600 }}>
+                    {isIn ? '+' : '−'}{fmtMoney(e.amount).replace('−', '')}
+                  </span>
+                </div>
+              );
+            })}
+            <div className="between" style={{ paddingTop: 8, marginTop: 4, borderTop: '1px solid #E4DCC8' }}>
+              <span className="small muted">Net</span>
+              <span className="mono small" style={{ fontWeight: 700 }}>
+                {fmtMoney(daySpending.filter((e: any) => e.type === 'in').reduce((s: number, e: any) => s + e.amount, 0)
+                  - daySpending.filter((e: any) => e.type === 'out').reduce((s: number, e: any) => s + e.amount, 0))}
+              </span>
+            </div>
           </div>
         </>
       )}
@@ -5233,11 +5498,14 @@ function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onCategori
   const netWorth = assets - totalLiabilities;
   const totalOwed = owed.filter((o: any) => !o.paid).reduce((s: number, o: any) => s + (Number(o.amount) || 0), 0);
 
+  const [filterCatId, setFilterCatId] = useState('');
+  const [filterAcctId, setFilterAcctId] = useState('');
+  const [filterType, setFilterType] = useState('');
+
   const recent = useMemo(
     () => [...spending.entries]
       .filter((e: any) => monthKey(e.date) === viewMonth)
-      .sort((a: any, b: any) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (b.id || '').localeCompare(a.id || '')))
-      .slice(0, 30),
+      .sort((a: any, b: any) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (b.id || '').localeCompare(a.id || ''))),
     [spending.entries, viewMonth],
   );
 
@@ -5292,13 +5560,18 @@ function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onCategori
   const totalYTD = w2YTD + income1099YTD;
 
   const filteredRecent = useMemo(() => {
-    if (!txFilter.trim()) return recent;
-    const q = txFilter.toLowerCase();
     return recent.filter((e: any) => {
       const cat = catMap[e.categoryId];
-      return (e.name || '').toLowerCase().includes(q) || (cat?.name || '').toLowerCase().includes(q);
+      if (txFilter.trim()) {
+        const q = txFilter.toLowerCase();
+        if (!(e.name || '').toLowerCase().includes(q) && !(cat?.name || '').toLowerCase().includes(q)) return false;
+      }
+      if (filterCatId && e.categoryId !== filterCatId) return false;
+      if (filterAcctId && e.accountId !== filterAcctId) return false;
+      if (filterType && e.type !== filterType) return false;
+      return true;
     });
-  }, [recent, txFilter, catMap]);
+  }, [recent, txFilter, filterCatId, filterAcctId, filterType, catMap]);
 
   const sectionOrder = useMemo(() => {
     const saved: string[] = spending.sectionOrder || [];
@@ -5678,21 +5951,48 @@ function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onCategori
           </div>
         );
 
-      case 'transactions':
+      case 'transactions': {
+        const hasFilters = !!(txFilter.trim() || filterCatId || filterAcctId || filterType);
         return (
           <div className="card">
             <div className="between" style={{ marginBottom: 10 }}>
               <div className="row" style={{ gap: 6 }}><Receipt size={14} color="#1A1A2E" /><span className="h2">Transactions</span></div>
-              <span className="tiny muted mono">{recent.length} this month</span>
+              <span className="tiny muted mono">{filteredRecent.length}{hasFilters ? ` / ${recent.length}` : ''} this month</span>
             </div>
-            <div style={{ position: 'relative', marginBottom: 10 }}>
-              <input type="text" value={txFilter} onChange={(e) => setTxFilter(e.target.value)} placeholder="Search by name or category…" style={{ paddingLeft: 32, fontSize: 13, padding: '8px 10px 8px 32px' }} />
+            <div style={{ position: 'relative', marginBottom: 8 }}>
+              <input type="text" value={txFilter} onChange={(e) => setTxFilter(e.target.value)} placeholder="Search by name…" style={{ paddingLeft: 32, fontSize: 13, padding: '8px 10px 8px 32px' }} />
               <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6B6457', fontSize: 14 }}>🔍</span>
               {txFilter && <button onClick={() => setTxFilter('')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#6B6457' }}><X size={14} /></button>}
             </div>
+            <div className="row" style={{ gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+              <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ flex: 1, minWidth: 90, padding: '6px 8px', fontSize: 12, borderRadius: 8, border: '1px solid #E4DCC8', background: filterType ? '#1A1A2E' : undefined, color: filterType ? '#F5F0E6' : undefined }}>
+                <option value="">All types</option>
+                <option value="out">Expenses</option>
+                <option value="in">Income</option>
+              </select>
+              {spending.categories?.length > 0 && (
+                <select value={filterCatId} onChange={(e) => setFilterCatId(e.target.value)} style={{ flex: 1, minWidth: 110, padding: '6px 8px', fontSize: 12, borderRadius: 8, border: '1px solid #E4DCC8', background: filterCatId ? '#1A1A2E' : undefined, color: filterCatId ? '#F5F0E6' : undefined }}>
+                  <option value="">All categories</option>
+                  {spending.categories.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              )}
+              {accounts.length > 0 && (
+                <select value={filterAcctId} onChange={(e) => setFilterAcctId(e.target.value)} style={{ flex: 1, minWidth: 110, padding: '6px 8px', fontSize: 12, borderRadius: 8, border: '1px solid #E4DCC8', background: filterAcctId ? '#1A1A2E' : undefined, color: filterAcctId ? '#F5F0E6' : undefined }}>
+                  <option value="">All accounts</option>
+                  {accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              )}
+              {hasFilters && (
+                <button className="tap" style={{ padding: '5px 10px', fontSize: 11, color: '#B8460E' }} onClick={() => { setTxFilter(''); setFilterCatId(''); setFilterAcctId(''); setFilterType(''); }}>
+                  <X size={11} style={{ verticalAlign: 'middle', marginRight: 3 }} />Clear
+                </button>
+              )}
+            </div>
             {filteredRecent.length === 0 ? (
               <div className="muted small" style={{ padding: '12px 0', textAlign: 'center' }}>
-                {recent.length === 0 ? <><Sparkles size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />No transactions yet — add income or an expense above.</> : `No results for "${txFilter}"`}
+                {recent.length === 0
+                  ? <><Sparkles size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} />No transactions yet — add income or an expense above.</>
+                  : 'No transactions match the current filters.'}
               </div>
             ) : (
               filteredRecent.map((e: any) => {
@@ -5713,6 +6013,7 @@ function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onCategori
             )}
           </div>
         );
+      }
 
       default:
         return null;
@@ -7173,7 +7474,7 @@ export default function App() {
         {tab === 'history' && (
           <HistoryTab
             settings={settings} totals={totals} workout={workout} meals={meals} body={body}
-            activity={activity} streaks={streaks} checkins={checkins}
+            activity={activity} streaks={streaks} checkins={checkins} spending={spending}
             onSelectDay={(date: string) => setModal({ type: 'dayDetail', date })}
           />
         )}
@@ -7196,7 +7497,7 @@ export default function App() {
       {modal?.type === 'logMeal' && <LogMealModal meals={meals} settings={settings} onSave={saveMeals} onClose={() => setModal(null)} />}
       {modal?.type === 'nutritionCoach' && <NutritionCoachModal settings={settings} meals={meals} body={body} onLogItem={async (item: any) => { await saveMeals(addMealEntry(meals, todayStr(), { qty: 1, ...item })); toast(`Logged ${item.name}`); }} onClose={() => setModal(null)} />}
       {modal?.type === 'planDay' && <PlanDayModal date={modal.date} plans={plans} onSave={savePlans} onClose={() => setModal(null)} />}
-      {modal?.type === 'dayDetail' && <DayDetailModal date={modal.date} settings={settings} totals={totals} workout={workout} meals={meals} body={body} activity={activity} onClose={() => setModal(null)} />}
+      {modal?.type === 'dayDetail' && <DayDetailModal date={modal.date} settings={settings} totals={totals} workout={workout} meals={meals} body={body} activity={activity} checkins={checkins} spending={spending} onSaveMeals={saveMeals} onSaveWorkout={saveWorkout} onSaveTotals={saveTotals} onSaveCheckins={saveCheckins} onClose={() => setModal(null)} />}
       {modal?.type === 'addTransaction' && <AddTransactionModal entry={modal.entry} defaultType={modal.defaultType} spending={spending} onSave={upsertTransaction} onDelete={deleteTransaction} onClose={() => setModal(null)} />}
       {modal?.type === 'moneyGoals' && <MoneyGoalsModal spending={spending} onSave={saveSpending} onClose={() => setModal(null)} />}
       {modal?.type === 'moneyCategories' && <MoneyCategoriesModal spending={spending} onSave={saveSpending} onClose={() => setModal(null)} />}
@@ -7207,7 +7508,7 @@ export default function App() {
       {modal?.type === 'incomePlanner' && <IncomePlannerModal spending={spending} onSave={saveSpending} onClose={() => setModal(null)} />}
       {modal?.type === 'taxModal' && <TaxModal tax={tax} spending={spending} onSave={saveTax} onClose={() => setModal(null)} />}
       {modal?.type === 'customChallenges' && <CustomChallengesModal challenges={customChallenges} settings={settings} onSave={saveCustomChallenges} onClose={() => setModal(null)} />}
-      {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, journal, challengeHistory, busyPresets, weeklyAck, spending }} onImport={async (d: any) => {
+      {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, journal, challengeHistory, busyPresets, weeklyAck, spending, tax, customChallenges }} onImport={async (d: any) => {
         if (d.spending) { const sp = migrateSpending(d.spending); setSpending(sp); await safeSet(K.spending, sp); }
         if (d.settings) { setSettings(d.settings); await safeSet(K.settings, d.settings); }
         if (d.totals) { setTotals(d.totals); await safeSet(K.totals, d.totals); }
@@ -7219,8 +7520,11 @@ export default function App() {
         if (d.journal) { setJournal(d.journal); await safeSet(K.journal, d.journal); }
         if (d.challengeHistory) { setChallengeHistory(d.challengeHistory); await safeSet(K.challengeHistory, d.challengeHistory); }
         if (d.busyPresets) { setBusyPresets(d.busyPresets); await safeSet(K.busyPresets, d.busyPresets); }
-        if (d.activity) { await safeSet(K.activity, d.activity); }
-        if (d.checkins) { await safeSet(K.checkins, d.checkins); }
+        if (d.activity) { setActivity(d.activity); await safeSet(K.activity, d.activity); }
+        if (d.checkins) { setCheckins(d.checkins); await safeSet(K.checkins, d.checkins); }
+        if (d.tax) { const tx = migrateTax(d.tax); setTax(tx); await safeSet(K.tax, tx); }
+        if (d.customChallenges) { setCustomChallenges(d.customChallenges); await safeSet(K.customChallenges, d.customChallenges); }
+        toast.success('Data restored successfully.');
         setModal(null);
       }} onClose={() => setModal(null)} />}
       {showWeekly && <WeeklyReviewModal settings={settings} totals={totals} body={body} workout={workout} meals={meals} streaks={streaks} onAck={async () => { const next = { lastAck: todayStr() }; await safeSet(K.weeklyReview, next); setWeeklyAck(next); }} onSkip={async () => { const next = { lastAck: todayStr() }; await safeSet(K.weeklyReview, next); setWeeklyAck(next); }} />}
