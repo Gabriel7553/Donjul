@@ -12,7 +12,7 @@ import { Toaster, toast } from 'sonner';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import confetti from 'canvas-confetti';
 import { motion } from 'framer-motion';
-import { pushKey as syncPushKey } from './sync';
+import { pushKey as syncPushKey, getSyncId, setSyncId } from './sync';
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor,
   useSensor, useSensors, type DragEndEvent
@@ -3406,6 +3406,109 @@ function PlanDayModal({ date, plans, onSave, onClose }: any) {
       }}>
         <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save plan
       </button>
+    </ModalShell>
+  );
+}
+
+function SyncTransferModal({ onClose }: { onClose: () => void }) {
+  const [tab, setTab] = useState<'share' | 'join'>('share');
+  const [myCode] = useState(() => getSyncId());
+  const [copied, setCopied] = useState(false);
+  const [pasted, setPasted] = useState('');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [errMsg, setErrMsg] = useState('');
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(myCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error('Could not copy — please copy manually.');
+    }
+  };
+
+  const handleJoin = async () => {
+    const code = pasted.trim();
+    if (!code) { setErrMsg('Paste the code from your other device first.'); return; }
+    if (code === myCode) { setErrMsg('That is already your current code — nothing to change.'); return; }
+    if (!confirm('Switch this device to the other device\'s data? Your local data will be replaced by the other device\'s data on next load.')) return;
+    setStatus('loading');
+    setErrMsg('');
+    try {
+      setSyncId(code);
+      toast.success('Switched! Reloading now…');
+      setTimeout(() => window.location.reload(), 900);
+    } catch (e: any) {
+      setStatus('error');
+      setErrMsg(e?.message || 'Failed to switch device.');
+    }
+  };
+
+  return (
+    <ModalShell title="Sync to another device" onClose={onClose} icon={<Users size={18} color="#8E4585" />}>
+      <p className="small muted" style={{ marginBottom: 16, lineHeight: 1.5 }}>
+        Your data syncs to a private code. Share it to mirror everything across devices — no account needed.
+      </p>
+
+      <div className="row" style={{ gap: 6, marginBottom: 18 }}>
+        <button className={`tap${tab === 'share' ? ' active' : ''}`} style={{ flex: 1 }} onClick={() => setTab('share')}>
+          <Upload size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} /> Share this device
+        </button>
+        <button className={`tap${tab === 'join' ? ' active' : ''}`} style={{ flex: 1 }} onClick={() => { setTab('join'); setErrMsg(''); }}>
+          <Download size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} /> Join a device
+        </button>
+      </div>
+
+      {tab === 'share' && (
+        <>
+          <label>Your sync code</label>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+            <div className="mono" style={{
+              flex: 1, padding: '10px 12px', background: 'var(--bg-inset)', border: '1px solid var(--border)',
+              borderRadius: 8, fontSize: 11, wordBreak: 'break-all', lineHeight: 1.6, color: 'var(--text)'
+            }}>
+              {myCode}
+            </div>
+          </div>
+          <button className="btn" style={{ width: '100%' }} onClick={handleCopy}>
+            {copied
+              ? <><Check size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Copied!</>
+              : <><Upload size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Copy code</>
+            }
+          </button>
+          <p className="muted tiny" style={{ marginTop: 12, lineHeight: 1.5 }}>
+            On your other device, open Settings → Sync to another device → Join a device, then paste this code.
+          </p>
+        </>
+      )}
+
+      {tab === 'join' && (
+        <>
+          <label>Paste the code from your other device</label>
+          <textarea
+            value={pasted}
+            onChange={(e) => { setPasted(e.target.value); setErrMsg(''); }}
+            placeholder="Paste sync code here…"
+            rows={3}
+            style={{
+              width: '100%', resize: 'none', fontFamily: 'monospace', fontSize: 11,
+              padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8,
+              background: 'var(--bg-inset)', color: 'var(--text)', marginBottom: 10, boxSizing: 'border-box',
+            }}
+          />
+          {errMsg && <p className="tiny" style={{ color: '#B8460E', marginBottom: 8, lineHeight: 1.4 }}>{errMsg}</p>}
+          <button className="btn" style={{ width: '100%' }} onClick={handleJoin} disabled={status === 'loading'}>
+            {status === 'loading'
+              ? 'Switching…'
+              : <><Download size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Switch to that device's data</>
+            }
+          </button>
+          <p className="muted tiny" style={{ marginTop: 12, lineHeight: 1.5 }}>
+            This replaces your local sync ID. Make sure you have a backup if your current data isn't already synced.
+          </p>
+        </>
+      )}
     </ModalShell>
   );
 }
@@ -7017,7 +7120,8 @@ export default function App() {
 
       <BottomNav tab={tab} setTab={setTab} />
 
-      {modal?.type === 'settings' && <SettingsModal settings={settings} body={body} onSave={saveSettings} onClose={() => setModal(null)} onEditSubject={(k: string) => setModal({ type: 'editSubject', key: k })} onAddSubject={() => setModal({ type: 'editSubject', key: null })} onChallenge={() => setModal({ type: 'challenge' })} onCustomChallenges={() => setModal({ type: 'customChallenges' })} onExportImport={() => setModal({ type: 'exportImport' })} onResetDay={() => setModal({ type: 'resetDay' })} />}
+      {modal?.type === 'settings' && <SettingsModal settings={settings} body={body} onSave={saveSettings} onClose={() => setModal(null)} onEditSubject={(k: string) => setModal({ type: 'editSubject', key: k })} onAddSubject={() => setModal({ type: 'editSubject', key: null })} onChallenge={() => setModal({ type: 'challenge' })} onCustomChallenges={() => setModal({ type: 'customChallenges' })} onExportImport={() => setModal({ type: 'exportImport' })} onResetDay={() => setModal({ type: 'resetDay' })} onSyncTransfer={() => setModal({ type: 'syncTransfer' })} />}
+      {modal?.type === 'syncTransfer' && <SyncTransferModal onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'resetDay' && <ResetDayModal onReset={resetDay} onFullReset={fullReset} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'editSubject' && <EditSubjectModal subjectKey={modal.key} settings={settings} onSave={saveSettings} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'logTime' && <LogTimeModal subject={modal.subject} settings={settings} daily={daily} editMode={modal.editMode} onLog={(m: number) => { logTime(modal.subject, m); setModal(null); }} onSet={(m: number) => { setSubjectTime(modal.subject, m); setModal(null); }} onClose={() => setModal(null)} />}
