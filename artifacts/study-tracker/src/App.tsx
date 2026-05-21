@@ -189,6 +189,44 @@ function migrateMeals(meals: any): any {
   return m;
 }
 
+// Cloud sync (optional): localStorage stays the source of truth + offline cache,
+// and we mirror it to the server so data survives browser/device changes.
+let SYNC_AVAILABLE = false;
+function snapshotData(): Record<string, any> {
+  const data: Record<string, any> = {};
+  for (const name of BACKUP_KEYS) {
+    const raw = localStorage.getItem((K as any)[name]);
+    if (raw != null) { try { data[name] = JSON.parse(raw); } catch {} }
+  }
+  return data;
+}
+// On load: pull server state; if it's newer than what we last synced, hydrate localStorage from it.
+async function syncPull(): Promise<void> {
+  try {
+    const resp = await fetch('/api/state');
+    if (resp.status === 503) { SYNC_AVAILABLE = false; return; }
+    SYNC_AVAILABLE = resp.ok;
+    if (!resp.ok) return;
+    const { data, updatedAt } = await resp.json();
+    if (!data || !updatedAt) return;
+    const localTs = await safeGet('st:syncUpdatedAt', null);
+    if (localTs && new Date(updatedAt) <= new Date(localTs)) return;
+    for (const name of BACKUP_KEYS) {
+      if (data[name] !== undefined) localStorage.setItem((K as any)[name], JSON.stringify(data[name]));
+    }
+    await safeSet('st:syncUpdatedAt', updatedAt);
+  } catch { SYNC_AVAILABLE = false; }
+}
+async function syncPush(): Promise<void> {
+  if (!SYNC_AVAILABLE) return;
+  try {
+    const resp = await fetch('/api/state', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: snapshotData() }) });
+    if (!resp.ok) return;
+    const { updatedAt } = await resp.json();
+    if (updatedAt) await safeSet('st:syncUpdatedAt', updatedAt);
+  } catch {}
+}
+
 // Resize an image client-side so the upload stays small but label text stays legible.
 async function fileToResizedBase64(file: File, maxEdge = 1500, quality = 0.9): Promise<{ image: string; mime: string }> {
   const dataUrl: string = await new Promise((res, rej) => {
@@ -3403,9 +3441,15 @@ function ExportImportModal({ data, onImport, onClose }: any) {
         </button>
       </div>
 
-      <p className="muted tiny" style={{ marginBottom: 12, lineHeight: 1.5, color: '#B8460E' }}>
-        Heads up: your data lives only in this browser. Export it somewhere safe, or it can be lost if you clear the browser or switch devices.
-      </p>
+      {SYNC_AVAILABLE ? (
+        <p className="muted tiny" style={{ marginBottom: 12, lineHeight: 1.5, color: '#4A6741' }}>
+          Cloud sync is on — your data is saved to the server and restores automatically on other devices. Exports are still a good extra backup.
+        </p>
+      ) : (
+        <p className="muted tiny" style={{ marginBottom: 12, lineHeight: 1.5, color: '#B8460E' }}>
+          Heads up: your data lives only in this browser. Export it somewhere safe, or it can be lost if you clear the browser or switch devices.
+        </p>
+      )}
 
       {mode === 'backups' && (
         <>
@@ -3630,6 +3674,7 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
+      await syncPull(); // hydrate from server if it has newer data (survives device/browser changes)
       const s = await safeGet(K.settings, DEFAULT_SETTINGS);
       const merged = { ...DEFAULT_SETTINGS, ...s, subjects: { ...DEFAULT_SETTINGS.subjects, ...(s.subjects || {}) }, macroTargets: { ...DEFAULT_SETTINGS.macroTargets, ...(s.macroTargets || {}) } };
       // Normalize subjects to the flexible model and purge soft-deletes older than 15 days.
@@ -3701,6 +3746,13 @@ export default function App() {
     const id = setInterval(() => { void createBackup(); }, 10 * 60 * 1000);
     return () => clearInterval(id);
   }, [loaded]);
+
+  // Cloud sync: debounce-push the full snapshot to the server after any change.
+  useEffect(() => {
+    if (!loaded) return;
+    const id = setTimeout(() => { void syncPush(); }, 2500);
+    return () => clearTimeout(id);
+  }, [loaded, settings, totals, body, workout, meals, plans, streaks, journal, challengeHistory, busyPresets, activity, checkins]);
 
   // Opt-in reminders (fire while the app is open; permission-gated).
   useEffect(() => {
