@@ -41,6 +41,8 @@ const K = {
   backups: 'st:backups',
   achievements: 'st:achievements',
   spending: 'st:spending',
+  tax: 'st:tax',
+  customChallenges: 'st:customChallenges',
 };
 
 // Keys included in a full data snapshot (for auto-backup + export/restore).
@@ -574,11 +576,12 @@ const DEFAULT_SPEND_CATEGORIES = [
 const DEFAULT_SPENDING = {
   entries: [] as any[],
   categories: DEFAULT_SPEND_CATEGORIES,
-  accounts: [] as any[],   // bank/debit/credit card accounts
-  debts: [] as any[],      // loans, balances outside of credit cards
-  owed: [] as any[],       // money people owe you
+  accounts: [] as any[],
+  debts: [] as any[],
+  owed: [] as any[],
   monthlyBudget: 0,
   savingsGoal: 0,
+  income: { w2Monthly: 0, w2Employer: '', expectedTrading: 0 } as any,
 };
 
 function migrateSpending(s: any): any {
@@ -594,6 +597,7 @@ function migrateSpending(s: any): any {
   base.owed = Array.isArray(base.owed) ? base.owed : [];
   base.monthlyBudget = Number(base.monthlyBudget) || 0;
   base.savingsGoal = Number(base.savingsGoal) || 0;
+  if (!base.income || typeof base.income !== 'object') base.income = { w2Monthly: 0, w2Employer: '', expectedTrading: 0 };
   return base;
 }
 
@@ -635,6 +639,66 @@ function fmtPayoff(months: number): string {
   const years = Math.floor(months / 12);
   const rem = months % 12;
   return rem > 0 ? `${years}yr ${rem}mo` : `${years}yr`;
+}
+
+// ────── TAX ESTIMATION (2025, California + Federal, Single) ──────────────────
+const FED_BRACKETS_25: [number, number][] = [
+  [11925, 0.10], [48475, 0.12], [103350, 0.22], [197300, 0.24],
+  [250525, 0.32], [626350, 0.35], [9_999_999, 0.37],
+];
+const CA_BRACKETS_25: [number, number][] = [
+  [10756, 0.01], [25499, 0.02], [40245, 0.04], [55866, 0.06],
+  [70606, 0.08], [360659, 0.093], [432787, 0.103], [721314, 0.113], [9_999_999, 0.123],
+];
+function applyBrackets(income: number, brackets: [number, number][]): number {
+  let tax = 0, prev = 0;
+  for (const [limit, rate] of brackets) {
+    if (income <= prev) break;
+    tax += (Math.min(income, limit) - prev) * rate;
+    prev = limit;
+  }
+  return tax;
+}
+const DEFAULT_TAX = {
+  w2GrossAnnual: 0, w2Employer: '', w2WithheldFed: 0, w2WithheldCA: 0,
+  tradingExpenses: 0, entries1099: [] as any[], payments: [] as any[],
+};
+function migrateTax(t: any): any {
+  return { ...DEFAULT_TAX, ...(t || {}),
+    entries1099: Array.isArray(t?.entries1099) ? t.entries1099 : [],
+    payments: Array.isArray(t?.payments) ? t.payments : [],
+  };
+}
+function calcTaxEstimate(t: any) {
+  const income1099 = ((t.entries1099 as any[]) || []).reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
+  const w2Gross = Number(t.w2GrossAnnual) || 0;
+  const netTrading = Math.max(0, income1099 - (Number(t.tradingExpenses) || 0));
+  const seBase = netTrading * 0.9235;
+  const seTax = Math.min(seBase, 176100) * 0.124 + seBase * 0.029;
+  const halfSE = seTax / 2;
+  const totalGross = w2Gross + netTrading;
+  const agi = totalGross - halfSE;
+  const fedIncome = applyBrackets(Math.max(0, agi - 15000), FED_BRACKETS_25);
+  const caIncome = applyBrackets(Math.max(0, agi - 5202), CA_BRACKETS_25);
+  const caSDI = totalGross * 0.011;
+  const totalFed = fedIncome + seTax;
+  const totalCA = caIncome + caSDI;
+  const totalTax = totalFed + totalCA;
+  const paidEst = ((t.payments as any[]) || []).reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
+  const withheld = (Number(t.w2WithheldFed) || 0) + (Number(t.w2WithheldCA) || 0) + paidEst;
+  const netOwed = Math.max(0, totalTax - withheld);
+  const effectiveRate = totalGross > 0 ? (totalTax / totalGross) * 100 : 0;
+  return { income1099, w2Gross, netTrading, seTax, totalGross, agi, fedIncome, caIncome, caSDI, totalFed, totalCA, totalTax, withheld, netOwed, effectiveRate, quarterly: netOwed / 4 };
+}
+
+const CUSTOM_CHALLENGE_EMOJIS = ['📖','🏋️','🧘','🚴','🥗','💧','💤','✍️','🎯','🎨','🎸','🧠','🔥','⚡','🌟'];
+function getCustomStreak(ch: any): number {
+  const yd = new Date(); yd.setDate(yd.getDate() - 1);
+  const yesterday = `${yd.getFullYear()}-${pad(yd.getMonth()+1)}-${pad(yd.getDate())}`;
+  const last = ch.lastActionDate;
+  if (!last) return 0;
+  if (last < yesterday && !(ch.restDates || []).includes(yesterday)) return 0;
+  return ch.streak || 0;
 }
 
 function fmtMoney(n: number, opts: { signed?: boolean } = {}): string {
@@ -4019,9 +4083,317 @@ function Setup({ onComplete, onImport }: any) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
+// MONEY — INCOME PLANNER MODAL
+// ════════════════════════════════════════════════════════════════════════════════
+function IncomePlannerModal({ spending, onSave, onClose }: any) {
+  const inc = spending.income || {};
+  const [w2Monthly, setW2Monthly] = useState(String(inc.w2Monthly || ''));
+  const [w2Employer, setW2Employer] = useState(inc.w2Employer || '');
+  const [expectedTrading, setExpectedTrading] = useState(String(inc.expectedTrading || ''));
+
+  const save = () => {
+    onSave({ ...spending, income: { w2Monthly: parseFloat(w2Monthly) || 0, w2Employer: w2Employer.trim(), expectedTrading: parseFloat(expectedTrading) || 0 } });
+    onClose();
+  };
+  const total = (parseFloat(w2Monthly) || 0) + (parseFloat(expectedTrading) || 0);
+
+  return (
+    <ModalShell title="Income setup" onClose={onClose}>
+      <p className="small muted" style={{ marginBottom: 16 }}>Set your expected monthly take-home so Donjul can project debt payoff and coverage.</p>
+      <div className="h3" style={{ marginBottom: 8 }}>💼 W2 / Guaranteed</div>
+      <label>Employer</label>
+      <input type="text" value={w2Employer} onChange={(e) => setW2Employer(e.target.value)} placeholder="Your employer" style={{ marginBottom: 12 }} />
+      <label>Monthly take-home (after tax)</label>
+      <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 16 }}>
+        <span className="mono muted">$</span>
+        <input type="number" step="0.01" value={w2Monthly} onChange={(e) => setW2Monthly(e.target.value)} placeholder="0.00" style={{ flex: 1 }} />
+      </div>
+      <div className="h3" style={{ marginBottom: 8 }}>📈 1099 / Trading</div>
+      <label>Average monthly trading profit (pre-tax)</label>
+      <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 6 }}>
+        <span className="mono muted">$</span>
+        <input type="number" step="0.01" value={expectedTrading} onChange={(e) => setExpectedTrading(e.target.value)} placeholder="0.00 (avg)" style={{ flex: 1 }} />
+      </div>
+      <div className="tiny muted" style={{ marginBottom: 16 }}>Track exact 1099 payouts in the Tax Tracker for a precise tax estimate.</div>
+      {total > 0 && (
+        <div style={{ background: '#3F7A4F15', border: '1px solid #3F7A4F33', borderRadius: 8, padding: '10px 14px', marginBottom: 16 }}>
+          <div className="tiny muted">Expected monthly</div>
+          <div className="mono" style={{ fontSize: 18, fontWeight: 700, color: '#3F7A4F' }}>{fmtMoney(total)}/mo</div>
+          <div className="tiny muted">{fmtMoney(parseFloat(w2Monthly)||0)} W2 + {fmtMoney(parseFloat(expectedTrading)||0)} trading</div>
+        </div>
+      )}
+      <button className="btn" style={{ width: '100%' }} onClick={save}><Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save</button>
+    </ModalShell>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// MONEY — TAX TRACKER MODAL (1099 / California / Federal)
+// ════════════════════════════════════════════════════════════════════════════════
+function TaxModal({ tax, onSave, onClose }: any) {
+  const [view, setView] = useState<'estimate'|'income'|'setup'|'payments'>('estimate');
+  const [draft, setDraft] = useState({ ...tax });
+  const [newEntry, setNewEntry] = useState({ payer: '', amount: '', date: todayStr(), description: '' });
+  const [newPayment, setNewPayment] = useState({ quarter: 'Q1', year: '2025', amount: '', datePaid: todayStr() });
+  const est = calcTaxEstimate(draft);
+
+  const saveAll = () => { onSave(draft); onClose(); };
+
+  const addEntry = () => {
+    const amt = parseFloat(newEntry.amount);
+    if (!amt || amt <= 0) { toast.error('Enter an amount'); return; }
+    const e = { id: `t1099_${Date.now()}_${Math.random().toString(36).slice(2,6)}`, payer: newEntry.payer.trim() || 'Prop Firm', amount: Math.round(amt * 100) / 100, date: newEntry.date, description: newEntry.description.trim() };
+    setDraft({ ...draft, entries1099: [...(draft.entries1099 || []), e] });
+    setNewEntry({ payer: '', amount: '', date: todayStr(), description: '' });
+    toast('Entry added');
+  };
+
+  const addPayment = () => {
+    const amt = parseFloat(newPayment.amount);
+    if (!amt || amt <= 0) { toast.error('Enter an amount'); return; }
+    const p = { id: `qp_${Date.now()}_${Math.random().toString(36).slice(2,6)}`, quarter: newPayment.quarter, year: newPayment.year, amount: Math.round(amt * 100) / 100, datePaid: newPayment.datePaid };
+    setDraft({ ...draft, payments: [...(draft.payments || []), p] });
+    setNewPayment({ quarter: 'Q1', year: '2025', amount: '', datePaid: todayStr() });
+    toast('Payment recorded');
+  };
+
+  const QUARTERS = [
+    { q: 'Q1', due: 'Apr 15, 2025' }, { q: 'Q2', due: 'Jun 16, 2025' },
+    { q: 'Q3', due: 'Sep 15, 2025' }, { q: 'Q4', due: 'Jan 15, 2026' },
+  ];
+
+  return (
+    <ModalShell title="Tax tracker 2025" onClose={onClose}>
+      <div className="row" style={{ gap: 4, marginBottom: 14, flexWrap: 'wrap' }}>
+        {([['estimate','📊 Estimate'],['income','💰 1099'],['setup','⚙️ W2 Setup'],['payments','💸 Payments']] as [string,string][]).map(([v,label]) => (
+          <button key={v} className="tap" onClick={() => setView(v as any)} style={{ fontSize: 11, padding: '5px 10px', background: view === v ? '#8E4585' : 'transparent', color: view === v ? '#F5F0E6' : '#1A1A2E', borderColor: view === v ? '#8E4585' : '#E4DCC8' }}>{label}</button>
+        ))}
+      </div>
+
+      {view === 'estimate' && (
+        <>
+          {est.totalGross === 0 ? (
+            <div style={{ textAlign: 'center', padding: '24px 16px' }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>📊</div>
+              <div className="small muted">Add your 1099 income entries and W2 setup to see your 2025 tax estimate.</div>
+            </div>
+          ) : (
+            <>
+              <div style={{ background: '#8E458515', border: '1px solid #8E458530', borderRadius: 10, padding: '12px 14px', marginBottom: 14 }}>
+                <div className="tiny muted" style={{ marginBottom: 4 }}>Total estimated 2025 tax</div>
+                <div className="mono" style={{ fontSize: 24, fontWeight: 700, color: '#8E4585' }}>{fmtMoney(est.totalTax)}</div>
+                <div className="tiny muted">Effective rate: {est.effectiveRate.toFixed(1)}% · AGI: {fmtMoney(est.agi)}</div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14 }}>
+                {[['Federal income', est.fedIncome, '#1A1A2E'], ['Self-employment', est.seTax, '#B8460E'], ['CA income tax', est.caIncome, '#3B5C6B'], ['CA SDI (1.1%)', est.caSDI, '#6B6457']].map(([label, val, color]) => (
+                  <div key={label as string} style={{ background: '#F9F5EC', borderRadius: 8, padding: '10px 12px' }}>
+                    <div className="tiny muted" style={{ marginBottom: 2 }}>{label as string}</div>
+                    <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: color as string }}>{fmtMoney(val as number)}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ background: '#F0EAD8', borderRadius: 8, padding: '10px 12px', marginBottom: 14 }}>
+                {[['W2 gross + 1099 net', fmtMoney(est.totalGross)], ['AGI (after ½ SE deduct.)', fmtMoney(est.agi)], ['Total withheld/paid', `-${fmtMoney(est.withheld)}`]].map(([l,v]) => (
+                  <div key={l as string} className="between" style={{ marginBottom: 5 }}>
+                    <span className="tiny muted">{l as string}</span><span className="mono tiny">{v as string}</span>
+                  </div>
+                ))}
+                <div className="between" style={{ paddingTop: 6, borderTop: '1px solid #D4CCB8' }}>
+                  <span className="small" style={{ fontWeight: 600 }}>Still owed</span>
+                  <span className="mono small" style={{ fontWeight: 700, color: est.netOwed > 0 ? '#B8460E' : '#3F7A4F' }}>{est.netOwed > 0 ? fmtMoney(est.netOwed) : '✓ Covered!'}</span>
+                </div>
+              </div>
+              {est.netOwed > 0 && (
+                <div style={{ background: '#C8932E15', border: '1px solid #C8932E40', borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
+                  <div className="tiny muted">Recommended quarterly est. payment</div>
+                  <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: '#C8932E' }}>{fmtMoney(est.quarterly)}/quarter</div>
+                  <div className="tiny muted">= {fmtMoney(est.totalTax / 12)}/mo set aside</div>
+                </div>
+              )}
+              <div className="tiny muted" style={{ textAlign: 'center' }}>2025 CA + Federal brackets · Single filer · 15.3% SE tax</div>
+            </>
+          )}
+        </>
+      )}
+
+      {view === 'income' && (
+        <>
+          <div className="h3" style={{ marginBottom: 8 }}>Add 1099 entry</div>
+          <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+            <div style={{ flex: 1 }}><label>Payer</label><input type="text" value={newEntry.payer} onChange={(e) => setNewEntry({ ...newEntry, payer: e.target.value })} placeholder="Apex, Topstep…" /></div>
+            <div style={{ flex: 1 }}><label>Amount</label><div className="row" style={{ gap: 6, alignItems: 'center' }}><span className="mono muted">$</span><input type="number" step="0.01" value={newEntry.amount} onChange={(e) => setNewEntry({ ...newEntry, amount: e.target.value })} placeholder="0.00" style={{ flex: 1 }} /></div></div>
+          </div>
+          <div className="row" style={{ gap: 8, marginBottom: 10 }}>
+            <div style={{ flex: 1 }}><label>Date</label><input type="date" value={newEntry.date} onChange={(e) => setNewEntry({ ...newEntry, date: e.target.value })} /></div>
+            <div style={{ flex: 1 }}><label>Note</label><input type="text" value={newEntry.description} onChange={(e) => setNewEntry({ ...newEntry, description: e.target.value })} placeholder="Optional" /></div>
+          </div>
+          <button className="btn" style={{ width: '100%', marginBottom: 16 }} onClick={addEntry}><Plus size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} /> Add entry</button>
+          <div className="between" style={{ marginBottom: 8 }}>
+            <div className="h3">YTD entries</div>
+            <span className="mono small" style={{ color: '#3F7A4F', fontWeight: 700 }}>{fmtMoney(est.income1099)} total</span>
+          </div>
+          {(draft.entries1099 || []).length === 0 && <p className="small muted">No entries yet — include all payout dates from earlier this year.</p>}
+          {[...(draft.entries1099 || [])].sort((a: any, b: any) => b.date.localeCompare(a.date)).map((e: any) => (
+            <div key={e.id} className="between" style={{ padding: '8px 0', borderBottom: '1px solid #F0EAD8' }}>
+              <div><div className="small" style={{ fontWeight: 600 }}>{e.payer}</div><div className="tiny muted">{fmtShortDate(e.date)}{e.description ? ` · ${e.description}` : ''}</div></div>
+              <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+                <span className="mono small" style={{ fontWeight: 700, color: '#3F7A4F' }}>{fmtMoney(e.amount)}</span>
+                <button className="tap" onClick={() => setDraft({ ...draft, entries1099: (draft.entries1099 || []).filter((x: any) => x.id !== e.id) })} style={{ padding: '3px 6px', color: '#B8460E' }}><Trash2 size={11} /></button>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+
+      {view === 'setup' && (
+        <>
+          <div className="h3" style={{ marginBottom: 8 }}>W2 info</div>
+          <label>Employer</label>
+          <input type="text" value={draft.w2Employer || ''} onChange={(e) => setDraft({ ...draft, w2Employer: e.target.value })} placeholder="Company name" style={{ marginBottom: 12 }} />
+          <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}><label>Annual W2 gross</label><div className="row" style={{ gap: 6, alignItems: 'center' }}><span className="mono muted">$</span><input type="number" step="100" value={draft.w2GrossAnnual || ''} onChange={(e) => setDraft({ ...draft, w2GrossAnnual: parseFloat(e.target.value) || 0 })} placeholder="0" style={{ flex: 1 }} /></div></div>
+            <div style={{ flex: 1 }}><label>Federal withheld YTD</label><div className="row" style={{ gap: 6, alignItems: 'center' }}><span className="mono muted">$</span><input type="number" step="0.01" value={draft.w2WithheldFed || ''} onChange={(e) => setDraft({ ...draft, w2WithheldFed: parseFloat(e.target.value) || 0 })} placeholder="0.00" style={{ flex: 1 }} /></div></div>
+          </div>
+          <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}><label>CA withheld YTD</label><div className="row" style={{ gap: 6, alignItems: 'center' }}><span className="mono muted">$</span><input type="number" step="0.01" value={draft.w2WithheldCA || ''} onChange={(e) => setDraft({ ...draft, w2WithheldCA: parseFloat(e.target.value) || 0 })} placeholder="0.00" style={{ flex: 1 }} /></div></div>
+            <div style={{ flex: 1 }}><label>Trading expenses</label><div className="row" style={{ gap: 6, alignItems: 'center' }}><span className="mono muted">$</span><input type="number" step="0.01" value={draft.tradingExpenses || ''} onChange={(e) => setDraft({ ...draft, tradingExpenses: parseFloat(e.target.value) || 0 })} placeholder="Platform, data…" style={{ flex: 1 }} /></div></div>
+          </div>
+          <div className="tiny muted" style={{ padding: '8px 12px', background: '#F0EAD8', borderRadius: 8, marginBottom: 16 }}>Trading expenses reduce your 1099 taxable income. Deductible: platform fees, data subscriptions, home office (% of rent).</div>
+          <button className="btn" style={{ width: '100%' }} onClick={saveAll}><Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save setup</button>
+        </>
+      )}
+
+      {view === 'payments' && (
+        <>
+          <div className="h3" style={{ marginBottom: 8 }}>Record payment</div>
+          <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+            <div style={{ flex: 1 }}><label>Quarter</label><select value={newPayment.quarter} onChange={(e) => setNewPayment({ ...newPayment, quarter: e.target.value })} style={{ width: '100%' }}>{QUARTERS.map((q) => <option key={q.q} value={q.q}>{q.q} 2025 (due {q.due})</option>)}</select></div>
+            <div style={{ flex: 1 }}><label>Amount</label><div className="row" style={{ gap: 6, alignItems: 'center' }}><span className="mono muted">$</span><input type="number" step="0.01" value={newPayment.amount} onChange={(e) => setNewPayment({ ...newPayment, amount: e.target.value })} placeholder="0.00" style={{ flex: 1 }} /></div></div>
+          </div>
+          <div className="row" style={{ gap: 8, marginBottom: 12 }}><div style={{ flex: 1 }}><label>Date paid</label><input type="date" value={newPayment.datePaid} onChange={(e) => setNewPayment({ ...newPayment, datePaid: e.target.value })} /></div></div>
+          <button className="btn" style={{ width: '100%', marginBottom: 16 }} onClick={addPayment}><Plus size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} /> Record</button>
+          <div className="h3" style={{ marginBottom: 8 }}>2025 schedule</div>
+          {QUARTERS.map((q) => {
+            const paid = (draft.payments || []).filter((p: any) => p.quarter === q.q && p.year === '2025');
+            const total = paid.reduce((s: number, p: any) => s + (Number(p.amount) || 0), 0);
+            return (
+              <div key={q.q} style={{ padding: '10px 0', borderBottom: '1px solid #F0EAD8' }}>
+                <div className="between">
+                  <div><div className="small" style={{ fontWeight: 600 }}>{q.q} 2025</div><div className="tiny muted">Due {q.due}</div></div>
+                  <div style={{ textAlign: 'right' }}>{total > 0 ? <span className="mono small" style={{ color: '#3F7A4F', fontWeight: 700 }}>✓ {fmtMoney(total)}</span> : <span className="tiny muted">—</span>}</div>
+                </div>
+                {paid.map((p: any) => (
+                  <div key={p.id} className="between" style={{ paddingLeft: 12, marginTop: 4 }}>
+                    <span className="tiny muted">{fmtShortDate(p.datePaid)}</span>
+                    <div className="row" style={{ gap: 8 }}><span className="mono tiny">{fmtMoney(p.amount)}</span><button className="tap" onClick={() => setDraft({ ...draft, payments: (draft.payments||[]).filter((x:any)=>x.id!==p.id) })} style={{ padding: '2px 5px', color: '#B8460E' }}><Trash2 size={10} /></button></div>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+          <div className="between" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid #F0EAD8' }}>
+            <span className="small muted">Total paid</span>
+            <span className="mono small" style={{ fontWeight: 700, color: '#3F7A4F' }}>{fmtMoney((draft.payments||[]).reduce((s:number,p:any)=>s+(Number(p.amount)||0),0))}</span>
+          </div>
+          <button className="btn" style={{ width: '100%', marginTop: 12 }} onClick={saveAll}><Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save</button>
+        </>
+      )}
+    </ModalShell>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// DAILY HABITS — CUSTOM CHALLENGES MODAL
+// ════════════════════════════════════════════════════════════════════════════════
+function CustomChallengesModal({ challenges, onSave, onClose }: any) {
+  const [view, setView] = useState<'list'|'add'>('list');
+  const [form, setForm] = useState({ name: '', emoji: '🔥', description: '' });
+  const today = todayStr();
+
+  const checkIn = (ch: any, action: 'done'|'rest') => {
+    const streak = getCustomStreak(ch);
+    const updated = action === 'done'
+      ? { ...ch, streak: streak + 1, longestStreak: Math.max(ch.longestStreak || 0, streak + 1), lastActionDate: today }
+      : { ...ch, restDates: [...(ch.restDates || []).slice(-60), today], lastActionDate: today };
+    onSave(challenges.map((c: any) => c.id === ch.id ? updated : c));
+  };
+
+  const addChallenge = () => {
+    if (!form.name.trim()) { toast.error('Enter a habit name'); return; }
+    const ch = { id: `cch_${Date.now()}_${Math.random().toString(36).slice(2,6)}`, name: form.name.trim(), emoji: form.emoji, description: form.description.trim(), startDate: today, streak: 0, longestStreak: 0, lastActionDate: null, restDates: [] };
+    onSave([...challenges, ch]);
+    setForm({ name: '', emoji: '🔥', description: '' });
+    setView('list');
+    toast(`"${ch.name}" habit started!`);
+  };
+
+  return (
+    <ModalShell title="Daily habits" onClose={onClose}>
+      <div className="row" style={{ gap: 6, marginBottom: 14 }}>
+        <button className="tap" onClick={() => setView('list')} style={{ flex: 1, background: view === 'list' ? '#1A1A2E' : 'transparent', color: view === 'list' ? '#F5F0E6' : '#1A1A2E' }}>My habits ({challenges.length})</button>
+        <button className="tap" onClick={() => setView('add')} style={{ flex: 1, background: view === 'add' ? '#1A1A2E' : 'transparent', color: view === 'add' ? '#F5F0E6' : '#1A1A2E', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}><Plus size={12} /> New habit</button>
+      </div>
+
+      {view === 'list' && (
+        <>
+          {challenges.length === 0 && <div style={{ textAlign: 'center', padding: '24px 0' }}><div style={{ fontSize: 32, marginBottom: 8 }}>🔥</div><p className="small muted">No habits yet. Create one to build streaks.</p></div>}
+          {challenges.map((ch: any) => {
+            const streak = getCustomStreak(ch);
+            const doneToday = ch.lastActionDate === today;
+            const isRest = doneToday && (ch.restDates || []).includes(today);
+            const isDone = doneToday && !isRest;
+            return (
+              <div key={ch.id} style={{ padding: '12px 0', borderBottom: '1px solid #F0EAD8' }}>
+                <div className="between" style={{ marginBottom: 8 }}>
+                  <div>
+                    <div className="row" style={{ gap: 6, marginBottom: 2 }}>
+                      <span style={{ fontSize: 18 }}>{ch.emoji}</span>
+                      <span className="small" style={{ fontWeight: 600 }}>{ch.name}</span>
+                    </div>
+                    {ch.description && <div className="tiny muted" style={{ paddingLeft: 26 }}>{ch.description}</div>}
+                    <div className="tiny muted" style={{ paddingLeft: 26, marginTop: 2 }}>🔥 {streak} day streak · best {ch.longestStreak || 0}</div>
+                  </div>
+                  <button className="tap" onClick={() => { if (confirm('Delete this habit?')) onSave(challenges.filter((c: any) => c.id !== ch.id)); }} style={{ padding: '3px 6px', color: '#6B6457' }}><Trash2 size={11} /></button>
+                </div>
+                {!doneToday ? (
+                  <div className="row" style={{ gap: 6 }}>
+                    <button className="btn" style={{ flex: 1, padding: '8px', fontSize: 12, background: '#3F7A4F' }} onClick={() => checkIn(ch, 'done')}>✓ Done today</button>
+                    <button className="tap" style={{ flex: 1, padding: '8px', fontSize: 12 }} onClick={() => checkIn(ch, 'rest')}>😴 Rest day</button>
+                  </div>
+                ) : (
+                  <div style={{ background: isDone ? '#3F7A4F15' : '#F0EAD8', border: `1px solid ${isDone ? '#3F7A4F40' : '#D4CCB8'}`, borderRadius: 8, padding: '8px 12px', textAlign: 'center' }}>
+                    <span className="small" style={{ color: isDone ? '#3F7A4F' : '#6B6457', fontWeight: 600 }}>{isDone ? '✓ Completed today!' : '😴 Rest day — streak protected'}</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {view === 'add' && (
+        <>
+          <label>Habit name</label>
+          <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Read the Bible, Pray, Cold shower…" style={{ marginBottom: 12 }} autoFocus />
+          <label>Description (optional)</label>
+          <input type="text" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Any notes or reminders" style={{ marginBottom: 12 }} />
+          <label>Icon</label>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+            {CUSTOM_CHALLENGE_EMOJIS.map((em) => (
+              <button key={em} onClick={() => setForm({ ...form, emoji: em })} style={{ fontSize: 20, background: form.emoji === em ? '#C8932E20' : 'transparent', border: `2px solid ${form.emoji === em ? '#C8932E' : 'transparent'}`, borderRadius: 8, width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>{em}</button>
+            ))}
+          </div>
+          <button className="btn" style={{ width: '100%' }} onClick={addChallenge}><Plus size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Start habit</button>
+        </>
+      )}
+    </ModalShell>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
 // MONEY TAB — manual personal-finance tracker (Rocket Money inspired)
 // ════════════════════════════════════════════════════════════════════════════════
-function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories, onAddAccount, onEditAccount, onAddDebt, onEditDebt, onAddOwed, onEditOwed, onTransfer }: any) {
+function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories, onAddAccount, onEditAccount, onAddDebt, onEditDebt, onAddOwed, onEditOwed, onTransfer, onEditIncome, onTaxModal, onCustomChallenges }: any) {
   const today = todayStr();
   const thisMonth = monthKey(today);
   const lastMonth = prevMonth(thisMonth);
@@ -4502,6 +4874,97 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories, o
         );
       })()}
 
+      {/* INCOME & PAYOFF PLANNER */}
+      {(() => {
+        const inc = spending.income || {};
+        const w2Monthly = Number(inc.w2Monthly) || 0;
+        const expTrading = Number(inc.expectedTrading) || 0;
+        const totalExpected = w2Monthly + expTrading;
+        const minObligations = [...debts.map((d: any) => Number(d.minPayment) || 0), ...accounts.filter((a: any) => a.type === 'credit').map((a: any) => Number(a.minPayment) || 0)].reduce((s, v) => s + v, 0);
+        const surplus = cur.income - cur.spent - minObligations;
+        const canCover = cur.income >= minObligations;
+        const availExtra = Math.max(0, surplus);
+        const totalMonthlyPayment = minObligations + availExtra;
+        const roughMonths = totalMonthlyPayment > 0 && totalLiabilities > 0 ? Math.ceil(totalLiabilities / totalMonthlyPayment) : 0;
+        return (
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="between" style={{ marginBottom: 12 }}>
+              <div className="row" style={{ gap: 6 }}><TrendingUp size={14} color="#3F7A4F" /><span className="h2">Income & payoff</span></div>
+              <button className="tap" onClick={onEditIncome} style={{ padding: '4px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Pencil size={10} /> Edit</button>
+            </div>
+            {totalExpected === 0 ? (
+              <button className="tap" onClick={onEditIncome} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', textAlign: 'left', background: 'transparent', border: 'none' }}>
+                <TrendingUp size={14} color="#6B6457" />
+                <span className="small muted" style={{ flex: 1 }}>Set your income to see debt payoff projections</span>
+                <ChevronRight size={14} color="#6B6457" />
+              </button>
+            ) : (
+              <>
+                <div className="row" style={{ gap: 8, marginBottom: 10 }}>
+                  <div style={{ flex: 1, background: '#F9F5EC', borderRadius: 8, padding: '10px 12px' }}>
+                    <div className="tiny muted" style={{ marginBottom: 2 }}>Expected/mo</div>
+                    <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: '#3F7A4F' }}>{fmtMoney(totalExpected)}</div>
+                    {w2Monthly > 0 && expTrading > 0 && <div className="tiny muted">{fmtMoney(w2Monthly)} W2 + {fmtMoney(expTrading)} trading</div>}
+                  </div>
+                  <div style={{ flex: 1, background: '#F9F5EC', borderRadius: 8, padding: '10px 12px' }}>
+                    <div className="tiny muted" style={{ marginBottom: 2 }}>Realized this month</div>
+                    <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: cur.income >= totalExpected * 0.8 ? '#3F7A4F' : '#C8932E' }}>{fmtMoney(cur.income)}</div>
+                  </div>
+                </div>
+                {minObligations > 0 && (
+                  <div style={{ marginBottom: 10 }}>
+                    <div className="between" style={{ marginBottom: 4 }}>
+                      <span className="small muted">Min debt payments/mo</span>
+                      <span className="mono small" style={{ color: '#B8460E' }}>{fmtMoney(minObligations)}</span>
+                    </div>
+                    <div style={{ height: 4, background: '#F0EAD8', borderRadius: 2, overflow: 'hidden', marginBottom: 4 }}>
+                      <div style={{ height: '100%', width: `${Math.min(100, cur.income > 0 ? (minObligations/cur.income)*100 : 100)}%`, background: canCover ? '#3F7A4F' : '#B8460E', borderRadius: 2 }} />
+                    </div>
+                    <div className="tiny" style={{ color: canCover ? '#3F7A4F' : '#B8460E' }}>
+                      {canCover ? `✓ Covered — ${fmtMoney(Math.abs(surplus))} ${surplus >= 0 ? 'surplus' : 'short'} after expenses` : `⚠ Income this month is ${fmtMoney(Math.abs(surplus))} short of covering obligations`}
+                    </div>
+                  </div>
+                )}
+                {roughMonths > 0 && totalLiabilities > 0 && (
+                  <div style={{ background: '#3F7A4F15', border: '1px solid #3F7A4F33', borderRadius: 8, padding: '8px 12px' }}>
+                    <div className="tiny muted" style={{ marginBottom: 2 }}>Debt-free estimate at current pace</div>
+                    <div className="row" style={{ alignItems: 'baseline', gap: 6 }}>
+                      <span className="mono" style={{ fontSize: 16, fontWeight: 700, color: '#3F7A4F' }}>{fmtPayoff(roughMonths)}</span>
+                      {availExtra > 0 && <span className="tiny muted">(incl. {fmtMoney(availExtra)}/mo extra payments)</span>}
+                    </div>
+                  </div>
+                )}
+                {totalLiabilities === 0 && debts.length + accounts.filter((a: any) => a.type === 'credit').length > 0 && (
+                  <div style={{ background: '#3F7A4F15', border: '1px solid #3F7A4F33', borderRadius: 8, padding: '8px 12px', textAlign: 'center' }}>
+                    <span className="small" style={{ color: '#3F7A4F', fontWeight: 600 }}>🎉 Debt free!</span>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* TAX TRACKER + HABITS QUICK LINKS */}
+      <div className="row" style={{ gap: 8, marginBottom: 14 }}>
+        <button className="tap" onClick={onTaxModal} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', textAlign: 'left', borderRadius: 10 }}>
+          <span style={{ fontSize: 20 }}>🧾</span>
+          <div style={{ flex: 1 }}>
+            <div className="small" style={{ fontWeight: 600 }}>Tax tracker</div>
+            <div className="tiny muted">1099 · CA + Federal · Quarterly</div>
+          </div>
+          <ChevronRight size={14} color="#6B6457" />
+        </button>
+        <button className="tap" onClick={onCustomChallenges} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', textAlign: 'left', borderRadius: 10 }}>
+          <span style={{ fontSize: 20 }}>🔥</span>
+          <div style={{ flex: 1 }}>
+            <div className="small" style={{ fontWeight: 600 }}>Daily habits</div>
+            <div className="tiny muted">Streaks with rest days</div>
+          </div>
+          <ChevronRight size={14} color="#6B6457" />
+        </button>
+      </div>
+
       {/* CATEGORY BREAKDOWN */}
       {topCats.length > 0 && (
         <div className="card" style={{ marginBottom: 14 }}>
@@ -4637,9 +5100,17 @@ function AddTransactionModal({ entry, defaultType, spending, onSave, onDelete, o
   const [date, setDate] = useState<string>(entry?.date || todayStr());
   const [recurring, setRecurring] = useState<boolean>(!!entry?.recurring);
   const [note, setNote] = useState<string>(entry?.note || '');
+  const [accountId, setAccountId] = useState<string>(entry?.accountId || '');
+
+  const allAccounts: any[] = spending.accounts || [];
+  const relevantAccounts = type === 'out' ? allAccounts : allAccounts.filter((a: any) => a.type !== 'credit');
 
   useEffect(() => {
     if (!cats.find((c: any) => c.id === categoryId)) setCategoryId(cats[0]?.id || '');
+    if (accountId) {
+      const acc = allAccounts.find((a: any) => a.id === accountId);
+      if (acc && type === 'in' && acc.type === 'credit') setAccountId('');
+    }
   }, [type]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = () => {
@@ -4648,7 +5119,9 @@ function AddTransactionModal({ entry, defaultType, spending, onSave, onDelete, o
     if (!categoryId) { toast.error('Pick a category'); return; }
     const next = {
       id: entry?.id || `tx_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      type, amount: Math.round(amt * 100) / 100, name: name.trim(), categoryId, date, recurring, note: note.trim() || undefined,
+      type, amount: Math.round(amt * 100) / 100, name: name.trim(), categoryId, date, recurring,
+      note: note.trim() || undefined,
+      accountId: accountId || undefined,
     };
     onSave(next);
     onClose();
@@ -4747,6 +5220,27 @@ function AddTransactionModal({ entry, defaultType, spending, onSave, onDelete, o
           </button>
         </div>
       </div>
+
+      {relevantAccounts.length > 0 && (
+        <>
+          <label>{type === 'out' ? 'Paid with' : 'Deposit to'} <span className="muted" style={{ fontWeight: 400 }}>(optional)</span></label>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+            <button className="tap" onClick={() => setAccountId('')} style={{ fontSize: 11, padding: '5px 10px', background: !accountId ? '#1A1A2E' : 'transparent', color: !accountId ? '#F5F0E6' : '#1A1A2E', borderColor: !accountId ? '#1A1A2E' : '#E4DCC8' }}>None</button>
+            {relevantAccounts.map((a: any) => (
+              <button key={a.id} className="tap" onClick={() => setAccountId(a.id)} style={{ fontSize: 11, padding: '5px 10px', background: accountId === a.id ? (a.color || '#1A1A2E') : 'transparent', color: accountId === a.id ? '#F5F0E6' : '#1A1A2E', borderColor: accountId === a.id ? (a.color || '#1A1A2E') : '#E4DCC8' }}>
+                {a.name}{a.type === 'credit' ? ' 💳' : ''}
+              </button>
+            ))}
+          </div>
+          {accountId && (() => {
+            const acc = allAccounts.find((a: any) => a.id === accountId);
+            const amt = parseFloat(amount) || 0;
+            if (!acc || !amt) return null;
+            const newBal = type === 'out' ? (acc.type === 'credit' ? Number(acc.balance) + amt : Number(acc.balance) - amt) : Number(acc.balance) + amt;
+            return <div className="tiny muted" style={{ marginBottom: 12 }}>Balance after: <span className="mono" style={{ color: newBal < 0 ? '#B8460E' : '#3F7A4F' }}>{fmtMoney(newBal)}</span></div>;
+          })()}
+        </>
+      )}
 
       <label>Note (optional)</label>
       <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything to remember" style={{ marginBottom: 16 }} />
@@ -5253,6 +5747,8 @@ export default function App() {
   const [checkins, setCheckins] = useState<any>({});
   const [activity, setActivity] = useState<any>({});
   const [spending, setSpending] = useState<any>(DEFAULT_SPENDING);
+  const [tax, setTax] = useState<any>(DEFAULT_TAX);
+  const [customChallenges, setCustomChallenges] = useState<any[]>([]);
   const [modal, setModal] = useState<any>(null);
 
   useEffect(() => {
@@ -5346,7 +5842,11 @@ export default function App() {
       setBusyPresets(bp);
       setCheckins(ci);
       setActivity(ac);
+      const txData = migrateTax(await safeGet(K.tax, DEFAULT_TAX));
+      const cc = await safeGet(K.customChallenges, []);
       setSpending(sp);
+      setTax(txData);
+      setCustomChallenges(cc);
       setLoaded(true);
     })();
   }, []);
@@ -5390,6 +5890,8 @@ export default function App() {
   const saveCheckins = async (next: any) => { setCheckins(next); await safeSet(K.checkins, next); };
   const saveActivity = async (next: any) => { setActivity(next); await safeSet(K.activity, next); };
   const saveSpending = async (next: any) => { setSpending(next); await safeSet(K.spending, next); };
+  const saveTax = async (next: any) => { setTax(next); await safeSet(K.tax, next); };
+  const saveCustomChallenges = async (next: any[]) => { setCustomChallenges(next); await safeSet(K.customChallenges, next); };
   // Functional updates so concurrent edits (categories/goals/other tx) aren't clobbered.
   const upsertTransaction = async (tx: any) => {
     let isEdit = false;
@@ -5397,10 +5899,22 @@ export default function App() {
     setSpending((prev: any) => {
       const idx = prev.entries.findIndex((e: any) => e.id === tx.id);
       isEdit = idx >= 0;
+      const oldTx = isEdit ? prev.entries[idx] : null;
       const nextEntries = isEdit
         ? prev.entries.map((e: any) => (e.id === tx.id ? tx : e))
         : [tx, ...prev.entries];
-      computed = { ...prev, entries: nextEntries };
+      // Adjust linked account balances
+      let nextAccounts = [...prev.accounts];
+      const applyDelta = (accounts: any[], accId: string, txType: string, amt: number, sign: 1 | -1) => {
+        return accounts.map((a: any) => {
+          if (a.id !== accId) return a;
+          const raw = txType === 'out' ? (a.type === 'credit' ? amt : -amt) : amt;
+          return { ...a, balance: Math.round((Number(a.balance) + sign * raw) * 100) / 100 };
+        });
+      };
+      if (isEdit && oldTx?.accountId) nextAccounts = applyDelta(nextAccounts, oldTx.accountId, oldTx.type, oldTx.amount, -1);
+      if (tx.accountId) nextAccounts = applyDelta(nextAccounts, tx.accountId, tx.type, tx.amount, 1);
+      computed = { ...prev, entries: nextEntries, accounts: nextAccounts };
       return computed;
     });
     if (computed) await safeSet(K.spending, computed);
@@ -5822,6 +6336,9 @@ export default function App() {
             onAddOwed={() => setModal({ type: 'addOwed' })}
             onEditOwed={(item: any) => setModal({ type: 'addOwed', item })}
             onTransfer={() => setModal({ type: 'accountTransfer' })}
+            onEditIncome={() => setModal({ type: 'incomePlanner' })}
+            onTaxModal={() => setModal({ type: 'taxModal' })}
+            onCustomChallenges={() => setModal({ type: 'customChallenges' })}
           />
         )}
         {tab === 'journal' && (
@@ -5860,6 +6377,9 @@ export default function App() {
       {modal?.type === 'addDebt' && <AddDebtModal debt={modal.debt} onSave={upsertDebt} onDelete={deleteDebt} onClose={() => setModal(null)} />}
       {modal?.type === 'addOwed' && <AddOwedModal item={modal.item} onSave={upsertOwed} onDelete={deleteOwed} onClose={() => setModal(null)} />}
       {modal?.type === 'accountTransfer' && <AccountTransferModal spending={spending} onSave={doTransfer} onClose={() => setModal(null)} />}
+      {modal?.type === 'incomePlanner' && <IncomePlannerModal spending={spending} onSave={saveSpending} onClose={() => setModal(null)} />}
+      {modal?.type === 'taxModal' && <TaxModal tax={tax} onSave={saveTax} onClose={() => setModal(null)} />}
+      {modal?.type === 'customChallenges' && <CustomChallengesModal challenges={customChallenges} onSave={saveCustomChallenges} onClose={() => setModal(null)} />}
       {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, journal, challengeHistory, busyPresets, weeklyAck, spending }} onImport={async (d: any) => {
         if (d.spending) { const sp = migrateSpending(d.spending); setSpending(sp); await safeSet(K.spending, sp); }
         if (d.settings) { setSettings(d.settings); await safeSet(K.settings, d.settings); }
