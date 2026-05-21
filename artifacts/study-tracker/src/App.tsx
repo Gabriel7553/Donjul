@@ -12,7 +12,7 @@ import { Toaster, toast } from 'sonner';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import confetti from 'canvas-confetti';
 import { motion } from 'framer-motion';
-import { pushKey as syncPushKey, getSyncId, setSyncId } from './sync';
+import { pushKey as syncPushKey, getSyncId, setSyncId, getStoredUsername, setStoredUsername, clearStoredUsername, clearLocalSyncData } from './sync';
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor,
   useSensor, useSensors, type DragEndEvent
@@ -3410,104 +3410,164 @@ function PlanDayModal({ date, plans, onSave, onClose }: any) {
   );
 }
 
-function SyncTransferModal({ onClose }: { onClose: () => void }) {
-  const [tab, setTab] = useState<'share' | 'join'>('share');
-  const [myCode] = useState(() => getSyncId());
-  const [copied, setCopied] = useState(false);
-  const [pasted, setPasted] = useState('');
-  const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
-  const [errMsg, setErrMsg] = useState('');
+const AUTH_API = (() => {
+  const base = (typeof import.meta !== 'undefined' ? (import.meta as any).env?.BASE_URL : '/') || '/';
+  return base.replace(/\/$/, '') + '/api';
+})();
 
-  const handleCopy = async () => {
+function AccountModal({ onClose }: { onClose: () => void }) {
+  const [loggedInAs] = useState(() => getStoredUsername());
+  const [tab, setTab] = useState<'signin' | 'signup'>('signin');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+
+  const reset = () => { setUsername(''); setPassword(''); setConfirmPw(''); setErr(''); };
+
+  const handleSignIn = async () => {
+    setErr('');
+    if (!username.trim() || !password) { setErr('Enter your username and password.'); return; }
+    setLoading(true);
     try {
-      await navigator.clipboard.writeText(myCode);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      const resp = await fetch(`${AUTH_API}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username.trim(), password }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) { setErr(data.error || 'Sign-in failed.'); setLoading(false); return; }
+      clearLocalSyncData();
+      setSyncId(data.userId);
+      setStoredUsername(data.username);
+      toast.success(`Signed in as ${data.username} — syncing…`);
+      setTimeout(() => window.location.reload(), 800);
     } catch {
-      toast.error('Could not copy — please copy manually.');
+      setErr('Network error — check your connection.');
+      setLoading(false);
     }
   };
 
-  const handleJoin = async () => {
-    const code = pasted.trim();
-    if (!code) { setErrMsg('Paste the code from your other device first.'); return; }
-    if (code === myCode) { setErrMsg('That is already your current code — nothing to change.'); return; }
-    if (!confirm('Switch this device to the other device\'s data? Your local data will be replaced by the other device\'s data on next load.')) return;
-    setStatus('loading');
-    setErrMsg('');
+  const handleSignUp = async () => {
+    setErr('');
+    if (!username.trim()) { setErr('Choose a username.'); return; }
+    if (password.length < 6) { setErr('Password must be at least 6 characters.'); return; }
+    if (password !== confirmPw) { setErr('Passwords don\'t match.'); return; }
+    setLoading(true);
     try {
-      setSyncId(code);
-      toast.success('Switched! Reloading now…');
-      setTimeout(() => window.location.reload(), 900);
-    } catch (e: any) {
-      setStatus('error');
-      setErrMsg(e?.message || 'Failed to switch device.');
+      const resp = await fetch(`${AUTH_API}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username.trim(), password }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) { setErr(data.error || 'Registration failed.'); setLoading(false); return; }
+      setSyncId(data.userId);
+      setStoredUsername(data.username);
+      toast.success(`Account created! Signed in as ${data.username}.`);
+      setTimeout(() => window.location.reload(), 800);
+    } catch {
+      setErr('Network error — check your connection.');
+      setLoading(false);
     }
   };
+
+  const handleSignOut = () => {
+    if (!window.confirm(`Sign out of "${loggedInAs}"? This device will become anonymous — your local data stays but won't sync to your account.`)) return;
+    clearLocalSyncData();
+    clearStoredUsername();
+    const newId = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `u-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    setSyncId(newId);
+    toast('Signed out.');
+    setTimeout(() => window.location.reload(), 600);
+  };
+
+  if (loggedInAs) {
+    return (
+      <ModalShell title="Account" onClose={onClose} icon={<Users size={18} color="#8E4585" />}>
+        <div style={{ padding: '14px 0', borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
+          <div className="small muted" style={{ marginBottom: 4 }}>Signed in as</div>
+          <div className="h2" style={{ color: '#8E4585' }}>{loggedInAs}</div>
+        </div>
+        <p className="small muted" style={{ marginBottom: 18, lineHeight: 1.5 }}>
+          Your data syncs automatically across all devices logged into this account.
+          Sign in with the same username and password on any device.
+        </p>
+        <button
+          className="tap"
+          style={{ width: '100%', color: '#B8460E', borderColor: '#B8460E', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}
+          onClick={handleSignOut}
+        >
+          <X size={14} /> Sign out of this device
+        </button>
+      </ModalShell>
+    );
+  }
 
   return (
-    <ModalShell title="Sync to another device" onClose={onClose} icon={<Users size={18} color="#8E4585" />}>
+    <ModalShell title="Account & sync" onClose={onClose} icon={<Users size={18} color="#8E4585" />}>
       <p className="small muted" style={{ marginBottom: 16, lineHeight: 1.5 }}>
-        Your data syncs to a private code. Share it to mirror everything across devices — no account needed.
+        Create an account to sync your data across devices. Sign in on any device with the same username and password.
       </p>
 
       <div className="row" style={{ gap: 6, marginBottom: 18 }}>
-        <button className={`tap${tab === 'share' ? ' active' : ''}`} style={{ flex: 1 }} onClick={() => setTab('share')}>
-          <Upload size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} /> Share this device
+        <button className={`tap${tab === 'signin' ? ' active' : ''}`} style={{ flex: 1 }} onClick={() => { setTab('signin'); reset(); }}>
+          Sign in
         </button>
-        <button className={`tap${tab === 'join' ? ' active' : ''}`} style={{ flex: 1 }} onClick={() => { setTab('join'); setErrMsg(''); }}>
-          <Download size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} /> Join a device
+        <button className={`tap${tab === 'signup' ? ' active' : ''}`} style={{ flex: 1 }} onClick={() => { setTab('signup'); reset(); }}>
+          Create account
         </button>
       </div>
 
-      {tab === 'share' && (
+      <label>Username</label>
+      <input
+        type="text"
+        value={username}
+        onChange={(e) => { setUsername(e.target.value); setErr(''); }}
+        placeholder="e.g. donjul"
+        autoCapitalize="none"
+        autoCorrect="off"
+        style={{ marginBottom: 10 }}
+        onKeyDown={(e) => e.key === 'Enter' && (tab === 'signin' ? handleSignIn() : undefined)}
+      />
+      <label>Password</label>
+      <input
+        type="password"
+        value={password}
+        onChange={(e) => { setPassword(e.target.value); setErr(''); }}
+        placeholder={tab === 'signup' ? 'At least 6 characters' : ''}
+        style={{ marginBottom: tab === 'signup' ? 10 : 14 }}
+        onKeyDown={(e) => e.key === 'Enter' && (tab === 'signin' ? handleSignIn() : undefined)}
+      />
+      {tab === 'signup' && (
         <>
-          <label>Your sync code</label>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
-            <div className="mono" style={{
-              flex: 1, padding: '10px 12px', background: 'var(--bg-inset)', border: '1px solid var(--border)',
-              borderRadius: 8, fontSize: 11, wordBreak: 'break-all', lineHeight: 1.6, color: 'var(--text)'
-            }}>
-              {myCode}
-            </div>
-          </div>
-          <button className="btn" style={{ width: '100%' }} onClick={handleCopy}>
-            {copied
-              ? <><Check size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Copied!</>
-              : <><Upload size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Copy code</>
-            }
-          </button>
-          <p className="muted tiny" style={{ marginTop: 12, lineHeight: 1.5 }}>
-            On your other device, open Settings → Sync to another device → Join a device, then paste this code.
-          </p>
+          <label>Confirm password</label>
+          <input
+            type="password"
+            value={confirmPw}
+            onChange={(e) => { setConfirmPw(e.target.value); setErr(''); }}
+            placeholder="Repeat password"
+            style={{ marginBottom: 14 }}
+          />
         </>
       )}
 
-      {tab === 'join' && (
-        <>
-          <label>Paste the code from your other device</label>
-          <textarea
-            value={pasted}
-            onChange={(e) => { setPasted(e.target.value); setErrMsg(''); }}
-            placeholder="Paste sync code here…"
-            rows={3}
-            style={{
-              width: '100%', resize: 'none', fontFamily: 'monospace', fontSize: 11,
-              padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8,
-              background: 'var(--bg-inset)', color: 'var(--text)', marginBottom: 10, boxSizing: 'border-box',
-            }}
-          />
-          {errMsg && <p className="tiny" style={{ color: '#B8460E', marginBottom: 8, lineHeight: 1.4 }}>{errMsg}</p>}
-          <button className="btn" style={{ width: '100%' }} onClick={handleJoin} disabled={status === 'loading'}>
-            {status === 'loading'
-              ? 'Switching…'
-              : <><Download size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Switch to that device's data</>
-            }
-          </button>
-          <p className="muted tiny" style={{ marginTop: 12, lineHeight: 1.5 }}>
-            This replaces your local sync ID. Make sure you have a backup if your current data isn't already synced.
-          </p>
-        </>
+      {err && <p className="tiny" style={{ color: '#B8460E', marginBottom: 10, lineHeight: 1.4 }}>{err}</p>}
+
+      <button className="btn" style={{ width: '100%' }} onClick={tab === 'signin' ? handleSignIn : handleSignUp} disabled={loading}>
+        {loading ? 'Please wait…' : tab === 'signin' ? 'Sign in' : 'Create account'}
+      </button>
+
+      {tab === 'signup' && (
+        <p className="muted tiny" style={{ marginTop: 10, lineHeight: 1.5 }}>
+          Your current data will be linked to this new account and synced going forward.
+        </p>
+      )}
+      {tab === 'signin' && (
+        <p className="muted tiny" style={{ marginTop: 10, lineHeight: 1.5 }}>
+          Signing in pulls your account's data to this device, replacing any local data.
+        </p>
       )}
     </ModalShell>
   );
@@ -3799,7 +3859,7 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
       </button>
       <button className="tap" onClick={onSyncTransfer} style={{ width: '100%', marginBottom: 8, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
         <Users size={14} color="#8E4585" />
-        <span style={{ flex: 1 }}>Sync to another device</span>
+        <span style={{ flex: 1 }}>{getStoredUsername() ? `Account: ${getStoredUsername()}` : 'Account & sync'}</span>
         <ChevronRight size={14} color="#6B6457" />
       </button>
       <button className="tap" onClick={onResetDay} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -7121,7 +7181,7 @@ export default function App() {
       <BottomNav tab={tab} setTab={setTab} />
 
       {modal?.type === 'settings' && <SettingsModal settings={settings} body={body} onSave={saveSettings} onClose={() => setModal(null)} onEditSubject={(k: string) => setModal({ type: 'editSubject', key: k })} onAddSubject={() => setModal({ type: 'editSubject', key: null })} onChallenge={() => setModal({ type: 'challenge' })} onCustomChallenges={() => setModal({ type: 'customChallenges' })} onExportImport={() => setModal({ type: 'exportImport' })} onResetDay={() => setModal({ type: 'resetDay' })} onSyncTransfer={() => setModal({ type: 'syncTransfer' })} />}
-      {modal?.type === 'syncTransfer' && <SyncTransferModal onClose={() => setModal({ type: 'settings' })} />}
+      {modal?.type === 'syncTransfer' && <AccountModal onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'resetDay' && <ResetDayModal onReset={resetDay} onFullReset={fullReset} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'editSubject' && <EditSubjectModal subjectKey={modal.key} settings={settings} onSave={saveSettings} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'logTime' && <LogTimeModal subject={modal.subject} settings={settings} daily={daily} editMode={modal.editMode} onLog={(m: number) => { logTime(modal.subject, m); setModal(null); }} onSet={(m: number) => { setSubjectTime(modal.subject, m); setModal(null); }} onClose={() => setModal(null)} />}

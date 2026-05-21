@@ -6,6 +6,7 @@ import parseFoodRouter from "./parseFood";
 import weeklyReviewRouter from "./weeklyReview";
 import syncRouter from "./sync";
 import stateRouter from "./state";
+import authRouter from "./auth";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use(parseFoodRouter);
 router.use(weeklyReviewRouter);
 router.use(syncRouter);
 router.use(stateRouter);
+router.use(authRouter);
 
 export default router;

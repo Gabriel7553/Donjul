@@ -2,9 +2,10 @@ const BASE = (import.meta.env.BASE_URL || "/").replace(/\/$/, "");
 const API = `${BASE}/api`;
 const USER_ID_KEY = "st:userId";
 const TRANSFER_KEY = "st:transferKey";
+const USERNAME_KEY = "st:username";
 const LOCAL_TS_PREFIX = "st:_ts:";
 const SYNC_PREFIX = "st:";
-const NO_SYNC_KEYS = new Set(["st:backups", USER_ID_KEY]);
+const NO_SYNC_KEYS = new Set(["st:backups", USER_ID_KEY, USERNAME_KEY]);
 const HYDRATE_TIMEOUT_MS = 2500;
 const DEBOUNCE_MS = 400;
 
@@ -52,6 +53,39 @@ export function getTransferKey(): string {
     localStorage.setItem(TRANSFER_KEY, key);
   }
   return key;
+}
+
+export function getStoredUsername(): string | null {
+  return localStorage.getItem(USERNAME_KEY);
+}
+
+export function setStoredUsername(name: string): void {
+  localStorage.setItem(USERNAME_KEY, name);
+}
+
+export function clearStoredUsername(): void {
+  localStorage.removeItem(USERNAME_KEY);
+}
+
+/**
+ * Wipe all synced data keys (but NOT the userId or username) so that
+ * the next hydrate() pulls server data without any local-wins conflicts.
+ */
+export function clearLocalSyncData(): void {
+  const keys: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (
+      k &&
+      k.startsWith(SYNC_PREFIX) &&
+      k !== USER_ID_KEY &&
+      k !== TRANSFER_KEY &&
+      k !== USERNAME_KEY
+    ) {
+      keys.push(k);
+    }
+  }
+  for (const k of keys) localStorage.removeItem(k);
 }
 
 function markLocalTs(key: string): void {
