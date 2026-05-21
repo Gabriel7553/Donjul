@@ -585,8 +585,12 @@ function migrateSpending(s: any): any {
   const base = { ...DEFAULT_SPENDING, ...(s || {}) };
   base.entries = Array.isArray(base.entries) ? base.entries : [];
   base.categories = Array.isArray(base.categories) && base.categories.length > 0 ? base.categories : DEFAULT_SPEND_CATEGORIES;
-  base.accounts = Array.isArray(base.accounts) ? base.accounts : [];
-  base.debts = Array.isArray(base.debts) ? base.debts : [];
+  base.accounts = Array.isArray(base.accounts)
+    ? base.accounts.map((a: any) => a.type === 'credit' ? { accruedInterest: 0, lastAccrualDate: null, ...a } : a)
+    : [];
+  base.debts = Array.isArray(base.debts)
+    ? base.debts.map((d: any) => ({ accruedInterest: 0, lastAccrualDate: null, ...d }))
+    : [];
   base.owed = Array.isArray(base.owed) ? base.owed : [];
   base.monthlyBudget = Number(base.monthlyBudget) || 0;
   base.savingsGoal = Number(base.savingsGoal) || 0;
@@ -602,6 +606,36 @@ const DEBT_TYPES = [
   { id: 'credit_card', label: 'Credit Card (debt)' },
   { id: 'other', label: 'Other' },
 ];
+
+function calcDailyInterest(balance: number, apr: number): number {
+  if (!balance || !apr || balance <= 0 || apr <= 0) return 0;
+  return (balance * (apr / 100)) / 365;
+}
+function calcMonthlyInterest(balance: number, apr: number): number {
+  if (!balance || !apr || balance <= 0 || apr <= 0) return 0;
+  return (balance * (apr / 100)) / 12;
+}
+function calcPayoffMonths(balance: number, apr: number, minPayment: number): number {
+  if (!balance || balance <= 0) return 0;
+  if (!minPayment || minPayment <= 0) return Number.POSITIVE_INFINITY;
+  if (!apr || apr <= 0) return Math.ceil(balance / minPayment);
+  const r = (apr / 100) / 12;
+  const monthlyInterest = balance * r;
+  if (minPayment <= monthlyInterest) return Number.POSITIVE_INFINITY;
+  return Math.ceil(-Math.log(1 - (r * balance) / minPayment) / Math.log(1 + r));
+}
+function calcTotalInterestAtMin(balance: number, apr: number, minPayment: number): number {
+  const months = calcPayoffMonths(balance, apr, minPayment);
+  if (!isFinite(months) || months <= 0) return Number.POSITIVE_INFINITY;
+  return Math.max(0, months * minPayment - balance);
+}
+function fmtPayoff(months: number): string {
+  if (!isFinite(months) || months <= 0) return '—';
+  if (months < 12) return `${months}mo`;
+  const years = Math.floor(months / 12);
+  const rem = months % 12;
+  return rem > 0 ? `${years}yr ${rem}mo` : `${years}yr`;
+}
 
 function fmtMoney(n: number, opts: { signed?: boolean } = {}): string {
   const v = Number(n) || 0;
@@ -4283,85 +4317,190 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories, o
       )}
 
       {/* DEBT TRACKER */}
-      <div className="card" style={{ marginBottom: 14 }}>
-        <div className="between" style={{ marginBottom: 10 }}>
-          <div className="row" style={{ gap: 6 }}>
-            <Banknote size={14} color="#B8460E" />
-            <span className="h2">Debt tracker</span>
-          </div>
-          <button className="tap" onClick={onAddDebt} style={{ padding: '4px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            <Plus size={11} /> Add
-          </button>
-        </div>
-        {debts.length === 0 && !hasCreditCards ? (
-          <button className="tap" onClick={onAddDebt} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', textAlign: 'left', background: 'transparent', border: 'none' }}>
-            <CircleDollarSign size={14} color="#6B6457" />
-            <span className="small muted" style={{ flex: 1 }}>Track a loan or credit card balance</span>
-            <ChevronRight size={14} color="#6B6457" />
-          </button>
-        ) : (
-          <>
-            {accounts.filter((a: any) => a.type === 'credit').map((acc: any) => {
-              const limit = Number(acc.creditLimit) || 0;
-              const bal = Number(acc.balance) || 0;
-              const paidPct = limit > 0 ? Math.max(0, Math.min(100, ((limit - bal) / limit) * 100)) : 0;
-              return (
-                <div key={acc.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid #F0EAD8' }}>
-                  <div className="between" style={{ marginBottom: 6 }}>
-                    <div>
-                      <div className="small" style={{ fontWeight: 600 }}>{acc.name}{acc.bank ? ` · ${acc.bank}` : ''}</div>
-                      <div className="tiny muted">Credit Card{acc.dueDay ? ` · due day ${acc.dueDay}` : ''}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(bal)}</div>
-                      {limit > 0 && <div className="tiny muted">of {fmtMoney(limit)} limit</div>}
-                    </div>
+      {(() => {
+        const creditCardAccounts = accounts.filter((a: any) => a.type === 'credit');
+        const allDebtItems = [
+          ...creditCardAccounts.map((a: any) => ({ ...a, _isCreditAcc: true })),
+          ...debts,
+        ];
+        const totalDailyInterest = allDebtItems.reduce((s, item) => {
+          const bal = Number(item.balance) || 0;
+          const apr = Number(item.rate) || 0;
+          return s + calcDailyInterest(bal, apr);
+        }, 0);
+        const totalMonthlyInterest = allDebtItems.reduce((s, item) => {
+          const bal = Number(item.balance) || 0;
+          const apr = Number(item.rate) || 0;
+          return s + calcMonthlyInterest(bal, apr);
+        }, 0);
+        const totalAccrued = allDebtItems.reduce((s, item) => s + (Number(item.accruedInterest) || 0), 0);
+        // Avalanche: highest APR debt with a balance > 0
+        const avalancheTarget = allDebtItems
+          .filter((item) => Number(item.balance) > 0 && Number(item.rate) > 0)
+          .sort((a, b) => Number(b.rate) - Number(a.rate))[0];
+
+        return (
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="between" style={{ marginBottom: totalDailyInterest > 0 ? 8 : 10 }}>
+              <div className="row" style={{ gap: 6 }}>
+                <Banknote size={14} color="#B8460E" />
+                <span className="h2">Debt tracker</span>
+              </div>
+              <button className="tap" onClick={onAddDebt} style={{ padding: '4px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <Plus size={11} /> Add
+              </button>
+            </div>
+
+            {/* Daily interest summary banner */}
+            {totalDailyInterest > 0 && (
+              <div style={{ background: '#B8460E10', border: '1px solid #B8460E30', borderRadius: 8, padding: '8px 12px', marginBottom: 12 }}>
+                <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: 120 }}>
+                    <div className="tiny muted" style={{ marginBottom: 1 }}>Costing you today</div>
+                    <div className="mono" style={{ fontSize: 17, fontWeight: 700, color: '#B8460E' }}>{fmtMoney(totalDailyInterest)}<span style={{ fontSize: 11, fontWeight: 400, color: '#6B6457' }}>/day</span></div>
                   </div>
-                  {limit > 0 && (
+                  <div style={{ width: 1, background: '#B8460E25' }} />
+                  <div style={{ flex: 1, minWidth: 100 }}>
+                    <div className="tiny muted" style={{ marginBottom: 1 }}>Monthly interest</div>
+                    <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: '#B8460E' }}>~{fmtMoney(totalMonthlyInterest)}<span style={{ fontSize: 11, fontWeight: 400, color: '#6B6457' }}>/mo</span></div>
+                  </div>
+                  {totalAccrued > 0 && (
                     <>
-                      <div style={{ height: 6, background: '#F0EAD8', borderRadius: 3, overflow: 'hidden', marginBottom: 4 }}>
-                        <div style={{ width: `${100 - paidPct}%`, height: '100%', background: '#B8460E', borderRadius: 3 }} />
+                      <div style={{ width: 1, background: '#B8460E25' }} />
+                      <div style={{ flex: 1, minWidth: 100 }}>
+                        <div className="tiny muted" style={{ marginBottom: 1 }}>Accrued since tracking</div>
+                        <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: '#6B6457' }}>{fmtMoney(totalAccrued)}</div>
                       </div>
-                      <div className="tiny muted">{fmtMoney(limit - bal)} available</div>
                     </>
                   )}
                 </div>
-              );
-            })}
-            {debts.map((debt: any) => {
-              const original = Number(debt.originalAmount) || Number(debt.balance) || 1;
-              const bal = Number(debt.balance) || 0;
-              const paid = original - bal;
-              const paidPct = Math.max(0, Math.min(100, (paid / original) * 100));
-              const debtType = DEBT_TYPES.find((t) => t.id === debt.type);
-              return (
-                <button key={debt.id} className="tap" onClick={() => onEditDebt(debt)} style={{ width: '100%', textAlign: 'left', padding: '10px 0', borderBottom: '1px solid #F0EAD8', background: 'transparent', borderRadius: 0 }}>
-                  <div className="between" style={{ marginBottom: 6 }}>
-                    <div>
-                      <div className="small" style={{ fontWeight: 600 }}>{debt.name}</div>
-                      <div className="tiny muted">{debtType?.label || 'Debt'}{debt.rate ? ` · ${debt.rate}% APR` : ''}{debt.dueDay ? ` · due day ${debt.dueDay}` : ''}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(bal)}</div>
-                      {debt.minPayment > 0 && <div className="tiny muted">min {fmtMoney(debt.minPayment)}/mo</div>}
-                    </div>
-                  </div>
-                  <div style={{ height: 6, background: '#F0EAD8', borderRadius: 3, overflow: 'hidden', marginBottom: 4 }}>
-                    <div style={{ width: `${paidPct}%`, height: '100%', background: '#3F7A4F', borderRadius: 3 }} />
-                  </div>
-                  <div className="tiny muted">{Math.round(paidPct)}% paid off · {fmtMoney(bal)} remaining of {fmtMoney(original)}</div>
-                </button>
-              );
-            })}
-            {totalLiabilities > 0 && (
-              <div className="between" style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid #F0EAD8' }}>
-                <span className="small muted">Total debt</span>
-                <span className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(totalLiabilities)}</span>
               </div>
             )}
-          </>
-        )}
-      </div>
+
+            {allDebtItems.length === 0 ? (
+              <button className="tap" onClick={onAddDebt} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', textAlign: 'left', background: 'transparent', border: 'none' }}>
+                <CircleDollarSign size={14} color="#6B6457" />
+                <span className="small muted" style={{ flex: 1 }}>Track a loan or credit card balance</span>
+                <ChevronRight size={14} color="#6B6457" />
+              </button>
+            ) : (
+              <>
+                {creditCardAccounts.map((acc: any) => {
+                  const limit = Number(acc.creditLimit) || 0;
+                  const bal = Number(acc.balance) || 0;
+                  const apr = Number(acc.rate) || 0;
+                  const daily = calcDailyInterest(bal, apr);
+                  const monthly = calcMonthlyInterest(bal, apr);
+                  const payoffMo = calcPayoffMonths(bal, apr, Number(acc.minPayment) || 0);
+                  const totalInterest = calcTotalInterestAtMin(bal, apr, Number(acc.minPayment) || 0);
+                  const accrued = Number(acc.accruedInterest) || 0;
+                  const utilPct = limit > 0 ? Math.min(100, (bal / limit) * 100) : 0;
+                  return (
+                    <div key={acc.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid #F0EAD8' }}>
+                      <div className="between" style={{ marginBottom: 6 }}>
+                        <div>
+                          <div className="small" style={{ fontWeight: 600 }}>{acc.name}{acc.bank ? ` · ${acc.bank}` : ''}</div>
+                          <div className="tiny muted">
+                            Credit Card{apr > 0 ? ` · ${apr}% APR` : ''}{acc.dueDay ? ` · due day ${acc.dueDay}` : ''}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(bal)}</div>
+                          {limit > 0 && <div className="tiny muted">of {fmtMoney(limit)} limit</div>}
+                        </div>
+                      </div>
+                      {limit > 0 && (
+                        <div style={{ height: 5, background: '#F0EAD8', borderRadius: 3, overflow: 'hidden', marginBottom: 6 }}>
+                          <div style={{ width: `${utilPct}%`, height: '100%', background: utilPct > 80 ? '#B8460E' : utilPct > 50 ? '#C8932E' : '#3F7A4F', borderRadius: 3 }} />
+                        </div>
+                      )}
+                      {apr > 0 && bal > 0 && (
+                        <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+                          <span style={{ background: '#B8460E15', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11, fontWeight: 600 }} className="mono">{fmtMoney(daily)}/day</span>
+                          <span style={{ background: '#B8460E10', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11 }} className="mono">~{fmtMoney(monthly)}/mo</span>
+                          {payoffMo > 0 && <span style={{ background: '#F0EAD8', color: '#6B6457', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>payoff {fmtPayoff(payoffMo)}</span>}
+                          {isFinite(totalInterest) && totalInterest > 0 && <span style={{ background: '#F0EAD8', color: '#8E4585', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>+{fmtMoney(totalInterest)} total interest</span>}
+                        </div>
+                      )}
+                      {accrued > 0 && <div className="tiny" style={{ color: '#B8460E', opacity: 0.7 }}>~{fmtMoney(accrued)} interest accrued since tracking</div>}
+                      {limit > 0 && <div className="tiny muted" style={{ marginTop: 2 }}>{fmtMoney(limit - bal)} available</div>}
+                    </div>
+                  );
+                })}
+
+                {debts.map((debt: any) => {
+                  const original = Number(debt.originalAmount) || Number(debt.balance) || 1;
+                  const bal = Number(debt.balance) || 0;
+                  const apr = Number(debt.rate) || 0;
+                  const paid = original - bal;
+                  const paidPct = Math.max(0, Math.min(100, (paid / original) * 100));
+                  const daily = calcDailyInterest(bal, apr);
+                  const monthly = calcMonthlyInterest(bal, apr);
+                  const payoffMo = calcPayoffMonths(bal, apr, Number(debt.minPayment) || 0);
+                  const totalInterest = calcTotalInterestAtMin(bal, apr, Number(debt.minPayment) || 0);
+                  const accrued = Number(debt.accruedInterest) || 0;
+                  const debtType = DEBT_TYPES.find((t) => t.id === debt.type);
+                  return (
+                    <button key={debt.id} className="tap" onClick={() => onEditDebt(debt)} style={{ width: '100%', textAlign: 'left', padding: '10px 0', borderBottom: '1px solid #F0EAD8', background: 'transparent', borderRadius: 0 }}>
+                      <div className="between" style={{ marginBottom: 6 }}>
+                        <div>
+                          <div className="small" style={{ fontWeight: 600 }}>{debt.name}</div>
+                          <div className="tiny muted">{debtType?.label || 'Debt'}{apr > 0 ? ` · ${apr}% APR` : ''}{debt.dueDay ? ` · due day ${debt.dueDay}` : ''}</div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(bal)}</div>
+                          {debt.minPayment > 0 && <div className="tiny muted">min {fmtMoney(debt.minPayment)}/mo</div>}
+                        </div>
+                      </div>
+                      <div style={{ height: 5, background: '#F0EAD8', borderRadius: 3, overflow: 'hidden', marginBottom: 6 }}>
+                        <div style={{ width: `${paidPct}%`, height: '100%', background: '#3F7A4F', borderRadius: 3 }} />
+                      </div>
+                      <div className="tiny muted" style={{ marginBottom: apr > 0 ? 5 : 0 }}>{Math.round(paidPct)}% paid off · {fmtMoney(bal)} of {fmtMoney(original)} left</div>
+                      {apr > 0 && bal > 0 && (
+                        <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: accrued > 0 ? 4 : 0 }}>
+                          <span style={{ background: '#B8460E15', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11, fontWeight: 600 }} className="mono">{fmtMoney(daily)}/day</span>
+                          <span style={{ background: '#B8460E10', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11 }} className="mono">~{fmtMoney(monthly)}/mo</span>
+                          {payoffMo > 0 && <span style={{ background: '#F0EAD8', color: '#6B6457', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>payoff {fmtPayoff(payoffMo)}</span>}
+                          {isFinite(totalInterest) && totalInterest > 0 && <span style={{ background: '#F0EAD8', color: '#8E4585', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>+{fmtMoney(totalInterest)} total interest</span>}
+                        </div>
+                      )}
+                      {accrued > 0 && <div className="tiny" style={{ color: '#B8460E', opacity: 0.7 }}>~{fmtMoney(accrued)} accrued since tracking</div>}
+                    </button>
+                  );
+                })}
+
+                {/* Avalanche tip */}
+                {avalancheTarget && allDebtItems.filter((i) => Number(i.balance) > 0 && Number(i.rate) > 0).length > 1 && (
+                  <div style={{ background: '#8E458510', border: '1px solid #8E458530', borderRadius: 8, padding: '8px 12px', marginTop: 10 }}>
+                    <div className="tiny" style={{ fontWeight: 600, color: '#8E4585', marginBottom: 2 }}>💡 Avalanche tip</div>
+                    <div className="tiny muted">Pay extra on <strong>{avalancheTarget.name}</strong> first ({avalancheTarget.rate}% APR) — it's costing you the most per dollar. Pay it off before others to save the most in interest.</div>
+                  </div>
+                )}
+
+                {/* Bottom summary */}
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #F0EAD8', display: 'flex', gap: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <div className="tiny muted">Total debt</div>
+                    <div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(totalLiabilities)}</div>
+                  </div>
+                  {totalDailyInterest > 0 && (
+                    <>
+                      <div style={{ flex: 1 }}>
+                        <div className="tiny muted">Daily cost</div>
+                        <div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(totalDailyInterest)}</div>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div className="tiny muted">Monthly cost</div>
+                        <div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>~{fmtMoney(totalMonthlyInterest)}</div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })()}
 
       {/* CATEGORY BREAKDOWN */}
       {topCats.length > 0 && (
@@ -4718,6 +4857,8 @@ function AddAccountModal({ account, onSave, onDelete, onClose }: any) {
   const [type, setType] = useState<'checking' | 'savings' | 'credit'>(account?.type || 'checking');
   const [balance, setBalance] = useState(String(account?.balance ?? ''));
   const [creditLimit, setCreditLimit] = useState(String(account?.creditLimit ?? ''));
+  const [rate, setRate] = useState(String(account?.rate ?? ''));
+  const [minPayment, setMinPayment] = useState(String(account?.minPayment ?? ''));
   const [dueDay, setDueDay] = useState(String(account?.dueDay ?? ''));
   const [color, setColor] = useState(account?.color || ACCOUNT_COLORS[0]);
   const [includeNW, setIncludeNW] = useState(account?.includeInNetWorth !== false);
@@ -4730,9 +4871,13 @@ function AddAccountModal({ account, onSave, onDelete, onClose }: any) {
       id: account?.id || `acc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       name: name.trim(), bank: bank.trim(), type,
       balance: Math.round(bal * 100) / 100, color, includeInNetWorth: includeNW,
+      accruedInterest: account?.accruedInterest || 0,
+      lastAccrualDate: account?.lastAccrualDate || todayStr(),
     };
     if (type === 'credit') {
       next.creditLimit = parseFloat(creditLimit) || 0;
+      next.rate = parseFloat(rate) || 0;
+      next.minPayment = parseFloat(minPayment) || 0;
       next.dueDay = parseInt(dueDay) || null;
     }
     onSave(next); onClose();
@@ -4762,13 +4907,40 @@ function AddAccountModal({ account, onSave, onDelete, onClose }: any) {
 
       {type === 'credit' && (
         <>
-          <label>Credit limit</label>
-          <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 12 }}>
-            <span className="mono muted">$</span>
-            <input type="number" step="1" inputMode="decimal" value={creditLimit} onChange={(e) => setCreditLimit(e.target.value)} placeholder="e.g. 5000" style={{ flex: 1 }} />
+          <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}>
+              <label>Credit limit</label>
+              <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                <span className="mono muted">$</span>
+                <input type="number" step="1" inputMode="decimal" value={creditLimit} onChange={(e) => setCreditLimit(e.target.value)} placeholder="e.g. 5000" style={{ flex: 1 }} />
+              </div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label>APR %</label>
+              <input type="number" step="0.01" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="e.g. 24.99" />
+            </div>
           </div>
-          <label>Payment due day of month</label>
-          <input type="number" min={1} max={31} value={dueDay} onChange={(e) => setDueDay(e.target.value)} placeholder="e.g. 15" style={{ marginBottom: 12 }} />
+          <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}>
+              <label>Due day of month</label>
+              <input type="number" min={1} max={31} value={dueDay} onChange={(e) => setDueDay(e.target.value)} placeholder="e.g. 15" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label>Min payment</label>
+              <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                <span className="mono muted">$</span>
+                <input type="number" step="0.01" value={minPayment} onChange={(e) => setMinPayment(e.target.value)} placeholder="0.00" style={{ flex: 1 }} />
+              </div>
+            </div>
+          </div>
+          {balance && rate && parseFloat(balance) > 0 && parseFloat(rate) > 0 && (
+            <div style={{ background: '#B8460E10', border: '1px solid #B8460E33', borderRadius: 8, padding: '8px 12px', marginBottom: 12, fontSize: 12 }}>
+              <span className="muted">Daily interest: </span>
+              <span className="mono" style={{ color: '#B8460E', fontWeight: 600 }}>~{fmtMoney(calcDailyInterest(parseFloat(balance), parseFloat(rate)))}/day</span>
+              <span className="muted"> · </span>
+              <span className="mono" style={{ color: '#B8460E' }}>~{fmtMoney(calcMonthlyInterest(parseFloat(balance), parseFloat(rate)))}/mo</span>
+            </div>
+          )}
         </>
       )}
 
@@ -5118,7 +5290,29 @@ export default function App() {
       const bp = await safeGet(K.busyPresets, BUSY_PRESET_DEFAULTS);
       const ci = await safeGet(K.checkins, {});
       const ac = await safeGet(K.activity, {});
-      const sp = migrateSpending(await safeGet(K.spending, DEFAULT_SPENDING));
+      let sp = migrateSpending(await safeGet(K.spending, DEFAULT_SPENDING));
+      // Accrue daily interest on all tracked debts and credit cards.
+      {
+        const today = todayStr();
+        const accrueItem = (item: any) => {
+          const rate = Number(item.rate) || 0;
+          const balance = Number(item.balance) || 0;
+          const last = item.lastAccrualDate;
+          if (!last) return { ...item, lastAccrualDate: today };
+          if (last >= today) return item;
+          const days = Math.max(0, diffDays(today, last));
+          if (days <= 0 || !rate || !balance) return { ...item, lastAccrualDate: today };
+          const interest = calcDailyInterest(balance, rate) * days;
+          return { ...item, accruedInterest: Math.round(((Number(item.accruedInterest) || 0) + interest) * 100) / 100, lastAccrualDate: today };
+        };
+        const newDebts = sp.debts.map(accrueItem);
+        const newAccounts = sp.accounts.map((a: any) => a.type === 'credit' ? accrueItem(a) : a);
+        const changed = JSON.stringify(newDebts) !== JSON.stringify(sp.debts) || JSON.stringify(newAccounts) !== JSON.stringify(sp.accounts);
+        if (changed) {
+          sp = { ...sp, debts: newDebts, accounts: newAccounts };
+          await safeSet(K.spending, sp);
+        }
+      }
       let d = await safeGet(K.daily, null);
       if (!d || d.date !== todayStr()) {
         const plan = p[todayStr()];
