@@ -4992,6 +4992,27 @@ function Setup({ onComplete, onImport }: any) {
   const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState('');
   const [importError, setImportError] = useState('');
+  const [showRecover, setShowRecover] = useState(false);
+  const [recoverId, setRecoverId] = useState('');
+  const [recoverLoading, setRecoverLoading] = useState(false);
+  const [recoverError, setRecoverError] = useState('');
+
+  const handleRecover = async () => {
+    const id = recoverId.trim();
+    if (!id) { setRecoverError('Paste your sync ID above.'); return; }
+    setRecoverLoading(true);
+    setRecoverError('');
+    try {
+      clearLocalSyncData();
+      setSyncId(id);
+      const { hydrate } = await import('./sync');
+      await hydrate();
+      window.location.reload();
+    } catch {
+      setRecoverError('Could not load data for that ID. Double-check and try again.');
+      setRecoverLoading(false);
+    }
+  };
   const update = (patch: any) => setDraft({ ...draft, ...patch });
   const updateSubject = (k: string, patch: any) => update({ subjects: { ...draft.subjects, [k]: { ...draft.subjects[k], ...patch } } });
 
@@ -5100,11 +5121,50 @@ function Setup({ onComplete, onImport }: any) {
               <span className="mono tiny muted" style={{ letterSpacing: '0.15em', textTransform: 'uppercase' }}>Returning?</span>
               <div style={{ flex: 1, height: 1, background: '#E4DCC8' }} />
             </div>
-            {!showImport ? (
-              <button className="btn btn-ghost" onClick={() => setShowImport(true)} style={{ width: '100%' }}>
-                <Upload size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Restore from backup
-              </button>
-            ) : (
+            {!showImport && !showRecover && (
+              <div className="row" style={{ gap: 8 }}>
+                <button className="btn btn-ghost" onClick={() => setShowRecover(true)} style={{ flex: 1 }}>
+                  <RotateCcw size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} /> Recover by ID
+                </button>
+                <button className="btn btn-ghost" onClick={() => setShowImport(true)} style={{ flex: 1 }}>
+                  <Upload size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} /> Restore backup
+                </button>
+              </div>
+            )}
+
+            {showRecover && (
+              <div className="card" style={{ borderLeft: '3px solid #8E4585' }}>
+                <div className="between" style={{ marginBottom: 10 }}>
+                  <div className="row" style={{ gap: 8 }}>
+                    <RotateCcw size={16} color="#8E4585" />
+                    <span className="h3">Recover account</span>
+                  </div>
+                  <button onClick={() => { setShowRecover(false); setRecoverId(''); setRecoverError(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6457' }}>
+                    <X size={18} />
+                  </button>
+                </div>
+                <p className="muted small" style={{ marginBottom: 12, lineHeight: 1.5 }}>
+                  Enter your sync ID to pull your data back. Find it in Settings → Sync / Transfer on any device where you're logged in.
+                </p>
+                <input
+                  type="text"
+                  value={recoverId}
+                  onChange={(e) => { setRecoverId(e.target.value); setRecoverError(''); }}
+                  placeholder="e.g. feff64e9-f366-46a2-aceb-..."
+                  style={{ fontFamily: 'JetBrains Mono', fontSize: 12, marginBottom: 10 }}
+                />
+                {recoverError && (
+                  <div className="small" style={{ color: '#B8460E', marginBottom: 10, padding: 8, background: '#F5E1D5', borderRadius: 6 }}>
+                    {recoverError}
+                  </div>
+                )}
+                <button className="btn btn-accent" onClick={handleRecover} disabled={!recoverId.trim() || recoverLoading} style={{ width: '100%' }}>
+                  {recoverLoading ? 'Loading…' : 'Recover & reload'}
+                </button>
+              </div>
+            )}
+
+            {showImport && (
               <div className="card" style={{ borderLeft: '3px solid #3B5C6B' }}>
                 <div className="between" style={{ marginBottom: 10 }}>
                   <div className="row" style={{ gap: 8 }}>
