@@ -96,12 +96,46 @@ function addMinutes(time: string, mins: number) {
   const nh = Math.floor((total / 60) % 24);
   return `${pad(nh)}:${pad(total % 60)}`;
 }
+// Display-unit prefs, set once from settings on load so pure formatters can read them.
+const APP_UNITS = { timeFormat: '12h', weight: 'lb', length: 'in', weekStart: 0 };
+function setAppUnits(u: any) { if (u) Object.assign(APP_UNITS, u); }
 function fmtTime(t: string) {
   if (!t) return '';
   const [h, m] = t.split(':').map(Number);
+  if (APP_UNITS.timeFormat === '24h') return `${pad(h)}:${pad(m)}`;
   const period = h >= 12 ? 'PM' : 'AM';
   const h12 = h % 12 === 0 ? 12 : h % 12;
   return `${h12}:${pad(m)} ${period}`;
+}
+function fmtWeight(lb: number | null | undefined) {
+  if (lb == null) return '—';
+  return APP_UNITS.weight === 'kg' ? `${Math.round(lb * 0.453592 * 10) / 10}kg` : `${lb}lb`;
+}
+function fmtLen(inch: number | null | undefined) {
+  if (inch == null) return '—';
+  return APP_UNITS.length === 'cm' ? `${Math.round(inch * 2.54 * 10) / 10}cm` : `${inch}in`;
+}
+// Convert a canonical measurement value (lb / in) to the user's display unit and back.
+function measureUnit(canonUnit: string) {
+  if (canonUnit === 'lb') return APP_UNITS.weight === 'kg' ? 'kg' : 'lb';
+  if (canonUnit === 'in') return APP_UNITS.length === 'cm' ? 'cm' : 'in';
+  return canonUnit;
+}
+function toDisplayVal(canonUnit: string, v: any) {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  if (Number.isNaN(n)) return null;
+  if (canonUnit === 'lb' && APP_UNITS.weight === 'kg') return Math.round(n * 0.453592 * 10) / 10;
+  if (canonUnit === 'in' && APP_UNITS.length === 'cm') return Math.round(n * 2.54 * 10) / 10;
+  return Math.round(n * 10) / 10;
+}
+function fromDisplayVal(canonUnit: string, v: any) {
+  if (v == null || v === '') return null;
+  const n = parseFloat(v);
+  if (Number.isNaN(n)) return null;
+  if (canonUnit === 'lb' && APP_UNITS.weight === 'kg') return Math.round((n / 0.453592) * 10) / 10;
+  if (canonUnit === 'in' && APP_UNITS.length === 'cm') return Math.round((n / 2.54) * 10) / 10;
+  return n;
 }
 function fmtDate(s: string) {
   return new Date(s + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
@@ -215,7 +249,8 @@ function subjectGoalKind(s: any): 'deadline' | 'count' | 'none' {
 // Sunday-based week start, matching the app's existing Sunday rest/review convention.
 function weekStartStr(dateStr = todayStr()) {
   const d = new Date(dateStr + 'T00:00:00');
-  d.setDate(d.getDate() - d.getDay());
+  const ws = APP_UNITS.weekStart || 0;
+  d.setDate(d.getDate() - ((d.getDay() - ws + 7) % 7));
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 function doneThisWeek(subjectKey: string, checkins: any) {
@@ -317,6 +352,9 @@ const DEFAULT_SETTINGS: Record<string, any> = {
   },
   nextMeasurement: tomorrowStr(),
   measurementIntervalDays: 30,
+  units: { timeFormat: '12h', weight: 'lb', length: 'in', weekStart: 0 },
+  dashboard: ['schedule', 'progress', 'challenge', 'macros', 'weekly'],
+  reminders: { enabled: false },
   challenge: {
     active: false,
     name: '60-Day V-Taper',
@@ -628,11 +666,16 @@ function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, 
         <>
           <StatusBar daily={daily} onBusy={onBusy} onBack={onBack} onSwitch={onSwitch} nowMins={nowMins} now={now} sleepTime={settings.sleepTime} />
           {daily.focus && <FocusTimerCard focus={daily.focus} subject={settings.subjects[daily.focus.subject]} onStop={onFocusStop} />}
-          <Schedule settings={settings} daily={daily} onLog={onLogTime} subjectKeys={subjectKeys} nowMins={nowMins} checkins={checkins} />
-          <Progress settings={settings} totals={totals} daily={daily} streaks={streaks} subjectKeys={subjectKeys} onLogExtra={onLogTime} checkins={checkins} onMarkDone={onMarkDone} onFocusStart={onFocusStart} focus={daily.focus} />
-          <ChallengeCard settings={settings} workout={workout} />
-          <MacrosCard targets={settings.macroTargets} totals={todayMacros} onLog={onLogMeal} onReset={onResetMacros} onCoach={onCoach} />
-          <WeeklySummary settings={settings} totals={totals} daily={daily} meals={meals} workout={workout} />
+          {(settings.dashboard || ['schedule', 'progress', 'challenge', 'macros', 'weekly']).map((card: string) => {
+            switch (card) {
+              case 'schedule': return <Schedule key={card} settings={settings} daily={daily} onLog={onLogTime} subjectKeys={subjectKeys} nowMins={nowMins} checkins={checkins} />;
+              case 'progress': return <Progress key={card} settings={settings} totals={totals} daily={daily} streaks={streaks} subjectKeys={subjectKeys} onLogExtra={onLogTime} checkins={checkins} onMarkDone={onMarkDone} onFocusStart={onFocusStart} focus={daily.focus} />;
+              case 'challenge': return <ChallengeCard key={card} settings={settings} workout={workout} />;
+              case 'macros': return <MacrosCard key={card} targets={settings.macroTargets} totals={todayMacros} onLog={onLogMeal} onReset={onResetMacros} onCoach={onCoach} />;
+              case 'weekly': return <WeeklySummary key={card} settings={settings} totals={totals} daily={daily} meals={meals} workout={workout} />;
+              default: return null;
+            }
+          })}
         </>
       )}
     </>
@@ -1320,9 +1363,9 @@ function BodyTab({ settings, body, workout, onAddEntry, onEditGoals }: any) {
 
           {entries.filter((e: any) => e.weight != null).length >= 2 && (
             <div className="card">
-              <div className="h2" style={{ marginBottom: 10 }}>Weight trend</div>
+              <div className="h2" style={{ marginBottom: 10 }}>Weight trend ({measureUnit('lb')})</div>
               <ResponsiveContainer width="100%" height={160}>
-                <LineChart data={entries.filter((e: any) => e.weight != null).map((e: any) => ({ date: fmtShortDate(e.date), weight: e.weight }))} margin={{ top: 5, right: 8, left: -20, bottom: 0 }}>
+                <LineChart data={entries.filter((e: any) => e.weight != null).map((e: any) => ({ date: fmtShortDate(e.date), weight: toDisplayVal('lb', e.weight) }))} margin={{ top: 5, right: 8, left: -20, bottom: 0 }}>
                   <XAxis dataKey="date" tick={{ fontSize: 10, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} />
                   <YAxis domain={['dataMin - 2', 'dataMax + 2']} tick={{ fontSize: 10, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} />
                   <Tooltip contentStyle={{ fontFamily: 'JetBrains Mono', fontSize: 12, borderRadius: 8 }} />
@@ -1363,19 +1406,19 @@ function BodyTab({ settings, body, workout, onAddEntry, onEditGoals }: any) {
                   <div className="between" style={{ marginBottom: 4 }}>
                     <span className="small" style={{ fontWeight: 600 }}>{f.label}</span>
                     <div className="row" style={{ gap: 6 }}>
-                      <span className="mono small">{current}{f.unit}</span>
+                      <span className="mono small">{toDisplayVal(f.unit, current)}{measureUnit(f.unit)}</span>
                       {change != null && (
                         <span className="pill" style={{ background: isGood ? '#E8EBE0' : '#F5E1D5', color: isGood ? '#4A6741' : '#B8460E', padding: '2px 8px' }}>
                           {change >= 0 ? <ArrowUp size={10} /> : <ArrowDown size={10} />}
-                          {Math.abs(change).toFixed(1)}{f.unit}
+                          {Math.abs(toDisplayVal(f.unit, Math.abs(change)) || 0).toFixed(1)}{measureUnit(f.unit)}
                         </span>
                       )}
                     </div>
                   </div>
                   {totalChange != null && start != null && (
                     <div className="mono tiny muted" style={{ marginBottom: 4 }}>
-                      Since start: {totalChange >= 0 ? '+' : ''}{totalChange.toFixed(1)}{f.unit}
-                      {goal.target != null && <> · target {goal.target}{f.unit}</>}
+                      Since start: {totalChange >= 0 ? '+' : ''}{((totalChange < 0 ? -1 : 1) * (toDisplayVal(f.unit, Math.abs(totalChange)) || 0)).toFixed(1)}{measureUnit(f.unit)}
+                      {goal.target != null && <> · target {toDisplayVal(f.unit, goal.target)}{measureUnit(f.unit)}</>}
                     </div>
                   )}
                   {targetPct != null && (
@@ -2233,7 +2276,7 @@ function BusyBackModal({ daily, onConfirm, onClose }: any) {
 function AddMeasurementModal({ onSave, onClose, previous }: any) {
   const [values, setValues] = useState<Record<string, any>>(() => {
     const init: Record<string, any> = {};
-    MEASUREMENT_FIELDS.forEach(f => { init[f.key] = previous?.[f.key] != null ? previous[f.key] : ''; });
+    MEASUREMENT_FIELDS.forEach(f => { init[f.key] = previous?.[f.key] != null ? toDisplayVal(f.unit, previous[f.key]) : ''; });
     return init;
   });
   const set = (k: string, v: any) => setValues({ ...values, [k]: v });
@@ -2245,13 +2288,13 @@ function AddMeasurementModal({ onSave, onClose, previous }: any) {
       </p>
       {MEASUREMENT_FIELDS.map(f => (
         <div key={f.key} style={{ marginBottom: 10 }}>
-          <label>{f.label} ({f.unit})</label>
-          <input type="number" step="0.1" value={values[f.key]} onChange={(e) => set(f.key, e.target.value)} placeholder={previous?.[f.key] != null ? `Previous: ${previous[f.key]}` : ''} />
+          <label>{f.label} ({measureUnit(f.unit)})</label>
+          <input type="number" step="0.1" value={values[f.key]} onChange={(e) => set(f.key, e.target.value)} placeholder={previous?.[f.key] != null ? `Previous: ${toDisplayVal(f.unit, previous[f.key])}` : ''} />
         </div>
       ))}
       <button className="btn" style={{ width: '100%', marginTop: 8 }} onClick={() => {
         const entry: Record<string, any> = { date: todayStr() };
-        Object.entries(values).forEach(([k, v]) => { if (v !== '' && v != null) entry[k] = parseFloat(v); });
+        MEASUREMENT_FIELDS.forEach((f) => { const v = values[f.key]; if (v !== '' && v != null) { const canon = fromDisplayVal(f.unit, v); if (canon != null) entry[f.key] = canon; } });
         onSave(entry);
       }}>
         <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save measurements
@@ -2891,7 +2934,63 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
         <p className="muted tiny" style={{ marginBottom: 16, lineHeight: 1.4 }}>Add a body weight entry to auto-calculate macro targets from your goal.</p>
       )}
 
-      <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={() => { onSave(draft); onClose(); }}>
+      {(() => {
+        const units = draft.units || { timeFormat: '12h', weight: 'lb', length: 'in', weekStart: 0 };
+        const setUnit = (k: string, v: any) => update({ units: { ...units, [k]: v } });
+        const ALL_CARDS = ['schedule', 'progress', 'challenge', 'macros', 'weekly'];
+        const LABELS: Record<string, string> = { schedule: 'Schedule', progress: 'Progress', challenge: 'Challenge', macros: 'Macros', weekly: 'Weekly summary' };
+        const dash: string[] = draft.dashboard || ALL_CARDS;
+        const hidden = ALL_CARDS.filter((c) => !dash.includes(c));
+        const move = (i: number, d: number) => { const a = [...dash]; const j = i + d; if (j < 0 || j >= a.length) return; [a[i], a[j]] = [a[j], a[i]]; update({ dashboard: a }); };
+        const Seg = ({ k, opts }: any) => (
+          <div className="row" style={{ gap: 6 }}>
+            {opts.map((o: any) => <button key={o.v} className={`tap ${units[k] === o.v ? 'active' : ''}`} style={{ flex: 1, fontSize: 12 }} onClick={() => setUnit(k, o.v)}>{o.label}</button>)}
+          </div>
+        );
+        return (
+          <>
+            <div className="h2" style={{ marginBottom: 8, marginTop: 8 }}>Preferences</div>
+            <label>Time format</label>
+            <div style={{ marginBottom: 10 }}><Seg k="timeFormat" opts={[{ v: '12h', label: '12-hour' }, { v: '24h', label: '24-hour' }]} /></div>
+            <div className="row" style={{ gap: 8, marginBottom: 10 }}>
+              <div style={{ flex: 1 }}><label>Weight</label><Seg k="weight" opts={[{ v: 'lb', label: 'lb' }, { v: 'kg', label: 'kg' }]} /></div>
+              <div style={{ flex: 1 }}><label>Length</label><Seg k="length" opts={[{ v: 'in', label: 'in' }, { v: 'cm', label: 'cm' }]} /></div>
+            </div>
+            <label>Week starts on</label>
+            <div style={{ marginBottom: 14 }}><Seg k="weekStart" opts={[{ v: 0, label: 'Sunday' }, { v: 1, label: 'Monday' }]} /></div>
+
+            <div className="h2" style={{ marginBottom: 8 }}>Today layout</div>
+            {dash.map((c, i) => (
+              <div key={c} className="between" style={{ padding: '6px 0' }}>
+                <span className="small">{LABELS[c]}</span>
+                <div className="row" style={{ gap: 4 }}>
+                  <button className="tap" style={{ padding: '3px 8px' }} disabled={i === 0} onClick={() => move(i, -1)}><ChevronUp size={13} /></button>
+                  <button className="tap" style={{ padding: '3px 8px' }} disabled={i === dash.length - 1} onClick={() => move(i, 1)}><ChevronDown size={13} /></button>
+                  <button className="tap" style={{ padding: '3px 8px', color: '#B8460E' }} onClick={() => update({ dashboard: dash.filter((x) => x !== c) })} title="Hide"><X size={13} /></button>
+                </div>
+              </div>
+            ))}
+            {hidden.map((c) => (
+              <div key={c} className="between" style={{ padding: '6px 0', opacity: 0.6 }}>
+                <span className="small">{LABELS[c]} <span className="muted tiny">· hidden</span></span>
+                <button className="tap" style={{ padding: '3px 10px', fontSize: 11 }} onClick={() => update({ dashboard: [...dash, c] })}>Show</button>
+              </div>
+            ))}
+
+            <div className="between" style={{ padding: '12px 0 4px' }}>
+              <div>
+                <div className="small" style={{ fontWeight: 600 }}>Reminders</div>
+                <div className="muted tiny" style={{ lineHeight: 1.4 }}>Nudges to log meals & measurements (while the app is open).</div>
+              </div>
+              <button className={`tap ${draft.reminders?.enabled ? 'active' : ''}`} style={{ padding: '6px 12px' }} onClick={async () => { const en = !draft.reminders?.enabled; if (en && 'Notification' in window) { try { await Notification.requestPermission(); } catch {} } update({ reminders: { ...(draft.reminders || {}), enabled: en } }); }}>
+                {draft.reminders?.enabled ? 'On' : 'Off'}
+              </button>
+            </div>
+          </>
+        );
+      })()}
+
+      <button className="btn" style={{ width: '100%', marginBottom: 8, marginTop: 14 }} onClick={() => { onSave(draft); onClose(); }}>
         <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save settings
       </button>
 
@@ -3576,6 +3675,7 @@ export default function App() {
       }
       if (d.scheduleStarted == null) d.scheduleStarted = false;
       if (!d.bonus) d.bonus = Object.fromEntries(Object.keys(merged.subjects).map((k: string) => [k, 0]));
+      setAppUnits(merged.units);
       setSettings(merged);
       setDaily(d);
       setTotals(t);
@@ -3602,6 +3702,24 @@ export default function App() {
     return () => clearInterval(id);
   }, [loaded]);
 
+  // Opt-in reminders (fire while the app is open; permission-gated).
+  useEffect(() => {
+    if (!loaded || !settings.reminders?.enabled) return;
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    const fired = new Set<string>();
+    const check = () => {
+      try {
+        if (settings.nextMeasurement && diffDays(settings.nextMeasurement) <= 0 && !fired.has('measure') && !body.entries?.some((e: any) => e.date === todayStr())) {
+          new Notification('Body measurement due', { body: 'Time to log your measurements.' });
+          fired.add('measure');
+        }
+      } catch {}
+    };
+    const t = setTimeout(check, 4000);
+    const id = setInterval(check, 30 * 60 * 1000);
+    return () => { clearTimeout(t); clearInterval(id); };
+  }, [loaded, settings.reminders?.enabled, settings.nextMeasurement]);
+
   // Celebrate newly-earned achievements (silent on first load so we don't dump them all at once).
   useEffect(() => {
     if (!loaded) return;
@@ -3619,7 +3737,7 @@ export default function App() {
     })();
   }, [loaded, totals, streaks, workout, body, meals]);
 
-  const saveSettings = async (next: any) => { setSettings(next); await safeSet(K.settings, next); };
+  const saveSettings = async (next: any) => { setAppUnits(next.units); setSettings(next); await safeSet(K.settings, next); };
   const saveDaily = async (next: any) => { setDaily(next); await safeSet(K.daily, next); };
   const saveTotals = async (next: any) => { setTotals(next); await safeSet(K.totals, next); };
   const saveBody = async (next: any) => { setBody(next); await safeSet(K.body, next); };
