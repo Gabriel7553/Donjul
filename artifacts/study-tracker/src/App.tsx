@@ -360,6 +360,12 @@ const DEFAULT_SETTINGS: Record<string, any> = {
   wakeTime: '07:00',
   sleepTime: '23:00',
   startDate: todayStr(),
+  timeFormat: '12h',
+  weightUnit: 'lb',
+  lengthUnit: 'in',
+  weekStart: 'sun',
+  reminders: false,
+  todayLayout: ['schedule', 'progress', 'nutrition', 'challenges'],
   subjects: SUBJECTS_DEFAULT,
   subjectOrder: ['cysa', 'spanish', 'running', 'guitar'],
   scheduleStartOffsetMin: 30,
@@ -3421,6 +3427,53 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
           </button>
         </>
       )}
+
+      <div className="h2" style={{ marginBottom: 8, marginTop: 16 }}>Preferences</div>
+
+      <div className="row" style={{ gap: 8, marginBottom: 10 }}>
+        <div style={{ flex: 1 }}>
+          <label>Time format</label>
+          <select value={draft.timeFormat || '12h'} onChange={(e) => update({ timeFormat: e.target.value })} style={{ width: '100%' }}>
+            <option value="12h">12-hour (AM/PM)</option>
+            <option value="24h">24-hour</option>
+          </select>
+        </div>
+        <div style={{ flex: 1 }}>
+          <label>Week starts on</label>
+          <select value={draft.weekStart || 'sun'} onChange={(e) => update({ weekStart: e.target.value })} style={{ width: '100%' }}>
+            <option value="sun">Sunday</option>
+            <option value="mon">Monday</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="row" style={{ gap: 8, marginBottom: 10 }}>
+        <div style={{ flex: 1 }}>
+          <label>Weight unit</label>
+          <select value={draft.weightUnit || 'lb'} onChange={(e) => update({ weightUnit: e.target.value })} style={{ width: '100%' }}>
+            <option value="lb">Pounds (lb)</option>
+            <option value="kg">Kilograms (kg)</option>
+          </select>
+        </div>
+        <div style={{ flex: 1 }}>
+          <label>Length unit</label>
+          <select value={draft.lengthUnit || 'in'} onChange={(e) => update({ lengthUnit: e.target.value })} style={{ width: '100%' }}>
+            <option value="in">Inches (in)</option>
+            <option value="cm">Centimetres (cm)</option>
+          </select>
+        </div>
+      </div>
+
+      <div className="between" style={{ padding: '8px 0', marginBottom: 8, borderBottom: '1px solid #E4DCC8' }}>
+        <span className="small">Reminders / notifications</span>
+        <button
+          className="tap"
+          style={{ padding: '4px 12px', fontSize: 12, color: draft.reminders ? '#4A6741' : '#6B6457' }}
+          onClick={() => update({ reminders: !draft.reminders })}
+        >
+          {draft.reminders ? 'On' : 'Off'}
+        </button>
+      </div>
 
       <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={() => { onSave(draft); onClose(); }}>
         <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save settings
