@@ -1261,8 +1261,13 @@ function Schedule({ settings, daily, onLog, subjectKeys, nowMins, checkins }: an
         const done = (daily.completed[b.subject] || 0) >= subj.target;
         const blockStart = timeToMins(b.start);
         const blockEnd = blockStart + b.mins;
-        const isActive = !done && nowMins >= blockStart && nowMins < blockEnd;
-        const isOverdue = !done && nowMins >= blockEnd;
+        const isBusy = daily.status === 'busy';
+        const busySegs = daily.busy?.segments;
+        const busyStartMins = isBusy && busySegs?.length
+          ? timeToMins(busySegs[busySegs.length - 1].start)
+          : Number.POSITIVE_INFINITY;
+        const isActive = !done && !isBusy && nowMins >= blockStart && nowMins < blockEnd;
+        const isOverdue = !done && nowMins >= blockEnd && (!isBusy || busyStartMins >= blockEnd);
         const isUpcoming = !done && !isActive && !isOverdue && (blockStart - nowMins) <= 30 && blockStart > nowMins;
         const minsUntil = blockStart - nowMins;
 
@@ -3266,58 +3271,149 @@ function LogWorkoutModal({ dayIdx, workout, onSave, onClose }: any) {
   );
 }
 
+function SortableExercise({ id, ex, onUpdate, onRemove }: any) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return (
+    <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1, marginBottom: 8, padding: 10, background: 'var(--bg-inset)', borderRadius: 8, border: '1px solid var(--border)' }}>
+      <div className="row" style={{ gap: 6, marginBottom: 6 }}>
+        <button {...attributes} {...listeners} style={{ background: 'none', border: 'none', cursor: 'grab', color: 'var(--text)', opacity: 0.4, padding: '2px 4px', touchAction: 'none' }}>
+          <GripVertical size={14} />
+        </button>
+        <input type="text" value={ex.name} onChange={e => onUpdate({ name: e.target.value })} style={{ flex: 1 }} />
+        <button onClick={onRemove} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E' }}>
+          <Trash2 size={14} />
+        </button>
+      </div>
+      <div className="row" style={{ gap: 6 }}>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: 10, marginBottom: 3, display: 'block' }}>Sets</label>
+          <input type="number" value={ex.sets} onChange={e => onUpdate({ sets: parseInt(e.target.value) || 0 })} style={{ padding: 6 }} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: 10, marginBottom: 3, display: 'block' }}>Reps</label>
+          <input type="text" value={ex.reps} placeholder="e.g. 8-12" onChange={e => onUpdate({ reps: e.target.value })} style={{ padding: 6 }} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: 10, marginBottom: 3, display: 'block' }}>Weight</label>
+          <input type="text" value={ex.weight || ''} placeholder="lbs / kg" onChange={e => onUpdate({ weight: e.target.value })} style={{ padding: 6 }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SortableDayRow({ id, day, idx, openDay, setOpenDay, updateDay, updateExercise, addExercise, removeExercise }: any) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const sensors = useDndSensors();
+  const isOpen = openDay === idx;
+  const exIds = (day.exercises || []).map((_: any, j: number) => `${id}-ex-${j}`);
+
+  return (
+    <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1, marginBottom: 10 }}>
+      <div className="card" style={{ padding: 12 }}>
+        <div className="between">
+          <div className="row" style={{ gap: 8 }}>
+            <button {...attributes} {...listeners} style={{ background: 'none', border: 'none', cursor: 'grab', color: 'var(--text)', opacity: 0.4, padding: '4px 2px', touchAction: 'none' }}>
+              <GripVertical size={16} />
+            </button>
+            <span className="mono tiny muted">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day.day]}</span>
+            <span className="small" style={{ fontWeight: 600 }}>{day.name}</span>
+            {day.rest && <span className="pill" style={{ fontSize: 10, padding: '2px 8px', background: 'var(--bg-inset)', color: 'var(--text)', opacity: 0.6 }}>Rest</span>}
+          </div>
+          <ChevronDown size={16} onClick={() => setOpenDay(isOpen ? null : idx)} style={{ cursor: 'pointer', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+        </div>
+
+        {isOpen && (
+          <div style={{ marginTop: 12 }}>
+            <label>Day name</label>
+            <input type="text" value={day.name} onChange={e => updateDay({ name: e.target.value })} style={{ marginBottom: 10 }} />
+            <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+              <button className={`tap ${day.rest ? 'active' : ''}`} onClick={() => updateDay({ rest: !day.rest })}>
+                {day.rest ? '✓ Rest day' : 'Workout day'}
+              </button>
+            </div>
+            {!day.rest && (
+              <>
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={({ active, over }: DragEndEvent) => {
+                  if (!over || active.id === over.id) return;
+                  const oldIdx = exIds.indexOf(String(active.id));
+                  const newIdx = exIds.indexOf(String(over.id));
+                  if (oldIdx !== -1 && newIdx !== -1) updateDay({ exercises: arrayMove(day.exercises, oldIdx, newIdx) });
+                }}>
+                  <SortableContext items={exIds} strategy={verticalListSortingStrategy}>
+                    {(day.exercises || []).map((ex: any, j: number) => (
+                      <SortableExercise
+                        key={`${id}-ex-${j}`}
+                        id={`${id}-ex-${j}`}
+                        ex={ex}
+                        onUpdate={(patch: any) => updateExercise(j, patch)}
+                        onRemove={() => removeExercise(j)}
+                      />
+                    ))}
+                  </SortableContext>
+                </DndContext>
+                <button className="tap" onClick={addExercise} style={{ width: '100%', marginTop: 4 }}>
+                  <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Add exercise
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function EditSplitModal({ workout, onSave, onClose }: any) {
-  const [split, setSplit] = useState(workout.split);
+  const [split, setSplit] = useState(() => workout.split.map((d: any, i: number) => ({ ...d, _uid: `day-${i}-${d.day}` })));
   const [openDay, setOpenDay] = useState<number | null>(null);
-  const updateDay = (idx: number, patch: any) => setSplit(split.map((d: any, i: number) => i === idx ? { ...d, ...patch } : d));
-  const updateExercise = (dayIdx: number, exIdx: number, patch: any) => updateDay(dayIdx, { exercises: split[dayIdx].exercises.map((e: any, i: number) => i === exIdx ? { ...e, ...patch } : e) });
-  const addExercise = (dayIdx: number) => updateDay(dayIdx, { exercises: [...split[dayIdx].exercises, { name: 'New exercise', sets: 3, reps: '8-10', weight: '' }] });
-  const removeExercise = (dayIdx: number, exIdx: number) => updateDay(dayIdx, { exercises: split[dayIdx].exercises.filter((_: any, i: number) => i !== exIdx) });
+  const dayIds = split.map((d: any) => d._uid);
+  const sensors = useDndSensors();
+
+  const updateDay = (idx: number, patch: any) => setSplit((s: any[]) => s.map((d, i) => i === idx ? { ...d, ...patch } : d));
+  const updateExercise = (dayIdx: number, exIdx: number, patch: any) =>
+    updateDay(dayIdx, { exercises: split[dayIdx].exercises.map((e: any, i: number) => i === exIdx ? { ...e, ...patch } : e) });
+  const addExercise = (dayIdx: number) =>
+    updateDay(dayIdx, { exercises: [...(split[dayIdx].exercises || []), { name: 'New exercise', sets: 3, reps: '8-12', weight: '' }] });
+  const removeExercise = (dayIdx: number, exIdx: number) =>
+    updateDay(dayIdx, { exercises: split[dayIdx].exercises.filter((_: any, i: number) => i !== exIdx) });
 
   return (
     <ModalShell title="Edit weekly split" onClose={onClose} icon={<Edit3 size={18} color="#3B5C6B" />}>
-      {split.map((day: any, i: number) => (
-        <div key={i} className="card" style={{ marginBottom: 10, padding: 12 }}>
-          <div className="between" onClick={() => setOpenDay(openDay === i ? null : i)} style={{ cursor: 'pointer' }}>
-            <div className="row" style={{ gap: 8 }}>
-              <span className="mono tiny muted">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day.day]}</span>
-              <span className="small" style={{ fontWeight: 600 }}>{day.name}</span>
-            </div>
-            <ChevronDown size={16} style={{ transform: openDay === i ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-          </div>
-          {openDay === i && (
-            <div style={{ marginTop: 12 }}>
-              <label>Day name</label>
-              <input type="text" value={day.name} onChange={(e) => updateDay(i, { name: e.target.value })} style={{ marginBottom: 10 }} />
-              <div className="row" style={{ gap: 8, marginBottom: 12 }}>
-                <button className={`tap ${day.rest ? 'active' : ''}`} onClick={() => updateDay(i, { rest: !day.rest })}>
-                  {day.rest ? 'Rest day' : 'Workout day'}
-                </button>
-              </div>
-              {!day.rest && (
-                <>
-                  {day.exercises.map((ex: any, j: number) => (
-                    <div key={j} style={{ marginBottom: 10, padding: 10, background: '#FBF7EE', borderRadius: 8, border: '1px solid #E4DCC8' }}>
-                      <input type="text" value={ex.name} onChange={(e) => updateExercise(i, j, { name: e.target.value })} style={{ marginBottom: 6 }} />
-                      <div className="row" style={{ gap: 6 }}>
-                        <input type="number" value={ex.sets} placeholder="sets" onChange={(e) => updateExercise(i, j, { sets: parseInt(e.target.value) || 0 })} style={{ flex: 1, padding: 6 }} />
-                        <input type="text" value={ex.reps} placeholder="reps" onChange={(e) => updateExercise(i, j, { reps: e.target.value })} style={{ flex: 1, padding: 6 }} />
-                        <button onClick={() => removeExercise(i, j)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E' }}>
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  <button className="tap" onClick={() => addExercise(i)} style={{ width: '100%' }}>
-                    <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Add exercise
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      ))}
-      <button className="btn" style={{ width: '100%', marginTop: 8 }} onClick={async () => { await onSave({ ...workout, split }); onClose(); }}>
+      <p className="muted small" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 5 }}>
+        <GripVertical size={13} /> Drag to reorder days or exercises within a day.
+      </p>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={({ active, over }: DragEndEvent) => {
+        if (!over || active.id === over.id) return;
+        const oldIdx = dayIds.indexOf(String(active.id));
+        const newIdx = dayIds.indexOf(String(over.id));
+        if (oldIdx !== -1 && newIdx !== -1) {
+          setSplit((s: any[]) => arrayMove(s, oldIdx, newIdx));
+          setOpenDay(prev => prev === oldIdx ? newIdx : prev === newIdx ? oldIdx : prev);
+        }
+      }}>
+        <SortableContext items={dayIds} strategy={verticalListSortingStrategy}>
+          {split.map((day: any, i: number) => (
+            <SortableDayRow
+              key={day._uid}
+              id={day._uid}
+              day={day}
+              idx={i}
+              openDay={openDay}
+              setOpenDay={setOpenDay}
+              updateDay={(patch: any) => updateDay(i, patch)}
+              updateExercise={(exIdx: number, patch: any) => updateExercise(i, exIdx, patch)}
+              addExercise={() => addExercise(i)}
+              removeExercise={(exIdx: number) => removeExercise(i, exIdx)}
+            />
+          ))}
+        </SortableContext>
+      </DndContext>
+      <button className="btn" style={{ width: '100%', marginTop: 8 }} onClick={async () => {
+        const cleanSplit = split.map(({ _uid, ...d }: any) => d);
+        await onSave({ ...workout, split: cleanSplit });
+        onClose();
+      }}>
         <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save split
       </button>
     </ModalShell>
@@ -5732,7 +5828,7 @@ function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onCategori
           if (idx !== -1) days30[idx].spent += Number(e.amount) || 0;
         }
         if (!days30.some(d => d.spent > 0)) return null;
-        const chartData = days30.filter((_, i) => i % 3 === 2 || i === 29).map(d => ({ label: d.label, spent: Math.round(d.spent) }));
+        const chartData = days30.map((d, i) => ({ label: (i % 6 === 0 || i >= 27) ? d.label : '', spent: Math.round(d.spent) }));
         return (
           <div className="card" style={{ marginBottom: 14 }}>
             <div className="row" style={{ gap: 6, marginBottom: 10 }}><Receipt size={14} color="#8E4585" /><span className="h2">Daily spending · last 30 days</span></div>
