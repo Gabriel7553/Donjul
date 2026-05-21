@@ -1784,11 +1784,20 @@ function BodyTab({ settings, body, workout, onAddEntry, onEditGoals }: any) {
 // ════════════════════════════════════════════════════════════════════════════════
 // JOURNAL TAB
 // ════════════════════════════════════════════════════════════════════════════════
+const MOOD_OPTIONS = [
+  { value: 1, emoji: '😔', label: 'Rough' },
+  { value: 2, emoji: '😕', label: 'Meh' },
+  { value: 3, emoji: '😐', label: 'OK' },
+  { value: 4, emoji: '🙂', label: 'Good' },
+  { value: 5, emoji: '😄', label: 'Great' },
+];
+
 function JournalTab({ journal, onSave, settings }: any) {
   const today = todayStr();
   const cfg = settings?.journal || { tradesEnabled: true, tradesLabel: 'Trades', notesPlaceholder: "What's on your mind? Progress, setbacks, ideas, reflections…" };
   const todayEntry = journal[today] || { note: '', trades: [] };
   const [note, setNote] = useState(todayEntry.note || '');
+  const [mood, setMood] = useState<number | null>(todayEntry.mood ?? null);
   const [trades, setTrades] = useState<any[]>(todayEntry.trades || []);
   const [view, setView] = useState<'today'|'trades'|'history'>('today');
   const [tradeForm, setTradeForm] = useState({ symbol: '', direction: 'L', entry: '', exit: '', pnl: '', notes: '' });
@@ -1796,10 +1805,16 @@ function JournalTab({ journal, onSave, settings }: any) {
   const [saved, setSaved] = useState(false);
 
   const saveNote = async () => {
-    const next = { ...journal, [today]: { ...todayEntry, note, trades } };
+    const next = { ...journal, [today]: { ...todayEntry, note, trades, mood } };
     await onSave(next);
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
+  };
+
+  const selectMood = async (val: number) => {
+    const newMood = mood === val ? null : val;
+    setMood(newMood);
+    await onSave({ ...journal, [today]: { ...todayEntry, note, trades, mood: newMood } });
   };
 
   const addTrade = async () => {
@@ -1839,18 +1854,38 @@ function JournalTab({ journal, onSave, settings }: any) {
       {view === 'today' && (
         <>
           <div className="card" style={{ padding: 14, marginBottom: 12 }}>
-            <div className="between" style={{ marginBottom: 8 }}>
+            <div className="between" style={{ marginBottom: 10 }}>
               <span className="h3">Daily notes</span>
               <div className="row" style={{ gap: 6 }}>
                 <VoiceButton onResult={(t: string) => setNote((prev: string) => prev ? `${prev} ${t}` : t)} />
                 <span className="mono tiny muted">{fmtShortDate(today)}</span>
               </div>
             </div>
+            <div style={{ marginBottom: 10 }}>
+              <div className="h2" style={{ marginBottom: 6 }}>How's today?</div>
+              <div className="row" style={{ gap: 6, justifyContent: 'space-between' }}>
+                {MOOD_OPTIONS.map(m => (
+                  <button
+                    key={m.value}
+                    onClick={() => selectMood(m.value)}
+                    title={m.label}
+                    style={{
+                      flex: 1, padding: '6px 4px', border: `1px solid ${mood === m.value ? '#8E4585' : '#E4DCC8'}`,
+                      borderRadius: 8, background: mood === m.value ? '#F3EEF6' : 'transparent',
+                      cursor: 'pointer', textAlign: 'center', fontSize: 20, lineHeight: 1.3,
+                    }}
+                  >
+                    <div>{m.emoji}</div>
+                    <div className="tiny muted" style={{ fontSize: 9, marginTop: 2 }}>{m.label}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder={cfg.notesPlaceholder || "What's on your mind? Progress, setbacks, ideas, reflections…"}
-              style={{ width: '100%', minHeight: 140, fontFamily: 'Fraunces, serif', fontSize: 15, padding: 10, border: '1px solid #E4DCC8', borderRadius: 8, background: '#FBF7EE', color: '#1A1A2E', resize: 'vertical', lineHeight: 1.6 }}
+              style={{ width: '100%', minHeight: 120, fontFamily: 'Fraunces, serif', fontSize: 15, padding: 10, border: '1px solid #E4DCC8', borderRadius: 8, background: '#FBF7EE', color: '#1A1A2E', resize: 'vertical', lineHeight: 1.6 }}
             />
             <button className="btn" style={{ width: '100%', marginTop: 10 }} onClick={saveNote}>
               {saved ? <><Check size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Saved</> : <><Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Save note</>}
@@ -1958,7 +1993,14 @@ function JournalTab({ journal, onSave, settings }: any) {
             return (
               <div key={d} className="card" style={{ padding: 12, marginBottom: 8 }}>
                 <div className="between" style={{ marginBottom: 6 }}>
-                  <span className="small" style={{ fontWeight: 600 }}>{fmtDate(d)}</span>
+                  <div className="row" style={{ gap: 8 }}>
+                    <span className="small" style={{ fontWeight: 600 }}>{fmtDate(d)}</span>
+                    {entry?.mood != null && (
+                      <span title={MOOD_OPTIONS.find(m => m.value === entry.mood)?.label} style={{ fontSize: 16 }}>
+                        {MOOD_OPTIONS.find(m => m.value === entry.mood)?.emoji}
+                      </span>
+                    )}
+                  </div>
                   <div className="row" style={{ gap: 10 }}>
                     {dayTrades.length > 0 && <span className="mono tiny" style={{ color: dayPnl >= 0 ? '#4A6741' : '#B8460E' }}>{dayTrades.length} trades {dayPnl >= 0 ? '+' : ''}{dayPnl.toFixed(0)}</span>}
                     {entry?.note && <BookMarked size={12} color="#6B6457" />}
@@ -2213,7 +2255,7 @@ function PlanRow({ date, plans, onClick, highlight }: any) {
 // ════════════════════════════════════════════════════════════════════════════════
 // HISTORY TAB
 // ════════════════════════════════════════════════════════════════════════════════
-function HistoryTab({ settings, totals, workout, meals, body, activity, streaks, onSelectDay }: any) {
+function HistoryTab({ settings, totals, workout, meals, body, activity, streaks, checkins, onSelectDay }: any) {
   const [month, setMonth] = useState(() => {
     const d = new Date(todayStr() + 'T00:00:00');
     return { year: d.getFullYear(), month: d.getMonth() };
@@ -2244,6 +2286,11 @@ function HistoryTab({ settings, totals, workout, meals, body, activity, streaks,
   const proteinValues = monthDays.map(d => meals.log?.[d]?.protein).filter((x: any) => x != null && x > 0);
   const avgProtein = proteinValues.length > 0 ? Math.round(proteinValues.reduce((a: number, b: number) => a + b, 0) / proteinValues.length) : 0;
 
+  const activeSubjectKeys = settings.subjectOrder.filter((k: string) => settings.subjects[k] && !settings.subjects[k].archived && !settings.subjects[k].deletedAt);
+  const studyDaysLogged = monthDays.filter(d => {
+    return activeSubjectKeys.some((k: string) => (checkins?.[k] || []).includes(d));
+  }).length;
+
   return (
     <>
       <h1 className="h1" style={{ marginBottom: 18 }}>History.</h1>
@@ -2266,6 +2313,7 @@ function HistoryTab({ settings, totals, workout, meals, body, activity, streaks,
             const hasMeal = !!meals.log?.[d];
             const hasMeasurement = body.entries?.some((e: any) => e.date === d);
             const hasActivity = !!(activity?.[d]?.length);
+            const hasStudy = activeSubjectKeys.some((k: string) => (checkins?.[k] || []).includes(d));
             const isToday = d === todayStr();
             const isFuture = diffDays(d) > 0;
             return (
@@ -2286,6 +2334,7 @@ function HistoryTab({ settings, totals, workout, meals, body, activity, streaks,
               >
                 <div>{dn}</div>
                 <div style={{ display: 'flex', justifyContent: 'center', gap: 2, marginTop: 2, minHeight: 6 }}>
+                  {hasStudy && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#8E4585' }} />}
                   {hasWorkout && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#3B5C6B' }} />}
                   {hasMeal && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#4A6741' }} />}
                   {hasMeasurement && <div style={{ width: 4, height: 4, borderRadius: 2, background: '#B8460E' }} />}
@@ -2297,6 +2346,7 @@ function HistoryTab({ settings, totals, workout, meals, body, activity, streaks,
         </div>
 
         <div className="row" style={{ gap: 12, flexWrap: 'wrap', marginBottom: 4 }}>
+          <span className="tiny muted"><span className="swatch" style={{ background: '#8E4585' }} />Study</span>
           <span className="tiny muted"><span className="swatch" style={{ background: '#3B5C6B' }} />Workout</span>
           <span className="tiny muted"><span className="swatch" style={{ background: '#4A6741' }} />Meals</span>
           <span className="tiny muted"><span className="swatch" style={{ background: '#B8460E' }} />Measurement</span>
@@ -2326,11 +2376,17 @@ function HistoryTab({ settings, totals, workout, meals, body, activity, streaks,
 
       <div className="card">
         <div className="h2" style={{ marginBottom: 12 }}>This month</div>
-        <div className="between" style={{ padding: '6px 0' }}>
+        {studyDaysLogged > 0 && (
+          <div className="between" style={{ padding: '6px 0', borderBottom: '1px solid #E4DCC8' }}>
+            <span className="small">Study days</span>
+            <span className="mono small" style={{ color: '#8E4585' }}>{studyDaysLogged}</span>
+          </div>
+        )}
+        <div className="between" style={{ padding: '6px 0', borderBottom: '1px solid #E4DCC8' }}>
           <span className="small">Workouts logged</span>
           <span className="mono small">{workoutsLogged}</span>
         </div>
-        <div className="between" style={{ padding: '6px 0' }}>
+        <div className="between" style={{ padding: '6px 0', borderBottom: '1px solid #E4DCC8' }}>
           <span className="small">Days with meals tracked</span>
           <span className="mono small">{mealsLogged}</span>
         </div>
@@ -4840,6 +4896,41 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories, o
         </div>
       )}
 
+      {/* 30-DAY DAILY SPEND CHART */}
+      {!empty && (() => {
+        const days30: { label: string; spent: number; date: string }[] = [];
+        for (let i = 29; i >= 0; i--) {
+          const d = new Date(today + 'T00:00:00');
+          d.setDate(d.getDate() - i);
+          const ds = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+          const label = i === 0 ? 'today' : `${d.getMonth() + 1}/${d.getDate()}`;
+          days30.push({ label, date: ds, spent: 0 });
+        }
+        for (const e of spending.entries) {
+          if (e.type !== 'out') continue;
+          const idx = days30.findIndex(d => d.date === e.date);
+          if (idx !== -1) days30[idx].spent += Number(e.amount) || 0;
+        }
+        if (!days30.some(d => d.spent > 0)) return null;
+        const chartData = days30.filter((_, i) => i % 3 === 2 || i === 29).map(d => ({ label: d.label, spent: Math.round(d.spent) }));
+        return (
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="row" style={{ gap: 6, marginBottom: 10 }}>
+              <Receipt size={14} color="#8E4585" />
+              <span className="h2">Daily spending · last 30 days</span>
+            </div>
+            <ResponsiveContainer width="100%" height={120}>
+              <BarChart data={chartData} margin={{ top: 4, right: 6, left: -28, bottom: 0 }}>
+                <XAxis dataKey="label" tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} interval={0} />
+                <YAxis tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} />
+                <Tooltip contentStyle={{ fontFamily: 'JetBrains Mono', fontSize: 11, borderRadius: 8 }} formatter={(v: any) => [`$${v}`, 'Spent']} />
+                <Bar dataKey="spent" fill="#8E4585" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        );
+      })()}
+
       {/* DEBT TRACKER */}
       {(() => {
         const creditCardAccounts = accounts.filter((a: any) => a.type === 'credit');
@@ -6507,7 +6598,7 @@ export default function App() {
         {tab === 'history' && (
           <HistoryTab
             settings={settings} totals={totals} workout={workout} meals={meals} body={body}
-            activity={activity} streaks={streaks}
+            activity={activity} streaks={streaks} checkins={checkins}
             onSelectDay={(date: string) => setModal({ type: 'dayDetail', date })}
           />
         )}
