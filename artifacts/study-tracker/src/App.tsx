@@ -473,59 +473,15 @@ const DEFAULT_WORKOUT_SPLIT = [
   ]},
 ];
 
+// Backup plan from Lean & Strong Playbook — 4-round AMRAP circuit for days you can't make the gym.
 const HOME_WORKOUT_SPLIT = [
-  { day: 0, name: 'Rest — Active Recovery', rest: true, exercises: [] },
-  { day: 1, name: 'Home Push A — Shoulder Focus', rest: false, exercises: [
-    { name: 'Pike Push-Ups', sets: 4, reps: '10-12', notes: 'Hands close, hips high — mimics overhead press' },
-    { name: 'Wall Handstand Hold / Kick-Up', sets: 3, reps: '20-30s', notes: 'Build shoulder strength and balance' },
-    { name: 'Feet-Elevated Push-Ups', sets: 4, reps: '12-15', notes: 'Feet on chair — upper chest and front delt' },
-    { name: 'Prone Y Raises', sets: 3, reps: '20', notes: 'Face down, arms in Y — side/rear delt' },
-    { name: 'Diamond Push-Ups', sets: 3, reps: '15-20', notes: 'Tricep emphasis' },
-    { name: 'Chair Dips', sets: 3, reps: '12-15', notes: 'Hands on chair behind you, dip down' },
-  ]},
-  { day: 2, name: 'Home Pull A — Width Focus', rest: false, exercises: [
-    { name: 'Table Inverted Rows — Wide (FLARED)', sets: 4, reps: '10-12', notes: 'Elbows flared — upper back/rear delts' },
-    { name: 'Table Inverted Rows — Narrow (TUCKED)', sets: 3, reps: '10-12', notes: 'Elbows tucked — lat thickness' },
-    { name: 'Prone Superman Hold', sets: 3, reps: '30-45s', notes: 'Arms forward, lift chest and legs off floor' },
-    { name: 'Prone Y Raises', sets: 3, reps: '20', notes: 'Face down, arms in Y — upper back width' },
-    { name: 'Prone T Raises', sets: 3, reps: '20', notes: 'Arms out like a T — rear delt and rhomboids' },
-    { name: 'Prone W Raises', sets: 3, reps: '15', notes: 'Elbows bent 90 deg, pull back — traps' },
-    { name: 'Table Edge Isometric Curl', sets: 3, reps: '20s each', notes: 'Palms up under table edge, push up hard' },
-  ]},
-  { day: 3, name: 'Home Legs A — Quad + HIIT', rest: false, exercises: [
-    { name: 'Jump Squats', sets: 4, reps: '15', notes: 'Explosive up, soft controlled landing' },
-    { name: 'Bulgarian Split Squats (chair)', sets: 3, reps: '10/leg', notes: 'Long stride, knee stays behind toe' },
-    { name: 'Wall Sit', sets: 3, reps: '60 sec', notes: 'Thighs parallel, back flat on wall' },
-    { name: 'Step-Ups on Chair', sets: 3, reps: '12/leg', notes: 'Full hip extension at the top' },
-    { name: 'Single-Leg Calf Raises', sets: 4, reps: '20', notes: 'Hand on wall for balance' },
-    { name: 'Floor Leg Raises', sets: 3, reps: '20', notes: 'Lying flat, legs straight, raise to 90 deg' },
-    { name: 'HIIT: High Knees or Burpees', sets: 1, reps: '10 min', notes: '20s max effort / 40s rest × 10 rounds' },
-  ]},
-  { day: 4, name: 'Home Push B — Chest Focus', rest: false, exercises: [
-    { name: 'Standard Push-Ups', sets: 4, reps: '15-20', notes: 'Slow 3s down, explosive push up' },
-    { name: 'Wide-Grip Push-Ups', sets: 3, reps: '12-15', notes: 'Hands wide = more chest' },
-    { name: 'Decline Push-Ups (feet on chair)', sets: 3, reps: '10-12', notes: 'Targets upper chest heavily' },
-    { name: 'Archer Push-Ups', sets: 3, reps: '8-10/side', notes: 'One arm bent, one straight — unilateral' },
-    { name: 'Chair Dips', sets: 3, reps: '12-15', notes: 'Full range, lean forward for chest' },
-    { name: 'Close-Grip Push-Ups', sets: 3, reps: '12', notes: 'Hands close, tricep isolation' },
-  ]},
-  { day: 5, name: 'Home Pull B — Thickness Focus', rest: false, exercises: [
-    { name: 'Table Inverted Rows — Narrow (TUCKED)', sets: 4, reps: '10-12', notes: 'Elbows tucked — lat thickness focus' },
-    { name: 'Table Inverted Rows — Wide (FLARED)', sets: 3, reps: '10-12', notes: 'Elbows flared — upper back/rear delts' },
-    { name: 'Table Inverted Rows — Explosive', sets: 3, reps: '8-10', notes: 'Pull fast, lower slow 4s' },
-    { name: 'Prone Superman — Alternating', sets: 3, reps: '12/side', notes: 'One arm forward, one back' },
-    { name: 'Prone I Raises', sets: 3, reps: '15', notes: 'Arms straight overhead, lift — lower traps' },
-    { name: 'Prone W Raises', sets: 3, reps: '15', notes: 'Elbows bent, pull back — mid traps' },
-    { name: 'Bodyweight Good Mornings', sets: 3, reps: '15', notes: 'Hands behind head, hinge forward' },
-  ]},
-  { day: 6, name: 'Home Legs B — Posterior + HIIT', rest: false, exercises: [
-    { name: 'Single-Leg RDL (bodyweight)', sets: 3, reps: '10/leg', notes: 'Arms forward for balance, hinge at hips' },
-    { name: 'Glute Bridges (bodyweight)', sets: 4, reps: '20', notes: 'Drive hips up, hard squeeze at top' },
-    { name: 'Walking Lunges', sets: 3, reps: '12/leg', notes: 'Long stride, control the descent' },
-    { name: 'Nordic Hamstring Curl (feet under couch)', sets: 3, reps: '6-8', notes: 'Kneel, hook feet, lower slowly — brutal' },
-    { name: 'Single-Leg Calf Raises', sets: 4, reps: '20', notes: 'Slow and controlled both ways' },
-    { name: 'Mountain Climbers', sets: 3, reps: '30 sec', notes: 'Core and cardio — drive knees fast' },
-    { name: 'HIIT: Burpees or Jump Squats', sets: 1, reps: '12 min', notes: '20s max / 40s rest × 12 rounds' },
+  { day: 0, name: 'AMRAP Circuit — Backup Plan', rest: false, exercises: [
+    { name: 'Push-Ups', sets: 4, reps: 'AMRAP', notes: 'Slow 2s down, full range — track reps each round' },
+    { name: 'Bodyweight Squats', sets: 4, reps: 'AMRAP', notes: 'Go to parallel or deeper' },
+    { name: 'Sit-Ups or Crunches', sets: 4, reps: 'AMRAP', notes: 'Slow and controlled' },
+    { name: 'Reverse Lunges (each leg)', sets: 4, reps: '15/leg', notes: 'Step back, knee almost to floor' },
+    { name: 'Plank Hold', sets: 4, reps: '45-60s', notes: 'Straight line, no sagging' },
+    { name: 'Jumping Jacks or Mountain Climbers', sets: 4, reps: '60 sec', notes: 'Keep moving the whole time' },
   ]},
 ];
 
@@ -2782,9 +2738,11 @@ function BodyGoalsModal({ settings, onSave, onClose }: any) {
 }
 
 function LogWorkoutModal({ dayIdx, workout, onSave, onClose }: any) {
-  const day = workout.split[dayIdx];
+  const location = workout.location || 'gym';
+  const activeSplit = location === 'home' ? (workout.homeSplit || HOME_WORKOUT_SPLIT) : (workout.split || DEFAULT_WORKOUT_SPLIT);
+  const day = activeSplit[Math.min(dayIdx, activeSplit.length - 1)] || activeSplit[0];
   const today = todayStr();
-  const initial = workout.logs[today] || { name: day.name, location: 'gym', exercises: day.exercises.map((ex: any) => ({ name: ex.name, sets: Array(ex.sets).fill(0).map(() => ({ weight: '', reps: '', rpe: '' })) })) };
+  const initial = workout.logs[today] || { name: day.name, location, exercises: day.exercises.map((ex: any) => ({ name: ex.name, sets: Array(ex.sets).fill(0).map(() => ({ weight: '', reps: '', rpe: '' })) })) };
   const [data, setData] = useState(initial);
 
   const setSet = (exIdx: number, setIdx: number, field: string, value: string) => {
@@ -2837,9 +2795,9 @@ function LogWorkoutModal({ dayIdx, workout, onSave, onClose }: any) {
         const isFirstLog = !workout.logs[today];
         const nextWorkout = { ...workout, logs: { ...workout.logs, [today]: data } };
         if (isFirstLog && (workout.mode || 'sequence') === 'sequence') {
-          const nonRestDays = workout.split.filter((d: any) => !d.rest);
+          const nonRestDays = activeSplit.filter((d: any) => !d.rest);
           const cur = workout.sequencePosition || 1;
-          nextWorkout.sequencePosition = (cur % nonRestDays.length) + 1;
+          nextWorkout.sequencePosition = nonRestDays.length > 0 ? (cur % nonRestDays.length) + 1 : 1;
         }
         await onSave(nextWorkout);
         onClose();
