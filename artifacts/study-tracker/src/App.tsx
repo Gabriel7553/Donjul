@@ -365,6 +365,7 @@ const DEFAULT_SETTINGS: Record<string, any> = {
   lengthUnit: 'in',
   weekStart: 'sun',
   reminders: false,
+  theme: 'light',
   todayLayout: ['schedule', 'progress', 'nutrition', 'challenges'],
   subjects: SUBJECTS_DEFAULT,
   subjectOrder: ['cysa', 'spanish', 'running', 'guitar'],
@@ -697,6 +698,11 @@ function prevMonth(ym: string): string {
   const d = new Date(y, m - 2, 1);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 }
+function nextMonth(ym: string): string {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(y, m, 1);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+}
 function spendingByMonth(entries: any[], ym: string) {
   let income = 0, spent = 0;
   const byCat: Record<string, number> = {};
@@ -771,6 +777,30 @@ function GlobalStyles() {
       .divider { height: 1px; background: #E4DCC8; margin: 12px 0; border: none; }
       .swatch { width: 8px; height: 8px; border-radius: 2px; display: inline-block; margin-right: 6px; vertical-align: middle; }
       .streak-flame { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-family: 'JetBrains Mono', monospace; color: #C8932E; }
+
+      /* ── DARK THEME ─────────────────────────────────────────────── */
+      .dark, .dark body { background: #14141C !important; color: #E8E4DC !important; }
+      .dark .app { background: #14141C; color: #E8E4DC; }
+      .dark .card { background: #1C1C28; border-color: #2C2C3E; }
+      .dark .block { background: #1C1C28; border-color: #2C2C3E; }
+      .dark .modal { background: #1C1C28; }
+      .dark .modal-bg { background: rgba(0,0,0,0.72); }
+      .dark .btn { background: #E8E4DC; color: #14141C; }
+      .dark .btn-ghost { background: transparent; color: #E8E4DC; border-color: #3A3A50; }
+      .dark .tap { border-color: #3A3A50; color: #E8E4DC; background: transparent; }
+      .dark .tap.active { background: #E8E4DC; color: #14141C; border-color: #E8E4DC; }
+      .dark .bottom-nav { background: #1C1C28; border-color: #2C2C3E; }
+      .dark .nav-btn { color: #7A7570; }
+      .dark .nav-btn.active { color: #E8E4DC; background: #2C2C3E; }
+      .dark .muted, .dark .h2 { color: #7A7570 !important; }
+      .dark label { color: #7A7570; }
+      .dark .divider { background: #2C2C3E; }
+      .dark .progress-bar { background: #2C2C3E; }
+      .dark input[type="time"], .dark input[type="date"], .dark input[type="number"],
+      .dark input[type="text"], .dark select, .dark textarea {
+        background: #1A1A26; border-color: #3A3A50; color: #E8E4DC;
+      }
+      .dark .swatch { opacity: 0.9; }
     `}</style>
   );
 }
@@ -2756,14 +2786,22 @@ function LogWorkoutModal({ dayIdx, workout, onSave, onClose }: any) {
         <button
           className={`tap ${data.location !== 'home' ? 'active' : ''}`}
           style={{ flex: 1, justifyContent: 'center', padding: '8px 12px' }}
-          onClick={() => setData({ ...data, location: 'gym' })}
+          onClick={() => {
+            const s = workout.split || DEFAULT_WORKOUT_SPLIT;
+            const d = s[Math.min(dayIdx, s.length - 1)] || s[0];
+            setData({ ...data, location: 'gym', name: d.name, exercises: d.exercises.map((ex: any) => ({ name: ex.name, sets: Array(ex.sets).fill(0).map(() => ({ weight: '', reps: '', rpe: '' })) })) });
+          }}
         >
           <Building2 size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} />Gym
         </button>
         <button
           className={`tap ${data.location === 'home' ? 'active' : ''}`}
           style={{ flex: 1, justifyContent: 'center', padding: '8px 12px' }}
-          onClick={() => setData({ ...data, location: 'home' })}
+          onClick={() => {
+            const s = workout.homeSplit || HOME_WORKOUT_SPLIT;
+            const d = s[Math.min(dayIdx, s.length - 1)] || s[0];
+            setData({ ...data, location: 'home', name: d.name, exercises: d.exercises.map((ex: any) => ({ name: ex.name, sets: Array(ex.sets).fill(0).map(() => ({ weight: '', reps: '', rpe: '' })) })) });
+          }}
         >
           <TreePine size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} />Home
         </button>
@@ -3422,7 +3460,7 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
         </div>
       </div>
 
-      <div className="between" style={{ padding: '8px 0', marginBottom: 8, borderBottom: '1px solid #E4DCC8' }}>
+      <div className="between" style={{ padding: '8px 0', borderBottom: '1px solid #E4DCC8' }}>
         <span className="small">Reminders / notifications</span>
         <button
           className="tap"
@@ -3431,6 +3469,22 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
         >
           {draft.reminders ? 'On' : 'Off'}
         </button>
+      </div>
+
+      <div className="between" style={{ padding: '8px 0', marginBottom: 8, borderBottom: '1px solid #E4DCC8' }}>
+        <span className="small">Appearance</span>
+        <div className="row" style={{ gap: 6 }}>
+          <button
+            className={`tap${draft.theme !== 'dark' ? ' active' : ''}`}
+            style={{ padding: '4px 12px', fontSize: 12 }}
+            onClick={() => update({ theme: 'light' })}
+          >☀️ Light</button>
+          <button
+            className={`tap${draft.theme === 'dark' ? ' active' : ''}`}
+            style={{ padding: '4px 12px', fontSize: 12 }}
+            onClick={() => update({ theme: 'dark' })}
+          >🌙 Dark</button>
+        </div>
       </div>
 
       <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={() => { onSave(draft); onClose(); }}>
@@ -4615,9 +4669,9 @@ function CustomChallengesModal({ challenges, settings, onSave, onClose }: any) {
 function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories, onAddAccount, onEditAccount, onAddDebt, onEditDebt, onAddOwed, onEditOwed, onTransfer, onEditIncome, onTaxModal, onCustomChallenges }: any) {
   const today = todayStr();
   const thisMonth = monthKey(today);
-  const lastMonth = prevMonth(thisMonth);
-  const cur = spendingByMonth(spending.entries, thisMonth);
-  const prev = spendingByMonth(spending.entries, lastMonth);
+  const [viewMonth, setViewMonth] = useState(thisMonth);
+  const cur = spendingByMonth(spending.entries, viewMonth);
+  const prev = spendingByMonth(spending.entries, prevMonth(viewMonth));
   const catMap = useMemo(() => Object.fromEntries(spending.categories.map((c: any) => [c.id, c])), [spending.categories]);
   const budget = Number(spending.monthlyBudget) || 0;
   const goal = Number(spending.savingsGoal) || 0;
@@ -4639,8 +4693,11 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories, o
   const totalOwed = owed.filter((o: any) => !o.paid).reduce((s: number, o: any) => s + (Number(o.amount) || 0), 0);
 
   const recent = useMemo(
-    () => [...spending.entries].sort((a: any, b: any) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (b.id || '').localeCompare(a.id || ''))).slice(0, 8),
-    [spending.entries],
+    () => [...spending.entries]
+      .filter((e: any) => monthKey(e.date) === viewMonth)
+      .sort((a: any, b: any) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (b.id || '').localeCompare(a.id || '')))
+      .slice(0, 30),
+    [spending.entries, viewMonth],
   );
 
   const recurring = useMemo(() => {
@@ -4687,7 +4744,32 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories, o
           <Target size={12} /> Goals
         </button>
       </div>
-      <div className="muted small" style={{ marginBottom: 16 }}>{monthLabel(thisMonth)} · manual entries, your data stays local.</div>
+      <div className="between" style={{ marginBottom: 16 }}>
+        <button
+          onClick={() => setViewMonth(prevMonth(viewMonth))}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: '#6B6457' }}
+        >
+          <ChevronLeft size={16} />
+        </button>
+        <div style={{ textAlign: 'center' }}>
+          <span className="mono small" style={{ color: '#6B6457' }}>{monthLabel(viewMonth)}</span>
+          {viewMonth !== thisMonth && (
+            <button
+              onClick={() => setViewMonth(thisMonth)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 10, color: '#8E4585', marginLeft: 8, fontFamily: 'inherit' }}
+            >
+              → today
+            </button>
+          )}
+        </div>
+        <button
+          onClick={() => setViewMonth(nextMonth(viewMonth))}
+          disabled={viewMonth >= thisMonth}
+          style={{ background: 'none', border: 'none', cursor: viewMonth >= thisMonth ? 'default' : 'pointer', padding: '4px 6px', color: viewMonth >= thisMonth ? '#D4CCB8' : '#6B6457' }}
+        >
+          <ChevronRight size={16} />
+        </button>
+      </div>
 
       {/* NEGATIVE MONTH ALERT */}
       {negativeMonth && (
@@ -4713,7 +4795,7 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories, o
           <div className="row" style={{ gap: 6, marginTop: 8, fontSize: 11, opacity: 0.8 }}>
             {netDelta >= 0 ? <ArrowUpRight size={12} color="#A8D8B0" /> : <ArrowDownRight size={12} color="#F4A89E" />}
             <span className="mono">{fmtMoney(Math.abs(netDelta))}</span>
-            <span style={{ opacity: 0.7 }}>vs {monthShort(lastMonth)}</span>
+            <span style={{ opacity: 0.7 }}>vs {monthShort(prevMonth(viewMonth))}</span>
           </div>
         )}
         <div className="row" style={{ gap: 10, marginTop: 18 }}>
@@ -4907,8 +4989,8 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories, o
         </div>
       )}
 
-      {/* 30-DAY DAILY SPEND CHART */}
-      {!empty && (() => {
+      {/* 30-DAY DAILY SPEND CHART — only relevant when viewing current month */}
+      {!empty && viewMonth === thisMonth && (() => {
         const days30: { label: string; spent: number; date: string }[] = [];
         for (let i = 29; i >= 0; i--) {
           const d = new Date(today + 'T00:00:00');
@@ -6534,8 +6616,10 @@ export default function App() {
 
   const showWeekly = isSunday() && weeklyAck.lastAck !== todayStr() && !modal;
 
+  const isDark = settings.theme === 'dark';
+
   return (
-    <div className="app">
+    <div className={`app${isDark ? ' dark' : ''}`}>
       <GlobalStyles />
       <Toaster position="top-center" toastOptions={{ style: { fontFamily: 'inherit' } }} />
       <div className="content">
