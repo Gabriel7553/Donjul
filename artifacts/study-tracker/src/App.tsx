@@ -544,7 +544,7 @@ const DEFAULT_SPENDING = {
   owed: [] as any[],
   monthlyBudget: 0,
   savingsGoal: 0,
-  income: { w2Monthly: 0, w2Employer: '', expectedTrading: 0 } as any,
+  income: { w2Monthly: 0, w2Employer: '', expectedTrading: 0, w2YTD: 0 } as any,
 };
 
 function migrateSpending(s: any): any {
