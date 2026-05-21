@@ -700,6 +700,18 @@ function getCustomStreak(ch: any): number {
   if (last < yesterday && !(ch.restDates || []).includes(yesterday)) return 0;
   return ch.streak || 0;
 }
+// Advance any active custom challenges that track the given subject — call when target is hit.
+function tickChallengesForSubject(challenges: any[], subjectKey: string): any[] {
+  const today = todayStr();
+  const yd = new Date(today + 'T00:00:00'); yd.setDate(yd.getDate() - 1);
+  const yesterday = `${yd.getFullYear()}-${pad(yd.getMonth()+1)}-${pad(yd.getDate())}`;
+  return challenges.map((ch: any) => {
+    if (!ch.active || ch.subjectKey !== subjectKey || ch.lastActionDate === today) return ch;
+    const continuing = !ch.lastActionDate || ch.lastActionDate === yesterday;
+    const streak = continuing ? (ch.streak || 0) + 1 : 1;
+    return { ...ch, streak, longestStreak: Math.max(ch.longestStreak || 0, streak), lastActionDate: today };
+  });
+}
 
 function fmtMoney(n: number, opts: { signed?: boolean } = {}): string {
   const v = Number(n) || 0;
@@ -844,7 +856,7 @@ function BottomNav({ tab, setTab }: { tab: string; setTab: (t: string) => void }
 // ════════════════════════════════════════════════════════════════════════════════
 // TODAY TAB
 // ════════════════════════════════════════════════════════════════════════════════
-function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, onWake, onStatus, onLogTime, onBusy, onBack, onSwitch, onLogMeal, onScheduleStart, onResetMacros, onMarkDone, onFocusStart, onFocusStop, onCoach }: any) {
+function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, customChallenges, onWake, onStatus, onLogTime, onBusy, onBack, onSwitch, onLogMeal, onScheduleStart, onResetMacros, onMarkDone, onFocusStart, onFocusStop, onCoach, onRestDay, onManageChallenges }: any) {
   const now = useCurrentTime();
   const nowMins = timeToMins(now);
   const subjectKeys = settings.subjectOrder.filter((k: string) => settings.subjects[k] && !settings.subjects[k].archived && !settings.subjects[k].deletedAt);
@@ -889,6 +901,7 @@ function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, 
           <Schedule settings={settings} daily={daily} onLog={onLogTime} subjectKeys={subjectKeys} nowMins={nowMins} checkins={checkins} />
           <Progress settings={settings} totals={totals} daily={daily} streaks={streaks} subjectKeys={subjectKeys} onLogExtra={onLogTime} checkins={checkins} onMarkDone={onMarkDone} onFocusStart={onFocusStart} focus={daily.focus} />
           <ChallengeCard settings={settings} workout={workout} />
+          <CustomChallengesCard challenges={customChallenges} settings={settings} onRestDay={onRestDay} onManage={onManageChallenges} />
           <MacrosCard targets={settings.macroTargets} totals={todayMacros} onLog={onLogMeal} onReset={onResetMacros} onCoach={onCoach} />
           {settings.microsEnabled !== false && (
             <MicrosCard targets={settings.microTargets} totals={todayMacros} />
@@ -1472,6 +1485,51 @@ function NutritionCoachModal({ settings, meals, body, onLogItem, onClose }: any)
         </>
       )}
     </ModalShell>
+  );
+}
+
+function CustomChallengesCard({ challenges, settings, onRestDay, onManage }: any) {
+  const today = todayStr();
+  const active = (challenges || []).filter((c: any) => c.active);
+  if (active.length === 0) return null;
+  return (
+    <div className="card" style={{ marginBottom: 14 }}>
+      <div className="between" style={{ marginBottom: 10 }}>
+        <div className="row" style={{ gap: 6 }}><Trophy size={14} color="#8E4585" /><span className="h2">Your challenges</span></div>
+        <button className="tap" onClick={onManage} style={{ fontSize: 11, padding: '3px 8px' }}>Manage</button>
+      </div>
+      {active.map((ch: any) => {
+        const sub = settings.subjects?.[ch.subjectKey];
+        const doneToday = ch.lastActionDate === today;
+        const isRest = doneToday && (ch.restDates || []).includes(today);
+        const isLogged = doneToday && !isRest;
+        const isOpen = !ch.days || ch.days === 0;
+        const daysDone = ch.startDate ? Math.max(0, diffDays(today, ch.startDate)) : 0;
+        const pct = isOpen ? 0 : Math.min(100, Math.round((daysDone / ch.days) * 100));
+        return (
+          <div key={ch.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid #F0EAD8' }}>
+            <div className="between" style={{ marginBottom: 4 }}>
+              <div>
+                <div className="small" style={{ fontWeight: 600 }}>{ch.name}</div>
+                <div className="tiny muted">🔥 {ch.streak} streak · {sub?.name || ch.subjectKey} · {isOpen ? `Day ${daysDone + 1}` : `${daysDone}/${ch.days}`}</div>
+              </div>
+              {!isOpen && <span className="mono tiny muted">{pct}%</span>}
+            </div>
+            {!isOpen && <div style={{ height: 3, background: '#F0EAD8', borderRadius: 2, overflow: 'hidden', marginBottom: 6 }}><div style={{ height: '100%', width: `${pct}%`, background: '#8E4585', borderRadius: 2 }} /></div>}
+            {isLogged ? (
+              <div className="tiny" style={{ color: '#3F7A4F', fontWeight: 600 }}>✓ Counted today</div>
+            ) : isRest ? (
+              <div className="tiny" style={{ color: '#6B6457' }}>😴 Rest day · streak protected</div>
+            ) : (
+              <div className="row" style={{ gap: 6, alignItems: 'center', marginTop: 4 }}>
+                <div className="tiny muted" style={{ flex: 1 }}>Log {sub?.name || 'subject'} to count today</div>
+                <button className="tap" onClick={() => onRestDay(ch.id)} style={{ fontSize: 10, padding: '3px 8px', whiteSpace: 'nowrap' }}>😴 Rest day</button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -3139,7 +3197,7 @@ function PlanDayModal({ date, plans, onSave, onClose }: any) {
   );
 }
 
-function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSubject, onChallenge, onExportImport, onResetDay }: any) {
+function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSubject, onChallenge, onCustomChallenges, onExportImport, onResetDay }: any) {
   const [draft, setDraft] = useState(settings);
   const [subTab, setSubTab] = useState<'active' | 'archived' | 'deleted'>('active');
   const latestBody = body?.entries?.[body.entries.length - 1];
@@ -3314,7 +3372,12 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
 
       <button className="tap" onClick={onChallenge} style={{ width: '100%', marginBottom: 8, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
         <Zap size={14} color="#8E4585" />
-        <span style={{ flex: 1 }}>60-day challenge{settings.challenge?.active && <span className="mono tiny muted" style={{ marginLeft: 6 }}>· active</span>}</span>
+        <span style={{ flex: 1 }}>60-day workout challenge{settings.challenge?.active && <span className="mono tiny muted" style={{ marginLeft: 6 }}>· active</span>}</span>
+        <ChevronRight size={14} color="#6B6457" />
+      </button>
+      <button className="tap" onClick={onCustomChallenges} style={{ width: '100%', marginBottom: 8, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Trophy size={14} color="#C8932E" />
+        <span style={{ flex: 1 }}>Custom subject challenges</span>
         <ChevronRight size={14} color="#6B6457" />
       </button>
       <button className="tap" onClick={onExportImport} style={{ width: '100%', marginBottom: 8, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -4305,85 +4368,174 @@ function TaxModal({ tax, onSave, onClose }: any) {
 // ════════════════════════════════════════════════════════════════════════════════
 // DAILY HABITS — CUSTOM CHALLENGES MODAL
 // ════════════════════════════════════════════════════════════════════════════════
-function CustomChallengesModal({ challenges, onSave, onClose }: any) {
+function CustomChallengesModal({ challenges, settings, onSave, onClose }: any) {
   const [view, setView] = useState<'list'|'add'>('list');
-  const [form, setForm] = useState({ name: '', emoji: '🔥', description: '' });
+  const [form, setForm] = useState({ name: '', subjectKey: '', days: '60' });
   const today = todayStr();
 
-  const checkIn = (ch: any, action: 'done'|'rest') => {
-    const streak = getCustomStreak(ch);
-    const updated = action === 'done'
-      ? { ...ch, streak: streak + 1, longestStreak: Math.max(ch.longestStreak || 0, streak + 1), lastActionDate: today }
-      : { ...ch, restDates: [...(ch.restDates || []).slice(-60), today], lastActionDate: today };
-    onSave(challenges.map((c: any) => c.id === ch.id ? updated : c));
+  const subjects = (settings.subjectOrder || [])
+    .filter((k: string) => settings.subjects[k] && !settings.subjects[k].archived && !settings.subjects[k].deletedAt)
+    .map((k: string) => ({ key: k, ...settings.subjects[k] }));
+
+  const createChallenge = () => {
+    if (!form.name.trim()) { toast.error('Enter a challenge name'); return; }
+    if (!form.subjectKey) { toast.error('Pick a subject to track'); return; }
+    const ch = {
+      id: `cch_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: form.name.trim(),
+      subjectKey: form.subjectKey,
+      days: parseInt(form.days) || 0,
+      startDate: today,
+      active: true,
+      streak: 0,
+      longestStreak: 0,
+      lastActionDate: null,
+      restDates: [],
+    };
+    onSave([...challenges, ch]);
+    setForm({ name: '', subjectKey: '', days: '60' });
+    setView('list');
+    toast(`"${ch.name}" started!`);
   };
 
-  const addChallenge = () => {
-    if (!form.name.trim()) { toast.error('Enter a habit name'); return; }
-    const ch = { id: `cch_${Date.now()}_${Math.random().toString(36).slice(2,6)}`, name: form.name.trim(), emoji: form.emoji, description: form.description.trim(), startDate: today, streak: 0, longestStreak: 0, lastActionDate: null, restDates: [] };
-    onSave([...challenges, ch]);
-    setForm({ name: '', emoji: '🔥', description: '' });
-    setView('list');
-    toast(`"${ch.name}" habit started!`);
+  const archiveChallenge = (id: string) => {
+    onSave(challenges.map((c: any) => c.id === id ? { ...c, active: false, completedDate: today } : c));
+    toast('Challenge archived');
   };
+
+  const deleteChallenge = (id: string) => {
+    if (confirm('Delete this challenge? This cannot be undone.')) onSave(challenges.filter((c: any) => c.id !== id));
+  };
+
+  const activeChallenges = challenges.filter((c: any) => c.active);
+  const archived = challenges.filter((c: any) => !c.active);
 
   return (
-    <ModalShell title="Daily habits" onClose={onClose}>
+    <ModalShell title="Custom challenges" onClose={onClose} icon={<Trophy size={18} color="#C8932E" />}>
       <div className="row" style={{ gap: 6, marginBottom: 14 }}>
-        <button className="tap" onClick={() => setView('list')} style={{ flex: 1, background: view === 'list' ? '#1A1A2E' : 'transparent', color: view === 'list' ? '#F5F0E6' : '#1A1A2E' }}>My habits ({challenges.length})</button>
-        <button className="tap" onClick={() => setView('add')} style={{ flex: 1, background: view === 'add' ? '#1A1A2E' : 'transparent', color: view === 'add' ? '#F5F0E6' : '#1A1A2E', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}><Plus size={12} /> New habit</button>
+        <button className="tap" onClick={() => setView('list')} style={{ flex: 1, background: view === 'list' ? '#1A1A2E' : 'transparent', color: view === 'list' ? '#F5F0E6' : '#1A1A2E' }}>
+          Active ({activeChallenges.length})
+        </button>
+        <button className="tap" onClick={() => setView('add')} style={{ flex: 1, background: view === 'add' ? '#1A1A2E' : 'transparent', color: view === 'add' ? '#F5F0E6' : '#1A1A2E', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+          <Plus size={12} /> New challenge
+        </button>
       </div>
 
       {view === 'list' && (
         <>
-          {challenges.length === 0 && <div style={{ textAlign: 'center', padding: '24px 0' }}><div style={{ fontSize: 32, marginBottom: 8 }}>🔥</div><p className="small muted">No habits yet. Create one to build streaks.</p></div>}
-          {challenges.map((ch: any) => {
-            const streak = getCustomStreak(ch);
+          {activeChallenges.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '24px 0' }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>🏆</div>
+              <p className="small muted">No active challenges. Create one to track a subject streak.</p>
+            </div>
+          )}
+          {activeChallenges.map((ch: any) => {
+            const sub = settings.subjects?.[ch.subjectKey];
+            const daysDone = ch.startDate ? Math.max(0, diffDays(today, ch.startDate)) : 0;
+            const isOpen = !ch.days || ch.days === 0;
+            const pct = isOpen ? 0 : Math.min(100, Math.round((daysDone / ch.days) * 100));
             const doneToday = ch.lastActionDate === today;
             const isRest = doneToday && (ch.restDates || []).includes(today);
-            const isDone = doneToday && !isRest;
+            const isLogged = doneToday && !isRest;
             return (
               <div key={ch.id} style={{ padding: '12px 0', borderBottom: '1px solid #F0EAD8' }}>
-                <div className="between" style={{ marginBottom: 8 }}>
+                <div className="between" style={{ marginBottom: 6 }}>
                   <div>
-                    <div className="row" style={{ gap: 6, marginBottom: 2 }}>
-                      <span style={{ fontSize: 18 }}>{ch.emoji}</span>
-                      <span className="small" style={{ fontWeight: 600 }}>{ch.name}</span>
-                    </div>
-                    {ch.description && <div className="tiny muted" style={{ paddingLeft: 26 }}>{ch.description}</div>}
-                    <div className="tiny muted" style={{ paddingLeft: 26, marginTop: 2 }}>🔥 {streak} day streak · best {ch.longestStreak || 0}</div>
+                    <div className="small" style={{ fontWeight: 600 }}>{ch.name}</div>
+                    <div className="tiny muted">{sub?.name || ch.subjectKey} · 🔥 {ch.streak} streak · best {ch.longestStreak || 0}</div>
+                    <div className="tiny muted">{isOpen ? `Day ${daysDone + 1} (open-ended)` : `Day ${daysDone} of ${ch.days} · ${Math.max(0, ch.days - daysDone)} to go`}</div>
                   </div>
-                  <button className="tap" onClick={() => { if (confirm('Delete this habit?')) onSave(challenges.filter((c: any) => c.id !== ch.id)); }} style={{ padding: '3px 6px', color: '#6B6457' }}><Trash2 size={11} /></button>
+                  {!isOpen && <span className="mono tiny muted">{pct}%</span>}
                 </div>
-                {!doneToday ? (
-                  <div className="row" style={{ gap: 6 }}>
-                    <button className="btn" style={{ flex: 1, padding: '8px', fontSize: 12, background: '#3F7A4F' }} onClick={() => checkIn(ch, 'done')}>✓ Done today</button>
-                    <button className="tap" style={{ flex: 1, padding: '8px', fontSize: 12 }} onClick={() => checkIn(ch, 'rest')}>😴 Rest day</button>
-                  </div>
-                ) : (
-                  <div style={{ background: isDone ? '#3F7A4F15' : '#F0EAD8', border: `1px solid ${isDone ? '#3F7A4F40' : '#D4CCB8'}`, borderRadius: 8, padding: '8px 12px', textAlign: 'center' }}>
-                    <span className="small" style={{ color: isDone ? '#3F7A4F' : '#6B6457', fontWeight: 600 }}>{isDone ? '✓ Completed today!' : '😴 Rest day — streak protected'}</span>
+                {!isOpen && (
+                  <div style={{ height: 4, background: '#F0EAD8', borderRadius: 2, overflow: 'hidden', marginBottom: 8 }}>
+                    <div style={{ height: '100%', width: `${pct}%`, background: '#8E4585', borderRadius: 2 }} />
                   </div>
                 )}
+                {isLogged ? (
+                  <div style={{ background: '#3F7A4F15', border: '1px solid #3F7A4F40', borderRadius: 8, padding: '6px 12px', textAlign: 'center', marginBottom: 6 }}>
+                    <span className="tiny" style={{ color: '#3F7A4F', fontWeight: 600 }}>✓ Counted today — keep logging {sub?.name}</span>
+                  </div>
+                ) : isRest ? (
+                  <div style={{ background: '#F0EAD8', border: '1px solid #D4CCB8', borderRadius: 8, padding: '6px 12px', textAlign: 'center', marginBottom: 6 }}>
+                    <span className="tiny" style={{ color: '#6B6457', fontWeight: 600 }}>😴 Rest day — streak protected</span>
+                  </div>
+                ) : (
+                  <div className="tiny muted" style={{ fontStyle: 'italic', marginBottom: 6 }}>
+                    Pending — log {sub?.name || 'subject'} time on Today tab to count this day
+                  </div>
+                )}
+                <div className="row" style={{ gap: 6 }}>
+                  <button className="tap" onClick={() => archiveChallenge(ch.id)} style={{ flex: 1, fontSize: 11, padding: '5px' }}>
+                    <Trophy size={10} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Complete & archive
+                  </button>
+                  <button className="tap" onClick={() => deleteChallenge(ch.id)} style={{ padding: '5px 10px', fontSize: 11, color: '#B8460E' }}>
+                    <Trash2 size={10} />
+                  </button>
+                </div>
               </div>
             );
           })}
+
+          {archived.length > 0 && (
+            <>
+              <div className="h3" style={{ marginTop: 16, marginBottom: 8 }}>Completed</div>
+              {archived.map((ch: any) => {
+                const sub = settings.subjects?.[ch.subjectKey];
+                return (
+                  <div key={ch.id} className="card" style={{ padding: 10, marginBottom: 8, borderLeft: '3px solid #C8932E' }}>
+                    <div className="between">
+                      <div>
+                        <div className="small" style={{ fontWeight: 600 }}><Award size={11} style={{ verticalAlign: 'middle', marginRight: 4, color: '#C8932E' }} />{ch.name}</div>
+                        <div className="tiny muted">{sub?.name || ch.subjectKey} · Best streak: {ch.longestStreak || 0} days</div>
+                        {ch.startDate && <div className="tiny muted mono">{fmtShortDate(ch.startDate)} → {fmtShortDate(ch.completedDate || today)}</div>}
+                      </div>
+                      <button className="tap" onClick={() => deleteChallenge(ch.id)} style={{ padding: '3px 6px', color: '#6B6457' }}><Trash2 size={10} /></button>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
         </>
       )}
 
       {view === 'add' && (
         <>
-          <label>Habit name</label>
-          <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Read the Bible, Pray, Cold shower…" style={{ marginBottom: 12 }} autoFocus />
-          <label>Description (optional)</label>
-          <input type="text" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Any notes or reminders" style={{ marginBottom: 12 }} />
-          <label>Icon</label>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-            {CUSTOM_CHALLENGE_EMOJIS.map((em) => (
-              <button key={em} onClick={() => setForm({ ...form, emoji: em })} style={{ fontSize: 20, background: form.emoji === em ? '#C8932E20' : 'transparent', border: `2px solid ${form.emoji === em ? '#C8932E' : 'transparent'}`, borderRadius: 8, width: 40, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>{em}</button>
+          <p className="small muted" style={{ marginBottom: 14, lineHeight: 1.5 }}>
+            Pick a subject. Every time you log time (or check it off) on the Today tab, this challenge's streak advances automatically. Press "Rest day" on the Today tab to protect your streak on days you skip.
+          </p>
+
+          <label>Challenge name</label>
+          <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Bible Reading 60 Days, Daily Prayer…" style={{ marginBottom: 14 }} autoFocus />
+
+          <label>Subject to track</label>
+          {subjects.length === 0 ? (
+            <p className="tiny muted" style={{ marginBottom: 14 }}>No subjects yet — add one in Settings → Subjects first.</p>
+          ) : (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+              {subjects.map((s: any) => (
+                <button key={s.key} className="tap" onClick={() => setForm({ ...form, subjectKey: s.key })}
+                  style={{ fontSize: 12, padding: '6px 12px', background: form.subjectKey === s.key ? (s.accent || '#1A1A2E') : 'transparent', color: form.subjectKey === s.key ? '#F5F0E6' : '#1A1A2E', borderColor: form.subjectKey === s.key ? (s.accent || '#1A1A2E') : '#E4DCC8' }}>
+                  {s.name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <label>Duration</label>
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
+            {['21','30','60','75','90','0'].map((d) => (
+              <button key={d} className="tap" onClick={() => setForm({ ...form, days: d })}
+                style={{ fontSize: 11, padding: '5px 10px', background: form.days === d ? '#1A1A2E' : 'transparent', color: form.days === d ? '#F5F0E6' : '#1A1A2E' }}>
+                {d === '0' ? '∞ Open' : `${d} days`}
+              </button>
             ))}
           </div>
-          <button className="btn" style={{ width: '100%' }} onClick={addChallenge}><Plus size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Start habit</button>
+
+          <button className="btn" style={{ width: '100%' }} onClick={createChallenge}>
+            <Plus size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Start challenge
+          </button>
         </>
       )}
     </ModalShell>
@@ -4945,25 +5097,15 @@ function MoneyTab({ spending, onAdd, onEdit, onDelete, onBudget, onCategories, o
         );
       })()}
 
-      {/* TAX TRACKER + HABITS QUICK LINKS */}
-      <div className="row" style={{ gap: 8, marginBottom: 14 }}>
-        <button className="tap" onClick={onTaxModal} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', textAlign: 'left', borderRadius: 10 }}>
-          <span style={{ fontSize: 20 }}>🧾</span>
-          <div style={{ flex: 1 }}>
-            <div className="small" style={{ fontWeight: 600 }}>Tax tracker</div>
-            <div className="tiny muted">1099 · CA + Federal · Quarterly</div>
-          </div>
-          <ChevronRight size={14} color="#6B6457" />
-        </button>
-        <button className="tap" onClick={onCustomChallenges} style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', textAlign: 'left', borderRadius: 10 }}>
-          <span style={{ fontSize: 20 }}>🔥</span>
-          <div style={{ flex: 1 }}>
-            <div className="small" style={{ fontWeight: 600 }}>Daily habits</div>
-            <div className="tiny muted">Streaks with rest days</div>
-          </div>
-          <ChevronRight size={14} color="#6B6457" />
-        </button>
-      </div>
+      {/* TAX TRACKER LINK */}
+      <button className="tap" onClick={onTaxModal} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', textAlign: 'left', borderRadius: 10, marginBottom: 14 }}>
+        <span style={{ fontSize: 22 }}>🧾</span>
+        <div style={{ flex: 1 }}>
+          <div className="small" style={{ fontWeight: 600 }}>Tax tracker</div>
+          <div className="tiny muted">1099 entries · CA + Federal estimate · Quarterly payments</div>
+        </div>
+        <ChevronRight size={14} color="#6B6457" />
+      </button>
 
       {/* CATEGORY BREAKDOWN */}
       {topCats.length > 0 && (
@@ -5892,6 +6034,15 @@ export default function App() {
   const saveSpending = async (next: any) => { setSpending(next); await safeSet(K.spending, next); };
   const saveTax = async (next: any) => { setTax(next); await safeSet(K.tax, next); };
   const saveCustomChallenges = async (next: any[]) => { setCustomChallenges(next); await safeSet(K.customChallenges, next); };
+  const restDayChallenge = async (challengeId: string) => {
+    const today = todayStr();
+    const updated = customChallenges.map((c: any) => {
+      if (c.id !== challengeId || c.lastActionDate === today) return c;
+      return { ...c, restDates: [...(c.restDates || []).slice(-60), today], lastActionDate: today };
+    });
+    await saveCustomChallenges(updated);
+    toast('Rest day noted — streak protected 😴');
+  };
   // Functional updates so concurrent edits (categories/goals/other tx) aren't clobbered.
   const upsertTransaction = async (tx: any) => {
     let isEdit = false;
@@ -6038,6 +6189,8 @@ export default function App() {
     if (!has) {
       const weeklyDays = settings.subjects[subject]?.weeklyDays || 7;
       if (doneThisWeek(subject, { [subject]: nextList }) >= weeklyDays) celebrate(); else haptic();
+      const ticked = tickChallengesForSubject(customChallenges, subject);
+      if (ticked.some((c: any, i: number) => c !== customChallenges[i])) await saveCustomChallenges(ticked);
     }
     const name = settings.subjects[subject]?.name || 'task';
     undoToast(has ? `${name} unmarked` : `${name} done`, () => saveCheckins(prev));
@@ -6107,6 +6260,10 @@ export default function App() {
       }
     }
     if (newCompleted >= target && target > 0) await recordCheckin(subject, true);
+    if (newCompleted >= target && target > 0) {
+      const ticked = tickChallengesForSubject(customChallenges, subject);
+      if (ticked.some((c: any, i: number) => c !== customChallenges[i])) await saveCustomChallenges(ticked);
+    }
     if (target > 0 && (daily.completed[subject] || 0) < target && newCompleted >= target) celebrate();
     else haptic();
     const name = settings.subjects[subject]?.name || 'time';
@@ -6285,6 +6442,7 @@ export default function App() {
         {tab === 'today' && (
           <TodayTab
             settings={settings} daily={daily} totals={totals} streaks={streaks} meals={meals} workout={workout} checkins={checkins}
+            customChallenges={customChallenges}
             onWake={(time: string) => saveDaily({ ...daily, wakeLogged: true, actualWake: time })}
             onScheduleStart={(time: string) => saveDaily({ ...daily, scheduleStarted: true, scheduleStartTime: time })}
             onStatus={(status: string, busyUntil: string) => saveDaily({ ...daily, status, busyUntil })}
@@ -6298,6 +6456,8 @@ export default function App() {
             onFocusStart={startFocus}
             onFocusStop={stopFocus}
             onCoach={() => setModal({ type: 'nutritionCoach' })}
+            onRestDay={restDayChallenge}
+            onManageChallenges={() => setModal({ type: 'customChallenges' })}
           />
         )}
         {tab === 'body' && (
@@ -6355,7 +6515,7 @@ export default function App() {
 
       <BottomNav tab={tab} setTab={setTab} />
 
-      {modal?.type === 'settings' && <SettingsModal settings={settings} body={body} onSave={saveSettings} onClose={() => setModal(null)} onEditSubject={(k: string) => setModal({ type: 'editSubject', key: k })} onAddSubject={() => setModal({ type: 'editSubject', key: null })} onChallenge={() => setModal({ type: 'challenge' })} onExportImport={() => setModal({ type: 'exportImport' })} onResetDay={() => setModal({ type: 'resetDay' })} />}
+      {modal?.type === 'settings' && <SettingsModal settings={settings} body={body} onSave={saveSettings} onClose={() => setModal(null)} onEditSubject={(k: string) => setModal({ type: 'editSubject', key: k })} onAddSubject={() => setModal({ type: 'editSubject', key: null })} onChallenge={() => setModal({ type: 'challenge' })} onCustomChallenges={() => setModal({ type: 'customChallenges' })} onExportImport={() => setModal({ type: 'exportImport' })} onResetDay={() => setModal({ type: 'resetDay' })} />}
       {modal?.type === 'resetDay' && <ResetDayModal onReset={resetDay} onFullReset={fullReset} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'editSubject' && <EditSubjectModal subjectKey={modal.key} settings={settings} onSave={saveSettings} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'logTime' && <LogTimeModal subject={modal.subject} settings={settings} daily={daily} editMode={modal.editMode} onLog={(m: number) => { logTime(modal.subject, m); setModal(null); }} onSet={(m: number) => { setSubjectTime(modal.subject, m); setModal(null); }} onClose={() => setModal(null)} />}
@@ -6379,7 +6539,7 @@ export default function App() {
       {modal?.type === 'accountTransfer' && <AccountTransferModal spending={spending} onSave={doTransfer} onClose={() => setModal(null)} />}
       {modal?.type === 'incomePlanner' && <IncomePlannerModal spending={spending} onSave={saveSpending} onClose={() => setModal(null)} />}
       {modal?.type === 'taxModal' && <TaxModal tax={tax} onSave={saveTax} onClose={() => setModal(null)} />}
-      {modal?.type === 'customChallenges' && <CustomChallengesModal challenges={customChallenges} onSave={saveCustomChallenges} onClose={() => setModal(null)} />}
+      {modal?.type === 'customChallenges' && <CustomChallengesModal challenges={customChallenges} settings={settings} onSave={saveCustomChallenges} onClose={() => setModal(null)} />}
       {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, journal, challengeHistory, busyPresets, weeklyAck, spending }} onImport={async (d: any) => {
         if (d.spending) { const sp = migrateSpending(d.spending); setSpending(sp); await safeSet(K.spending, sp); }
         if (d.settings) { setSettings(d.settings); await safeSet(K.settings, d.settings); }
