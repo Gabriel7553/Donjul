@@ -1033,7 +1033,7 @@ function BottomNav({ tab, setTab }: { tab: string; setTab: (t: string) => void }
 // ════════════════════════════════════════════════════════════════════════════════
 // TODAY TAB
 // ════════════════════════════════════════════════════════════════════════════════
-function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, customChallenges, onWake, onStatus, onLogTime, onBusy, onBack, onSwitch, onLogMeal, onScheduleStart, onResetMacros, onMarkDone, onFocusStart, onFocusStop, onCoach, onRestDay, onManageChallenges }: any) {
+function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, customChallenges, onWake, onStatus, onLogTime, onBusy, onBack, onSwitch, onLogMeal, onScheduleStart, onResetMacros, onMarkDone, onFocusStart, onFocusStop, onCoach, onRestDay, onManageChallenges, onSkipToday }: any) {
   const now = useCurrentTime();
   const nowMins = timeToMins(now);
   const subjectKeys = settings.subjectOrder.filter((k: string) => settings.subjects[k] && !settings.subjects[k].archived && !settings.subjects[k].deletedAt);
@@ -1075,9 +1075,9 @@ function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, 
         <>
           <StatusBar daily={daily} onBusy={onBusy} onBack={onBack} onSwitch={onSwitch} nowMins={nowMins} now={now} sleepTime={settings.sleepTime} />
           {daily.focus && <FocusTimerCard focus={daily.focus} subject={settings.subjects[daily.focus.subject]} onStop={onFocusStop} />}
-          <Schedule settings={settings} daily={daily} onLog={onLogTime} subjectKeys={subjectKeys} nowMins={nowMins} checkins={checkins} />
+          <Schedule settings={settings} daily={daily} totals={totals} onLog={onLogTime} subjectKeys={subjectKeys} nowMins={nowMins} checkins={checkins} />
           <CatchUpBanner settings={settings} totals={totals} daily={daily} subjectKeys={subjectKeys} />
-          <Progress settings={settings} totals={totals} daily={daily} streaks={streaks} subjectKeys={subjectKeys} onLogExtra={onLogTime} checkins={checkins} onMarkDone={onMarkDone} onFocusStart={onFocusStart} focus={daily.focus} />
+          <Progress settings={settings} totals={totals} daily={daily} streaks={streaks} subjectKeys={subjectKeys} onLogExtra={onLogTime} checkins={checkins} onMarkDone={onMarkDone} onFocusStart={onFocusStart} focus={daily.focus} onSkipToday={onSkipToday} />
           <ChallengeCard settings={settings} workout={workout} />
           <CustomChallengesCard challenges={customChallenges} settings={settings} onRestDay={onRestDay} onManage={onManageChallenges} />
           <MacrosCard targets={settings.macroTargets} totals={todayMacros} onLog={onLogMeal} onReset={onResetMacros} onCoach={onCoach} />
@@ -1215,12 +1215,13 @@ function FocusTimerCard({ focus, subject, onStop }: any) {
   );
 }
 
-function buildSchedule(settings: any, daily: any, subjectKeys: string[], checkins: any = {}) {
+function buildSchedule(settings: any, daily: any, subjectKeys: string[], checkins: any = {}, totals: any = {}) {
   if (!daily?.scheduleStartTime) return [];
   const breakMin = settings.blockBreakMin ?? 15;
   let cursor = daily.scheduleStartTime;
   const blocks: any[] = [];
   const dow = dayOfWeek();
+  const skipped: string[] = daily.skippedToday || [];
   const order = ['cysa', 'running', 'spanish', 'guitar']
     .filter(k => subjectKeys.includes(k))
     .concat(subjectKeys.filter(k => !['cysa', 'running', 'spanish', 'guitar'].includes(k)));
@@ -1228,13 +1229,21 @@ function buildSchedule(settings: any, daily: any, subjectKeys: string[], checkin
   for (const k of order) {
     const s = settings.subjects[k];
     if (!s || s.archived || s.deletedAt) continue;
-    // Check-off habits aren't time-blocked, and weekly-met goals drop off until next week.
     if (s.trackingMode === 'checkoff') continue;
     if (doneThisWeek(k, checkins) >= (s.weeklyDays || 7)) continue;
+    if (skipped.includes(k)) continue;
     const isRest = (s.weeklyDays < 7) && (dow === 0);
     if (isRest) continue;
-    const remaining = Math.max(0, (s.target || 0) - (daily.completed[k] || 0));
+
+    // For deadline-based subjects, use the dynamically required daily minutes.
+    const baseTarget = s.target || 0;
+    const reqTarget = s.deadline ? getRequiredDailyMins(k, settings, totals, daily) : baseTarget;
+    const effectiveTarget = Math.max(baseTarget, reqTarget);
+    const extraMins = effectiveTarget - baseTarget;
+    const remaining = Math.max(0, effectiveTarget - (daily.completed[k] || 0));
     if (remaining <= 0) continue;
+
+    const catchNote = extraMins > 0 ? `+${extraMins}m catch-up` : undefined;
 
     if (k === 'spanish' && remaining >= 60) {
       const segments = splitSpanish(remaining);
@@ -1250,12 +1259,12 @@ function buildSchedule(settings: any, daily: any, subjectKeys: string[], checkin
       blocks.push({ subject: k, start: cursor, mins: remaining });
       cursor = addMinutes(cursor, remaining + breakMin);
     } else if (k === 'guitar') {
-      blocks.push({ subject: k, start: '19:00', mins: remaining });
+      blocks.push({ subject: k, start: '19:00', mins: remaining, note: catchNote });
     } else if (k === 'running') {
-      blocks.push({ subject: k, start: cursor, mins: remaining, note: 'Easy pace' });
+      blocks.push({ subject: k, start: cursor, mins: remaining, note: ['Easy pace', catchNote].filter(Boolean).join(' · ') });
       cursor = addMinutes(cursor, remaining + breakMin);
     } else {
-      blocks.push({ subject: k, start: cursor, mins: remaining });
+      blocks.push({ subject: k, start: cursor, mins: remaining, note: catchNote });
       cursor = addMinutes(cursor, remaining + breakMin);
     }
   }
@@ -1269,8 +1278,8 @@ function splitSpanish(total: number) {
   return [duo, babbel, input];
 }
 
-function Schedule({ settings, daily, onLog, subjectKeys, nowMins, checkins }: any) {
-  const blocks = useMemo(() => buildSchedule(settings, daily, subjectKeys, checkins), [settings, daily, subjectKeys, checkins]);
+function Schedule({ settings, daily, totals, onLog, subjectKeys, nowMins, checkins }: any) {
+  const blocks = useMemo(() => buildSchedule(settings, daily, subjectKeys, checkins, totals), [settings, daily, subjectKeys, checkins, totals]);
 
   if (blocks.length === 0) {
     return (
@@ -1403,7 +1412,7 @@ function CatchUpBanner({ settings, totals, daily, subjectKeys }: any) {
   );
 }
 
-function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, checkins, onMarkDone, onFocusStart, focus }: any) {
+function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, checkins, onMarkDone, onFocusStart, focus, onSkipToday }: any) {
   return (
     <div className="card">
       <div className="h2" style={{ marginBottom: 14 }}>Progress</div>
@@ -1526,6 +1535,14 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, c
                   </button>
                 ) : (
                   <>
+                    {weeklyDays < 7 && !weeklyMet && !(daily.skippedToday || []).includes(k) && (
+                      <button onClick={() => onSkipToday?.(k)} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', color: '#6B6457' }} title="Skip this subject today">
+                        Not today
+                      </button>
+                    )}
+                    {(daily.skippedToday || []).includes(k) && (
+                      <span className="mono tiny muted" style={{ padding: '3px 6px' }}>skipped today</span>
+                    )}
                     <button onClick={() => onFocusStart(k)} disabled={!!focus} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', color: isFocusing ? '#4A6741' : '#6B6457' }} title="Start a focus timer">
                       <Play size={11} />
                     </button>
@@ -3696,7 +3713,11 @@ function QtyStepper({ qty, setQty }: any) {
 function LogMealModal({ meals, settings, onSave, onClose }: any) {
   const [mode, setMode] = useState('preset');
   const [newPreset, setNewPreset] = useState({ name: '', protein: '', carbs: '', fat: '', calories: '', source: '' });
-  const [manual, setManual] = useState({ name: '', protein: '', carbs: '', fat: '', calories: '' });
+  const [manual, setManual] = useState<any>({ name: '', protein: '', carbs: '', fat: '', calories: '' });
+  const [manualMicros, setManualMicros] = useState<any>({});
+  const [showManualMicros, setShowManualMicros] = useState(false);
+  const [parts, setParts] = useState<any[]>([{ id: 'c0', name: '', servingLabel: '1 serving', protein: '', carbs: '', fat: '', calories: '', servings: '1' }]);
+  const [comboScanIdx, setComboScanIdx] = useState<number | null>(null);
   const [qty, setQty] = useState(1);
   const [scanState, setScanState] = useState<'idle'|'scanning'|'done'|'error'>('idle');
   const [scanError, setScanError] = useState('');
@@ -3795,7 +3816,31 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
   };
 
   const logManual = async () => {
-    await logItem({ name: manual.name || 'Manual entry', source: 'Manual', protein: parseFloat(manual.protein) || 0, carbs: parseFloat(manual.carbs) || 0, fat: parseFloat(manual.fat) || 0, calories: parseFloat(manual.calories) || 0 }, qty);
+    const micros: any = {};
+    for (const k of MICRO_KEYS) micros[k] = parseFloat(manualMicros[k]) || 0;
+    await logItem({ name: manual.name || 'Manual entry', source: 'Manual', protein: parseFloat(manual.protein) || 0, carbs: parseFloat(manual.carbs) || 0, fat: parseFloat(manual.fat) || 0, calories: parseFloat(manual.calories) || 0, ...micros }, qty);
+  };
+
+  const partSum = (p: any) => {
+    const s = Math.max(0.01, parseFloat(p.servings) || 1);
+    const out: any = { protein: (parseFloat(p.protein)||0)*s, carbs: (parseFloat(p.carbs)||0)*s, fat: (parseFloat(p.fat)||0)*s, calories: (parseFloat(p.calories)||0)*s };
+    for (const k of MICRO_KEYS) out[k] = (parseFloat(p[k])||0)*s;
+    return out;
+  };
+  const comboTotal = parts.reduce((acc: any, p: any) => {
+    const n = partSum(p);
+    acc.protein += n.protein; acc.carbs += n.carbs; acc.fat += n.fat; acc.calories += n.calories;
+    for (const k of MICRO_KEYS) acc[k] = (acc[k]||0) + n[k];
+    return acc;
+  }, { protein: 0, carbs: 0, fat: 0, calories: 0, ...Object.fromEntries(MICRO_KEYS.map(k => [k, 0])) });
+  const logCombo = async () => {
+    const name = parts.map((p: any) => p.name || 'item').join(' + ');
+    await logItem({ name, source: 'Combo', ...comboTotal }, 1);
+  };
+  const updatePart = (idx: number, patch: any) => setParts((ps: any[]) => ps.map((p, i) => i === idx ? { ...p, ...patch } : p));
+  const applyComboScan = (data: any, idx: number) => {
+    updatePart(idx, { name: data.name || parts[idx].name, protein: String(data.protein||0), carbs: String(data.carbs||0), fat: String(data.fat||0), calories: String(data.calories||0), servingLabel: data.serving || '1 serving', ...Object.fromEntries(MICRO_KEYS.map(k => [k, String(data[k]||0)])) });
+    setComboScanIdx(null); setReview(null); setScanState('idle');
   };
   const addPreset = async () => {
     const p = { id: 'p' + Date.now(), name: newPreset.name, protein: parseFloat(newPreset.protein) || 0, carbs: parseFloat(newPreset.carbs) || 0, fat: parseFloat(newPreset.fat) || 0, calories: parseFloat(newPreset.calories) || 0, source: newPreset.source };
@@ -3851,10 +3896,13 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
       <div className="row" style={{ gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
         <button className={`tap ${mode === 'preset' ? 'active' : ''}`} onClick={() => setMode('preset')}>Presets</button>
         <button className={`tap ${mode === 'type' ? 'active' : ''}`} onClick={() => { setMode('type'); setReview(null); }}>Type</button>
-        <button className={`tap ${mode === 'scan' ? 'active' : ''}`} style={{ color: '#3B5C6B', borderColor: '#3B5C6B' }} onClick={() => { setMode('scan'); setReview(null); setScanState('idle'); }}>
+        <button className={`tap ${mode === 'scan' ? 'active' : ''}`} style={{ color: '#3B5C6B', borderColor: '#3B5C6B' }} onClick={() => { setMode('scan'); setReview(null); setScanState('idle'); setComboScanIdx(null); }}>
           <Camera size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Scan
         </button>
         <button className={`tap ${mode === 'manual' ? 'active' : ''}`} onClick={() => setMode('manual')}>Manual</button>
+        <button className={`tap ${mode === 'combo' ? 'active' : ''}`} style={{ color: '#4A6741', borderColor: '#4A6741' }} onClick={() => { setMode('combo'); setReview(null); setComboScanIdx(null); }}>
+          <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Combo
+        </button>
         <button className={`tap ${mode === 'add' ? 'active' : ''}`} onClick={() => setMode('add')}>+ Save</button>
       </div>
 
@@ -3928,13 +3976,123 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
             <div style={{ flex: 1 }}><label>Protein (g)</label><input type="number" value={manual.protein} onChange={(e) => setManual({ ...manual, protein: e.target.value })} /></div>
             <div style={{ flex: 1 }}><label>Carbs (g)</label><input type="number" value={manual.carbs} onChange={(e) => setManual({ ...manual, carbs: e.target.value })} /></div>
           </div>
-          <div className="row" style={{ gap: 8, marginTop: 10, marginBottom: 12 }}>
+          <div className="row" style={{ gap: 8, marginTop: 10 }}>
             <div style={{ flex: 1 }}><label>Fat (g)</label><input type="number" value={manual.fat} onChange={(e) => setManual({ ...manual, fat: e.target.value })} /></div>
             <div style={{ flex: 1 }}><label>Calories</label><input type="number" value={manual.calories} onChange={(e) => setManual({ ...manual, calories: e.target.value })} /></div>
           </div>
+          <button className="tap" style={{ width: '100%', marginTop: 12, marginBottom: 4, fontSize: 11 }} onClick={() => setShowManualMicros(!showManualMicros)}>
+            <ChevronDown size={11} style={{ verticalAlign: 'middle', marginRight: 4, transform: showManualMicros ? 'rotate(180deg)' : 'none' }} />
+            Micros (optional)
+          </button>
+          {showManualMicros && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 10px' }}>
+                {MICRO_DEFS.map(d => (
+                  <div key={d.key}>
+                    <label style={{ fontSize: 10 }}>{d.label} ({d.unit})</label>
+                    <input type="number" value={manualMicros[d.key] || ''} onChange={(e) => setManualMicros({ ...manualMicros, [d.key]: e.target.value })} placeholder="0" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <QtyStepper qty={qty} setQty={setQty} />
           <button className="btn" style={{ width: '100%' }} onClick={logManual}>
             <Plus size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Add to today
           </button>
+        </>
+      )}
+
+      {mode === 'combo' && (
+        <>
+          {comboScanIdx !== null ? (
+            /* mini-scan flow for one ingredient */
+            <>
+              <div className="between" style={{ marginBottom: 10 }}>
+                <span className="small" style={{ fontWeight: 600 }}>Scan label for: {parts[comboScanIdx]?.name || `Ingredient ${comboScanIdx + 1}`}</span>
+                <button className="tap" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => { setComboScanIdx(null); setScanState('idle'); setReview(null); }}>Cancel</button>
+              </div>
+              <div className="card" style={{ padding: 14, marginBottom: 12, background: '#EEF2F8', border: '1px solid #C8D4E4', textAlign: 'center' }}>
+                <Camera size={24} color="#3B5C6B" style={{ marginBottom: 8 }} />
+                <p className="muted small" style={{ marginBottom: 10, lineHeight: 1.4 }}>Photo the nutrition label. Values will fill in automatically.</p>
+                {scanState === 'scanning' && <p className="mono small" style={{ color: '#3B5C6B' }}>Reading…</p>}
+                {scanState === 'error' && <p className="small" style={{ color: '#B8460E', marginBottom: 8 }}>{scanError}</p>}
+                {scanState !== 'scanning' && (
+                  <>
+                    <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+                      onChange={(e) => { const f = e.target.files?.[0]; if (f) { scanImage(f).then(() => {}); } }} />
+                    <button className="btn" style={{ width: '100%' }} onClick={() => fileRef.current?.click()}>
+                      <Camera size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} />Photo label
+                    </button>
+                  </>
+                )}
+              </div>
+              {scanState === 'done' && review && (
+                <div className="card" style={{ padding: 12, marginBottom: 12, background: '#F0F5ED', border: '1px solid #C8D9C0' }}>
+                  <div className="small" style={{ fontWeight: 600, marginBottom: 4 }}>{review.name}</div>
+                  {review.source && <div className="muted tiny" style={{ marginBottom: 6 }}>{review.source}</div>}
+                  <div className="mono tiny muted" style={{ marginBottom: 10 }}>{review.protein}p · {review.carbs}c · {review.fat}f · {review.calories}cal</div>
+                  <button className="btn" style={{ width: '100%' }} onClick={() => applyComboScan(review, comboScanIdx!)}>
+                    Use these values
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <p className="muted tiny" style={{ marginBottom: 12, lineHeight: 1.4 }}>Build a meal from multiple ingredients. Enter per-serving nutrition, set how many servings you're having.</p>
+              {parts.map((p: any, i: number) => {
+                const n = partSum(p);
+                return (
+                  <div key={p.id} className="card" style={{ padding: 12, marginBottom: 10, borderLeft: `3px solid #4A6741` }}>
+                    <div className="between" style={{ marginBottom: 8 }}>
+                      <input type="text" value={p.name} onChange={(e) => updatePart(i, { name: e.target.value })} placeholder={`Ingredient ${i + 1}`} style={{ flex: 1, marginRight: 8, marginBottom: 0 }} />
+                      <div className="row" style={{ gap: 6 }}>
+                        <button className="tap" style={{ fontSize: 11, padding: '3px 8px', color: '#3B5C6B' }} onClick={() => { setComboScanIdx(i); setScanState('idle'); setReview(null); }}>
+                          <Camera size={11} style={{ verticalAlign: 'middle', marginRight: 3 }} />Scan
+                        </button>
+                        {parts.length > 1 && (
+                          <button className="tap" style={{ fontSize: 11, padding: '3px 6px', color: '#B8460E' }} onClick={() => setParts((ps: any[]) => ps.filter((_: any, j: number) => j !== i))}>
+                            <Trash2 size={11} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="row" style={{ gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+                      <div style={{ flex: '1 1 70px' }}><label style={{ fontSize: 10 }}>Protein (g)</label><input type="number" value={p.protein} onChange={(e) => updatePart(i, { protein: e.target.value })} placeholder="0" /></div>
+                      <div style={{ flex: '1 1 70px' }}><label style={{ fontSize: 10 }}>Carbs (g)</label><input type="number" value={p.carbs} onChange={(e) => updatePart(i, { carbs: e.target.value })} placeholder="0" /></div>
+                      <div style={{ flex: '1 1 70px' }}><label style={{ fontSize: 10 }}>Fat (g)</label><input type="number" value={p.fat} onChange={(e) => updatePart(i, { fat: e.target.value })} placeholder="0" /></div>
+                      <div style={{ flex: '1 1 70px' }}><label style={{ fontSize: 10 }}>Cal</label><input type="number" value={p.calories} onChange={(e) => updatePart(i, { calories: e.target.value })} placeholder="0" /></div>
+                    </div>
+                    <div className="between">
+                      <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                        <label style={{ fontSize: 10, margin: 0, whiteSpace: 'nowrap' }}>Servings</label>
+                        <input type="number" value={p.servings} min="0.1" step="0.25" onChange={(e) => updatePart(i, { servings: e.target.value })} style={{ width: 60, margin: 0 }} />
+                        {p.servingLabel && <span className="mono tiny muted">({p.servingLabel})</span>}
+                      </div>
+                      {(parseFloat(p.protein)||parseFloat(p.calories)) > 0 && (
+                        <span className="mono tiny" style={{ color: '#4A6741' }}>
+                          → {Math.round(n.protein)}p · {Math.round(n.carbs)}c · {Math.round(n.fat)}f · {Math.round(n.calories)}cal
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              <button className="tap" style={{ width: '100%', marginBottom: 10 }} onClick={() => setParts((ps: any[]) => [...ps, { id: 'c' + Date.now(), name: '', servingLabel: '1 serving', protein: '', carbs: '', fat: '', calories: '', servings: '1' }])}>
+                <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Add ingredient
+              </button>
+              {parts.some((p: any) => parseFloat(p.calories) > 0 || parseFloat(p.protein) > 0) && (
+                <div className="card" style={{ padding: 12, marginBottom: 10, background: '#F0F5ED', border: '1px solid #C8D9C0' }}>
+                  <div className="small" style={{ fontWeight: 600, marginBottom: 4 }}>Total</div>
+                  <div className="mono small">{Math.round(comboTotal.protein)}p · {Math.round(comboTotal.carbs)}c · {Math.round(comboTotal.fat)}f · {Math.round(comboTotal.calories)} cal</div>
+                </div>
+              )}
+              <button className="btn" style={{ width: '100%' }} onClick={logCombo} disabled={!parts.some((p: any) => parseFloat(p.calories) > 0 || parseFloat(p.protein) > 0)}>
+                <Plus size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Log combo
+              </button>
+            </>
+          )}
         </>
       )}
 
@@ -7366,6 +7524,7 @@ export default function App() {
           scheduleStartTime: null,
           status: 'home',
           busyUntil: null,
+          skippedToday: [],
           completed: Object.fromEntries(Object.keys(merged.subjects).map((k: string) => [k, 0])),
           bonus: Object.fromEntries(Object.keys(merged.subjects).map((k: string) => [k, 0])),
         };
@@ -7863,6 +8022,10 @@ export default function App() {
             onCoach={() => setModal({ type: 'nutritionCoach' })}
             onRestDay={restDayChallenge}
             onManageChallenges={() => setModal({ type: 'customChallenges' })}
+            onSkipToday={async (k: string) => {
+              const cur = daily.skippedToday || [];
+              if (!cur.includes(k)) await saveDaily({ ...daily, skippedToday: [...cur, k] });
+            }}
           />
         )}
         {tab === 'body' && (
