@@ -1,44 +1,64 @@
-# [Project name]
+# Donjul
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Personal study / fitness / nutrition / spending tracker. Single-user offline-first PWA with optional cross-device sync.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/study-tracker run dev` — run the SPA
+- `pnpm --filter @workspace/api-server run dev` — run the API server (sync + food parsing)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
+- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
+- SPA: React + Vite (single big `App.tsx`, ~8.3k lines, intentionally monolithic for now)
 - API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
+- DB: PostgreSQL + Drizzle ORM (Zod via `zod/v4`, `drizzle-zod`)
 - API codegen: Orval (from OpenAPI spec)
 - Build: esbuild (CJS bundle)
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/study-tracker/src/App.tsx` — entire SPA (state, modals, screens)
+- `artifacts/study-tracker/src/ErrorBoundary.tsx` — React error UI + log to `localStorage:st:errorLog`
+- `artifacts/study-tracker/src/main.tsx` — boot shell with loading spinner + 8s hydrate timeout + global error listeners
+- `artifacts/study-tracker/src/sync.ts` — `hydrate()` / push / pull, talks to API server
+- `artifacts/api-server/src/routes/sync.ts` — sync endpoints
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- `App.tsx` is a single file by design; refactor only with strong justification.
+- `Infinity` is shadowed by a Lucide import — use `Number.POSITIVE_INFINITY`.
+- All meal operations must persist presets + entries in **one** `onSave` call (avoid stale-closure overwrites — see `logCombo`).
+- Boot path always renders a shell first (`main.tsx` → `BootShell`) so a hung `hydrate()` cannot produce a blank page.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Daily tracker with: schedule (subjects/tasks with catch-up), Body/Lift, Money (spending, debts, tax), Journal, Plan, History, Meals (Presets/Type/Manual/Combo/Scan/+Save), custom challenges/streaks, achievements, optional sync.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Sign-in must be obvious in Settings (prominent gradient card at top, not buried).
+- Combo logging auto-saves named ingredients as presets (dedupe by lowercase name).
+- Missed-day on a challenge → auto-pause + prompt Restart/End on next open. Rest days protect streaks.
+- Old dates in DayDetailModal must support scan/type/combo (use full logger button).
+- Fuel tab (MFP-style breakfast/lunch/dinner/snacks) is **deferred** — handle in a dedicated session.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Don't blank-screen the user. `main.tsx` boot shell + ErrorBoundary + 8s hydrate timeout exist for this reason; preserve them.
+- `tickChallengesForSubject` must short-circuit on `ch.paused`.
+- Modal child components should not call `onClose()` during render — use `useEffect`.
+- After major changes, run code review via `architect({ task, relevantFiles, includeGitDiff: true })`.
+
+## Session log
+
+- **2026-05-22**: ErrorBoundary + global error listeners; LogMealModal refactor (`targetDate` prop, Scan styling normalized); combo auto-saves ingredients as presets in a single save; DayDetailModal "Open full logger" button with return-to-day-detail; Settings prominent sign-in card; `pauseStaleChallenges` + `ChallengePausedModal` (Restart/End); boot shell in `main.tsx` with loading spinner, 8s hydrate timeout, and "Continue offline" recovery so the page is never blank.
+- **Deferred**: Fuel tab (MFP-style meal-time grouping + water + calorie-burn); preset-edit-before-log (qty/unit edit inline before adding).
 
 ## Pointers
 
