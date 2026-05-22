@@ -827,11 +827,30 @@ function tickChallengesForSubject(challenges: any[], subjectKey: string): any[] 
   const yd = new Date(today + 'T00:00:00'); yd.setDate(yd.getDate() - 1);
   const yesterday = `${yd.getFullYear()}-${pad(yd.getMonth()+1)}-${pad(yd.getDate())}`;
   return challenges.map((ch: any) => {
-    if (!ch.active || ch.subjectKey !== subjectKey || ch.lastActionDate === today) return ch;
-    const continuing = !ch.lastActionDate || ch.lastActionDate === yesterday;
+    if (!ch.active || ch.paused || ch.subjectKey !== subjectKey || ch.lastActionDate === today) return ch;
+    const continuing = !ch.lastActionDate || ch.lastActionDate === yesterday || (ch.restDates || []).includes(yesterday);
     const streak = continuing ? (ch.streak || 0) + 1 : 1;
     return { ...ch, streak, longestStreak: Math.max(ch.longestStreak || 0, streak), lastActionDate: today };
   });
+}
+
+// Pause any active challenge whose last action was before yesterday (and yesterday wasn't a rest day).
+// Returns { next, paused: [...] } where paused is the list of newly-paused challenges (for prompting).
+function pauseStaleChallenges(challenges: any[]): { next: any[]; paused: any[] } {
+  const today = todayStr();
+  const yd = new Date(today + 'T00:00:00'); yd.setDate(yd.getDate() - 1);
+  const yesterday = `${yd.getFullYear()}-${pad(yd.getMonth()+1)}-${pad(yd.getDate())}`;
+  const paused: any[] = [];
+  const next = challenges.map((ch: any) => {
+    if (!ch.active || ch.paused) return ch;
+    if (!ch.lastActionDate) return ch; // never started — don't pause
+    if (ch.lastActionDate === today || ch.lastActionDate === yesterday) return ch;
+    if ((ch.restDates || []).includes(yesterday)) return ch;
+    const updated = { ...ch, paused: true, pausedReason: 'missed', pausedAt: today, pausedStreak: ch.streak || 0 };
+    paused.push(updated);
+    return updated;
+  });
+  return { next, paused };
 }
 
 function fmtMoney(n: number, opts: { signed?: boolean } = {}): string {
@@ -2769,7 +2788,7 @@ function ModalShell({ title, onClose, children, icon = null, color = '#1A1A2E' }
 }
 
 function DayDetailModal({ date, settings, totals, workout, meals, body, activity, checkins, spending, customChallenges,
-  onSaveMeals, onSaveWorkout, onSaveTotals, onSaveCheckins, onClose }: any) {
+  onSaveMeals, onSaveWorkout, onSaveTotals, onSaveCheckins, onOpenMealLogger, onClose }: any) {
   const [subView, setSubView] = useState<null | 'workout' | 'meals' | 'study'>(null);
 
   const dayMeals = meals.log?.[date];
@@ -2862,6 +2881,15 @@ function DayDetailModal({ date, settings, totals, workout, meals, body, activity
         <button className="tap" style={{ marginBottom: 14, fontSize: 12 }} onClick={() => setSubView(null)}>
           <ChevronLeft size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Back to day
         </button>
+        {onOpenMealLogger && (
+          <button
+            className="btn"
+            style={{ width: '100%', marginBottom: 14, background: '#4A6741', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+            onClick={() => onOpenMealLogger(date)}
+          >
+            <Plus size={14} /> Open full logger (Scan / Type / Combo / Presets)
+          </button>
+        )}
         {dayEntries.length > 0 && (
           <div style={{ marginBottom: 16 }}>
             <div className="h2" style={{ marginBottom: 8 }}>Logged items</div>
@@ -3754,7 +3782,9 @@ function QtyStepper({ qty, setQty }: any) {
   );
 }
 
-function LogMealModal({ meals, settings, onSave, onClose }: any) {
+function LogMealModal({ meals, settings, onSave, onClose, targetDate }: any) {
+  const target = targetDate || todayStr();
+  const isToday = target === todayStr();
   const [mode, setMode] = useState('preset');
   const [newPreset, setNewPreset] = useState({ name: '', protein: '', carbs: '', fat: '', calories: '', source: '' });
   const [manual, setManual] = useState<any>({ name: '', protein: '', carbs: '', fat: '', calories: '' });
@@ -3770,8 +3800,7 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const barcodeRef = useRef<HTMLInputElement>(null);
-  const today = todayStr();
-  const todayEntries = meals.entries?.[today] || [];
+  const dayEntries = meals.entries?.[target] || [];
   const scaled = (m: any, q: number) => {
     const out: any = {
       protein: Math.round((m.protein || 0) * q),
@@ -3790,7 +3819,7 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
   const logItem = async (item: any, q = 1) => {
     const s = scaled(item, q);
     const name = q !== 1 ? `${item.name} ×${q}` : item.name;
-    await onSave(addMealEntry(meals, today, { name, source: item.source || '', qty: q, ...s }));
+    await onSave(addMealEntry(meals, target, { name, source: item.source || '', qty: q, ...s }));
     onClose();
   };
 
@@ -3807,7 +3836,7 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
     for (const k of MICRO_KEYS) base[k] = Number(item[k]) || 0;
     return base;
   };
-  const removeEntry = async (id: string) => { await onSave(removeMealEntry(meals, today, id)); };
+  const removeEntry = async (id: string) => { await onSave(removeMealEntry(meals, target, id)); };
 
   const scanImage = async (file: File) => {
     setScanState('scanning'); setReview(null); setScanError('');
@@ -3879,6 +3908,28 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
   }, { protein: 0, carbs: 0, fat: 0, calories: 0, ...Object.fromEntries(MICRO_KEYS.map(k => [k, 0])) });
   const logCombo = async () => {
     const name = parts.map((p: any) => p.name || 'item').join(' + ');
+    // Auto-save each named ingredient as its own preset (dedupe by name).
+    const existingNames = new Set((meals.presets || []).map((x: any) => (x.name || '').toLowerCase()));
+    const newPresets: any[] = [];
+    for (const p of parts) {
+      const nm = (p.name || '').trim();
+      if (!nm || existingNames.has(nm.toLowerCase())) continue;
+      existingNames.add(nm.toLowerCase());
+      const item: any = {
+        id: 'p' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+        name: nm,
+        source: p.servingLabel ? `Per ${p.servingLabel}` : '',
+        protein: parseFloat(p.protein) || 0,
+        carbs: parseFloat(p.carbs) || 0,
+        fat: parseFloat(p.fat) || 0,
+        calories: parseFloat(p.calories) || 0,
+      };
+      for (const k of MICRO_KEYS) item[k] = parseFloat(p[k]) || 0;
+      newPresets.push(item);
+    }
+    if (newPresets.length) {
+      await onSave({ ...meals, presets: [...(meals.presets || []), ...newPresets] });
+    }
     await logItem({ name, source: 'Combo', ...comboTotal }, 1);
   };
   const updatePart = (idx: number, patch: any) => setParts((ps: any[]) => ps.map((p, i) => i === idx ? { ...p, ...patch } : p));
@@ -3927,7 +3978,7 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
         );
       })()}
       <button className="btn" style={{ width: '100%', marginBottom: 6 }} onClick={() => logItem(review, qty)}>
-        <Plus size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Log to today
+        <Plus size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> {isToday ? 'Log to today' : `Log to ${fmtDate(target)}`}
       </button>
       <button className="tap" style={{ width: '100%' }} onClick={async () => { await onSave({ ...meals, presets: [...meals.presets, { id: 'p' + Date.now(), ...pickFood(review) }] }); setReview(null); setMode('preset'); }}>
         Save as preset
@@ -3936,16 +3987,14 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
   );
 
   return (
-    <ModalShell title="Log meal" onClose={onClose} icon={<Apple size={18} color="#4A6741" />}>
+    <ModalShell title={isToday ? 'Log meal' : `Log meal · ${fmtDate(target)}`} onClose={onClose} icon={<Apple size={18} color="#4A6741" />}>
       <div className="row" style={{ gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
         <button className={`tap ${mode === 'preset' ? 'active' : ''}`} onClick={() => setMode('preset')}>Presets</button>
         <button className={`tap ${mode === 'type' ? 'active' : ''}`} onClick={() => { setMode('type'); setReview(null); }}>Type</button>
-        <button className={`tap ${mode === 'scan' ? 'active' : ''}`} style={{ color: '#3B5C6B', borderColor: '#3B5C6B' }} onClick={() => { setMode('scan'); setReview(null); setScanState('idle'); setComboScanIdx(null); }}>
-          <Camera size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Scan
-        </button>
         <button className={`tap ${mode === 'manual' ? 'active' : ''}`} onClick={() => setMode('manual')}>Manual</button>
-        <button className={`tap ${mode === 'combo' ? 'active' : ''}`} style={{ color: '#4A6741', borderColor: '#4A6741' }} onClick={() => { setMode('combo'); setReview(null); setComboScanIdx(null); }}>
-          <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Combo
+        <button className={`tap ${mode === 'combo' ? 'active' : ''}`} onClick={() => { setMode('combo'); setReview(null); setComboScanIdx(null); }}>Combo</button>
+        <button className={`tap ${mode === 'scan' ? 'active' : ''}`} onClick={() => { setMode('scan'); setReview(null); setScanState('idle'); setComboScanIdx(null); }}>
+          <Camera size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Scan
         </button>
         <button className={`tap ${mode === 'add' ? 'active' : ''}`} onClick={() => setMode('add')}>+ Save</button>
       </div>
@@ -4042,7 +4091,7 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
           )}
           <QtyStepper qty={qty} setQty={setQty} />
           <button className="btn" style={{ width: '100%' }} onClick={logManual}>
-            <Plus size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Add to today
+            <Plus size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> {isToday ? 'Add to today' : `Add to ${fmtDate(target)}`}
           </button>
         </>
       )}
@@ -4160,10 +4209,10 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
         </>
       )}
 
-      {todayEntries.length > 0 && (
+      {dayEntries.length > 0 && (
         <div style={{ marginTop: 16, borderTop: '1px solid #E4DCC8', paddingTop: 12 }}>
-          <div className="h3" style={{ marginBottom: 8 }}>Today's meals</div>
-          {todayEntries.map((e: any) => (
+          <div className="h3" style={{ marginBottom: 8 }}>{isToday ? "Today's meals" : `Meals on ${fmtDate(target)}`}</div>
+          {dayEntries.map((e: any) => (
             <div key={e.id} className="between" style={{ padding: '6px 0' }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="small">{e.name}</div>
@@ -4439,6 +4488,55 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
 
   return (
     <ModalShell title="Settings" onClose={onClose}>
+      {!getStoredUsername() ? (
+        <button
+          onClick={onSyncTransfer}
+          style={{
+            width: '100%',
+            marginBottom: 18,
+            padding: '14px 16px',
+            background: 'linear-gradient(135deg, #8E4585, #B8460E)',
+            color: 'white',
+            border: 'none',
+            borderRadius: 12,
+            textAlign: 'left',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            boxShadow: '0 2px 8px rgba(142,69,133,0.15)',
+          }}
+        >
+          <Users size={22} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 2 }}>Sign in to sync</div>
+            <div style={{ fontSize: 12, opacity: 0.9, lineHeight: 1.4 }}>
+              Create an account or sign in to back up and sync your data across devices.
+            </div>
+          </div>
+          <ChevronRight size={18} />
+        </button>
+      ) : (
+        <div
+          style={{
+            marginBottom: 18,
+            padding: '12px 14px',
+            background: '#F0E8F0',
+            border: '1px solid #D4B5CB',
+            borderRadius: 10,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+          }}
+        >
+          <Users size={16} color="#8E4585" />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="small" style={{ fontWeight: 600, color: '#8E4585' }}>Signed in as {getStoredUsername()}</div>
+            <div className="muted tiny">Data syncs across devices.</div>
+          </div>
+          <button className="tap" style={{ fontSize: 11, padding: '4px 10px' }} onClick={onSyncTransfer}>Manage</button>
+        </div>
+      )}
       <div className="h2" style={{ marginBottom: 8 }}>Schedule</div>
       <div style={{ marginBottom: 12 }}>
         <label>Default wake</label>
@@ -5946,6 +6044,56 @@ function TaxModal({ tax, spending, onSave, onClose }: any) {
           <button className="btn" style={{ width: '100%', marginTop: 12 }} onClick={saveAll}><Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save</button>
         </>
       )}
+    </ModalShell>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+// CHALLENGE PAUSED — prompt after a missed day
+// ════════════════════════════════════════════════════════════════════════════════
+function ChallengePausedModal({ challenges, settings, pausedIds, onSave, onClose }: any) {
+  const items = challenges.filter((c: any) => pausedIds.includes(c.id));
+  if (!items.length) { onClose(); return null; }
+  const subjectName = (k: string) => settings?.subjects?.[k]?.name || k;
+  const restart = async (id: string) => {
+    const next = challenges.map((c: any) => c.id === id
+      ? { ...c, paused: false, pausedReason: null, pausedAt: null, streak: 0, lastActionDate: null, restartedAt: todayStr() }
+      : c);
+    await onSave(next);
+    toast('Challenge restarted — back to day 0.');
+  };
+  const end = async (id: string) => {
+    if (!confirm('End this challenge for good? Your streak history is kept but it stops counting.')) return;
+    const next = challenges.map((c: any) => c.id === id
+      ? { ...c, paused: false, active: false, endedAt: todayStr(), endReason: 'missed' }
+      : c);
+    await onSave(next);
+    toast('Challenge ended.');
+  };
+  return (
+    <ModalShell title="Missed a day" onClose={onClose} icon={<Trophy size={18} color="#C8932E" />}>
+      <p className="small muted" style={{ marginBottom: 14, lineHeight: 1.5 }}>
+        You missed a day on {items.length === 1 ? 'this challenge' : 'these challenges'}. Pick what to do for each:
+      </p>
+      {items.map((c: any) => (
+        <div key={c.id} className="card" style={{ padding: 14, marginBottom: 10, borderLeft: '3px solid #C8932E' }}>
+          <div className="small" style={{ fontWeight: 600, marginBottom: 2 }}>{c.label || `${subjectName(c.subjectKey)} streak`}</div>
+          <div className="mono tiny muted" style={{ marginBottom: 10 }}>
+            Last action: {c.lastActionDate || '—'} · Streak: {c.pausedStreak ?? c.streak ?? 0} day{(c.pausedStreak ?? c.streak ?? 0) === 1 ? '' : 's'}
+          </div>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn" style={{ flex: 1, background: '#4A6741' }} onClick={() => restart(c.id)}>
+              <RotateCcw size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} />Restart
+            </button>
+            <button className="tap" style={{ flex: 1, color: '#B8460E', borderColor: '#B8460E' }} onClick={() => end(c.id)}>
+              <X size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} />End
+            </button>
+          </div>
+        </div>
+      ))}
+      <p className="muted tiny" style={{ marginTop: 8, lineHeight: 1.5 }}>
+        Tip: use <strong>Rest day</strong> on the Today tab to protect your streak on planned off-days.
+      </p>
     </ModalShell>
   );
 }
@@ -7611,9 +7759,16 @@ export default function App() {
       setActivity(ac);
       const txData = migrateTax(await safeGet(K.tax, DEFAULT_TAX));
       const cc = await safeGet(K.customChallenges, []);
+      // Pause any challenge whose last action was before yesterday (and yesterday wasn't a rest day).
+      const { next: ccNext, paused: ccPaused } = pauseStaleChallenges(cc);
+      if (ccPaused.length) await safeSet(K.customChallenges, ccNext);
       setSpending(sp);
       setTax(txData);
-      setCustomChallenges(cc);
+      setCustomChallenges(ccNext);
+      if (ccPaused.length) {
+        // Defer modal so the rest of the app mounts first.
+        setTimeout(() => setModal({ type: 'challengePaused', items: ccPaused.map((c: any) => c.id) }), 400);
+      }
       setLoaded(true);
     })();
   }, []);
@@ -8160,10 +8315,13 @@ export default function App() {
       {modal?.type === 'logWorkout' && <LogWorkoutModal dayIdx={modal.dayIdx} workout={workout} onSave={saveWorkout} onClose={() => setModal(null)} />}
       {modal?.type === 'editSplit' && <EditSplitModal workout={workout} mode={modal.splitMode || 'gym'} onSave={saveWorkout} onClose={() => setModal(null)} />}
       {modal?.type === 'challenge' && <ChallengeModal settings={settings} challengeHistory={challengeHistory} onSave={saveSettings} onSaveHistory={saveChallengeHistory} onClose={() => setModal(null)} />}
-      {modal?.type === 'logMeal' && <LogMealModal meals={meals} settings={settings} onSave={saveMeals} onClose={() => setModal(null)} />}
+      {modal?.type === 'logMeal' && <LogMealModal meals={meals} settings={settings} onSave={saveMeals} targetDate={modal.targetDate} onClose={() => {
+        // If we came from a day-detail view, return to it instead of closing everything.
+        if (modal.returnTo) setModal(modal.returnTo); else setModal(null);
+      }} />}
       {modal?.type === 'nutritionCoach' && <NutritionCoachModal settings={settings} meals={meals} body={body} onLogItem={async (item: any) => { await saveMeals(addMealEntry(meals, todayStr(), { qty: 1, ...item })); toast(`Logged ${item.name}`); }} onClose={() => setModal(null)} />}
       {modal?.type === 'planDay' && <PlanDayModal date={modal.date} plans={plans} onSave={savePlans} onClose={() => setModal(null)} />}
-      {modal?.type === 'dayDetail' && <DayDetailModal date={modal.date} settings={settings} totals={totals} workout={workout} meals={meals} body={body} activity={activity} checkins={checkins} spending={spending} customChallenges={customChallenges} onSaveMeals={saveMeals} onSaveWorkout={saveWorkout} onSaveTotals={saveTotals} onSaveCheckins={saveCheckins} onClose={() => setModal(null)} />}
+      {modal?.type === 'dayDetail' && <DayDetailModal date={modal.date} settings={settings} totals={totals} workout={workout} meals={meals} body={body} activity={activity} checkins={checkins} spending={spending} customChallenges={customChallenges} onSaveMeals={saveMeals} onSaveWorkout={saveWorkout} onSaveTotals={saveTotals} onSaveCheckins={saveCheckins} onOpenMealLogger={(d: string) => setModal({ type: 'logMeal', targetDate: d, returnTo: { type: 'dayDetail', date: d } })} onClose={() => setModal(null)} />}
       {modal?.type === 'addTransaction' && <AddTransactionModal entry={modal.entry} defaultType={modal.defaultType} spending={spending} onSave={upsertTransaction} onDelete={deleteTransaction} onClose={() => setModal(null)} />}
       {modal?.type === 'moneyGoals' && <MoneyGoalsModal spending={spending} onSave={saveSpending} onClose={() => setModal(null)} />}
       {modal?.type === 'moneyCategories' && <MoneyCategoriesModal spending={spending} onSave={saveSpending} onClose={() => setModal(null)} />}
@@ -8174,6 +8332,7 @@ export default function App() {
       {modal?.type === 'incomePlanner' && <IncomePlannerModal spending={spending} onSave={saveSpending} onClose={() => setModal(null)} />}
       {modal?.type === 'taxModal' && <TaxModal tax={tax} spending={spending} onSave={saveTax} onClose={() => setModal(null)} />}
       {modal?.type === 'customChallenges' && <CustomChallengesModal challenges={customChallenges} settings={settings} onSave={saveCustomChallenges} onClose={() => setModal(null)} />}
+      {modal?.type === 'challengePaused' && <ChallengePausedModal challenges={customChallenges} settings={settings} pausedIds={modal.items} onSave={saveCustomChallenges} onClose={() => setModal(null)} />}
       {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, journal, challengeHistory, busyPresets, weeklyAck, spending, tax, customChallenges }} onImport={async (d: any) => {
         if (d.spending) { const sp = migrateSpending(d.spending); setSpending(sp); await safeSet(K.spending, sp); }
         if (d.settings) { setSettings(d.settings); await safeSet(K.settings, d.settings); }
