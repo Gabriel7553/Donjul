@@ -506,6 +506,21 @@ const HOME_WORKOUT_SPLIT = [
 // ════════════════════════════════════════════════════════════════════════════════
 // PROGRESS MATH
 // ════════════════════════════════════════════════════════════════════════════════
+function getRequiredDailyMins(k: string, settings: any, totals: any, daily: any): number {
+  const s = settings.subjects[k];
+  if (!s || !s.deadline) return s?.target || 0;
+  const totalDone = (totals[k] || 0) + (daily?.completed[k] || 0);
+  const target = s.courseHours ? s.courseHours * 60 : targetTotalByDeadline(k, settings);
+  const remaining = Math.max(0, target - totalDone);
+  const daysLeft = Math.max(1, diffDays(s.deadline, todayStr()));
+  return Math.ceil(remaining / daysLeft);
+}
+
+function daysLeftInWeek(): number {
+  const d = new Date(todayStr() + 'T00:00:00');
+  return 7 - d.getDay(); // days from today through Saturday (inclusive)
+}
+
 function expectedTotal(subjectKey: string, settings: any) {
   const s = settings.subjects[subjectKey];
   if (!s) return 0;
@@ -1337,35 +1352,53 @@ function Schedule({ settings, daily, onLog, subjectKeys, nowMins, checkins }: an
 }
 
 function CatchUpBanner({ settings, totals, daily, subjectKeys }: any) {
-  const behind = (subjectKeys as string[]).flatMap((k: string) => {
+  const today = todayStr();
+  const weekDaysLeft = daysLeftInWeek();
+
+  const items = (subjectKeys as string[]).flatMap((k: string) => {
     const s = settings.subjects[k];
     if (!s || s.archived || s.deletedAt || s.trackingMode === 'checkoff' || !s.deadline) return [];
     const totalDone = (totals[k] || 0) + (daily.completed[k] || 0);
     const deficit = expectedTotal(k, settings) - totalDone;
-    if (deficit < 5) return [];
-    return [{ key: k, name: s.name, accent: s.accent, mins: Math.round(deficit) }];
+    const daysLeft = Math.max(1, diffDays(s.deadline, today));
+    const reqDaily = getRequiredDailyMins(k, settings, totals, daily);
+    const originalTarget = s.target || 0;
+    const extraPerDay = Math.max(0, reqDaily - originalTarget);
+    // Show entry when meaningfully behind OR required daily is higher than original
+    if (deficit < 5 && extraPerDay < 3) return [];
+    // Spread: extra mins/day this week to absorb the deficit
+    const weeklyExtra = weekDaysLeft > 0 ? Math.ceil(deficit / weekDaysLeft) : 0;
+    return [{ key: k, name: s.name, accent: s.accent, reqDaily, originalTarget, extraPerDay, daysLeft, deficit: Math.round(deficit), weeklyExtra, deadline: s.deadline }];
   });
-  if (behind.length === 0) return null;
+
+  if (items.length === 0) return null;
   return (
     <div className="card" style={{ marginBottom: 14, borderLeft: '3px solid #B8460E', padding: '12px 14px' }}>
-      <div className="row" style={{ gap: 6, marginBottom: 8 }}>
+      <div className="row" style={{ gap: 6, marginBottom: 10 }}>
         <AlertTriangle size={14} color="#B8460E" />
-        <span className="h2" style={{ color: '#B8460E' }}>Catch-up needed</span>
+        <span className="h2" style={{ color: '#B8460E' }}>Daily targets (auto-adjusted)</span>
       </div>
-      {behind.map((b: any) => {
-        const h = Math.floor(b.mins / 60), m = b.mins % 60;
-        const fmt = h > 0 ? `${h}h${m > 0 ? ` ${m}m` : ''}` : `${m}m`;
-        return (
-          <div key={b.key} className="between" style={{ padding: '3px 0' }}>
+      {items.map((b: any) => (
+        <div key={b.key} style={{ marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #F0EAD8' }}>
+          <div className="between" style={{ marginBottom: 4 }}>
             <div className="row" style={{ gap: 6 }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: b.accent, flexShrink: 0 }} />
-              <span className="small">{b.name}</span>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: b.accent, flexShrink: 0, marginTop: 1 }} />
+              <span className="small" style={{ fontWeight: 600 }}>{b.name}</span>
             </div>
-            <span className="mono small" style={{ color: '#B8460E', fontWeight: 600 }}>↑ {fmt}</span>
+            <span className="mono small" style={{ color: '#B8460E', fontWeight: 700 }}>{b.reqDaily}m/day</span>
           </div>
-        );
-      })}
-      <p className="muted tiny" style={{ marginTop: 6, lineHeight: 1.4 }}>Log extra time today to get back on track.</p>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            {b.extraPerDay > 0 && (
+              <span className="mono tiny" style={{ color: '#B8460E' }}>↑ +{b.extraPerDay}m vs plan</span>
+            )}
+            {b.weeklyExtra > 0 && weekDaysLeft > 1 && (
+              <span className="mono tiny muted">· spread +{b.weeklyExtra}m/day × {weekDaysLeft} days this week</span>
+            )}
+            <span className="mono tiny muted">· {b.daysLeft}d to {fmtShortDate(b.deadline)}</span>
+          </div>
+        </div>
+      ))}
+      <p className="muted tiny" style={{ lineHeight: 1.4 }}>Required time updates daily as you log progress.</p>
     </div>
   );
 }
@@ -1443,15 +1476,25 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, c
                   <div className="progress-fill" style={{ width: `${pct}%`, background: subj.accent }} />
                   <div className="progress-marker" style={{ left: `${expectedPct}%` }} />
                 </div>
-                {diff < 0 && (() => {
-                  const mins = Math.round(Math.abs(diff));
-                  const h = Math.floor(mins / 60);
-                  const m = mins % 60;
-                  const fmt = h > 0 ? `${h}h${m > 0 ? ` ${m}m` : ''}` : `${m}m`;
+                {(() => {
+                  const reqDaily = getRequiredDailyMins(k, settings, totals, daily);
+                  const daysLeft = subj.deadline ? Math.max(1, diffDays(subj.deadline, todayStr())) : null;
+                  const isBehind = diff < 0;
+                  const extraPerDay = Math.max(0, reqDaily - (subj.target || 0));
                   return (
-                    <div className="row" style={{ gap: 5, marginTop: 4 }}>
-                      <AlertTriangle size={11} color="#B8460E" />
-                      <span className="mono tiny" style={{ color: '#B8460E' }}>Make up {fmt} to get back on pace</span>
+                    <div className="between" style={{ marginTop: 5 }}>
+                      <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                        {subj.courseHours && (
+                          <span className="mono tiny muted">
+                            {(() => { const th = Math.floor(totalDone / 60); const tm = totalDone % 60; return th > 0 ? `${th}h${tm > 0 ? ` ${tm}m` : ''}` : `${tm}m`; })()} / {subj.courseHours}h
+                          </span>
+                        )}
+                        {daysLeft && <span className="mono tiny muted">· {daysLeft}d left</span>}
+                      </div>
+                      <span className="mono tiny" style={{ color: isBehind ? '#B8460E' : '#4A6741', fontWeight: 600 }}>
+                        {isBehind && <AlertTriangle size={10} style={{ verticalAlign: 'middle', marginRight: 3 }} />}
+                        {reqDaily}m/day{extraPerDay > 0 ? ` (+${extraPerDay})` : ''}
+                      </span>
                     </div>
                   );
                 })()}
