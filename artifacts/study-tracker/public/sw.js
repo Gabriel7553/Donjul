@@ -1,4 +1,5 @@
-const CACHE = 'donjul-v1';
+// Bump CACHE version on every release to invalidate stale clients (prevents blank-screen-after-deploy).
+const CACHE = 'donjul-v3-20260522';
 const PRECACHE = ['/'];
 
 self.addEventListener('install', (e) => {
@@ -13,6 +14,13 @@ self.addEventListener('activate', (e) => {
       Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
+});
+
+// Allow the app to force-clear all caches (used for blank-screen recovery).
+self.addEventListener('message', (e) => {
+  if (e.data === 'clear-caches') {
+    e.waitUntil(caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k)))));
+  }
 });
 
 self.addEventListener('fetch', (e) => {

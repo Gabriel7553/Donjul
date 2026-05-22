@@ -158,6 +158,33 @@ if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register("/sw.js")
+      .then((reg) => {
+        // Check for updates every load + every 60s; if a new SW takes control, reload once to pick up new bundle.
+        reg.update().catch(() => {});
+        setInterval(() => reg.update().catch(() => {}), 60000);
+      })
       .catch(() => {/* SW unavailable in dev is fine */});
+    let reloadedForUpdate = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (reloadedForUpdate) return;
+      reloadedForUpdate = true;
+      window.location.reload();
+    });
   });
 }
+
+// Expose a global recovery helper users can call from the console if anything ever blanks: `__donjulReset()`.
+(window as any).__donjulReset = async () => {
+  try {
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } finally {
+    window.location.reload();
+  }
+};

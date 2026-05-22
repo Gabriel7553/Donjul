@@ -57,8 +57,12 @@ Daily tracker with: schedule (subjects/tasks with catch-up), Body/Lift, Money (s
 
 ## Session log
 
-- **2026-05-22**: ErrorBoundary + global error listeners; LogMealModal refactor (`targetDate` prop, Scan styling normalized); combo auto-saves ingredients as presets in a single save; DayDetailModal "Open full logger" button with return-to-day-detail; Settings prominent sign-in card; `pauseStaleChallenges` + `ChallengePausedModal` (Restart/End); boot shell in `main.tsx` with loading spinner, 8s hydrate timeout, and "Continue offline" recovery so the page is never blank.
+- **2026-05-22**: ErrorBoundary + global error listeners; LogMealModal refactor (`targetDate` prop, Scan styling normalized); combo auto-saves ingredients as presets in a single save; DayDetailModal "Open full logger" button with return-to-day-detail; Settings prominent sign-in card; `pauseStaleChallenges` + `ChallengePausedModal` (Restart/End); boot shell in `main.tsx` with loading spinner, 8s hydrate timeout, and "Continue offline" recovery so the page is never blank. Service worker cache version bumped to `donjul-v3-20260522`; SW auto-update + reload-on-controllerchange added so users always get the latest bundle; `window.__donjulReset()` console helper unregisters SW + clears caches for hard recovery.
 - **Deferred**: Fuel tab (MFP-style meal-time grouping + water + calorie-burn); preset-edit-before-log (qty/unit edit inline before adding).
+
+## Cache / blank-screen recovery
+
+Whenever shipping changes that touch `App.tsx`, `main.tsx`, or assets, bump `CACHE` in `artifacts/study-tracker/public/sw.js` (e.g. `donjul-v3-…` → `donjul-v4-…`). If a user reports a blank page, ask them to: (1) hard-refresh (Ctrl/Cmd+Shift+R), or (2) open devtools console and run `__donjulReset()`.
 
 ## Pointers
 
