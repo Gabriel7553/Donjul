@@ -4063,15 +4063,23 @@ function LogMealModal({ meals, settings, onSave, onClose, targetDate, mealType }
 
   return (
     <ModalShell title={isToday ? 'Log meal' : `Log meal · ${fmtDate(target)}`} onClose={onClose} icon={<Apple size={18} color="#4A6741" />}>
-      <div className="row" style={{ gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+      <div className="row" style={{ gap: 6, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
         <button className={`tap ${mode === 'preset' ? 'active' : ''}`} onClick={() => setMode('preset')}>Presets</button>
         <button className={`tap ${mode === 'type' ? 'active' : ''}`} onClick={() => { setMode('type'); setReview(null); }}>Type</button>
         <button className={`tap ${mode === 'manual' ? 'active' : ''}`} onClick={() => setMode('manual')}>Manual</button>
         <button className={`tap ${mode === 'combo' ? 'active' : ''}`} onClick={() => { setMode('combo'); setReview(null); setComboScanIdx(null); }}>Combo</button>
-        <button className={`tap ${mode === 'scan' ? 'active' : ''}`} onClick={() => { setMode('scan'); setReview(null); setScanState('idle'); setComboScanIdx(null); }}>
-          <Camera size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Scan
-        </button>
         <button className={`tap ${mode === 'add' ? 'active' : ''}`} onClick={() => setMode('add')}>+ Save</button>
+        <button
+          onClick={() => { setMode('scan'); setReview(null); setScanState('idle'); setComboScanIdx(null); }}
+          style={{
+            marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 5,
+            padding: '9px 16px', borderRadius: 8, border: '1px solid #8E4585', cursor: 'pointer',
+            fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
+            background: mode === 'scan' ? '#6F3468' : '#8E4585', color: '#F5F0E6',
+          }}
+        >
+          <Camera size={15} />Scan
+        </button>
       </div>
 
       {mode === 'type' && (
@@ -4743,6 +4751,46 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
       ) : (
         <p className="muted tiny" style={{ marginBottom: 16, lineHeight: 1.4 }}>Add a body weight entry to auto-calculate macro + micro targets from your goal.</p>
       )}
+
+      <div className="h2" style={{ marginBottom: 8, marginTop: 8 }}>Calories &amp; water</div>
+      <label>Calorie goal</label>
+      <div className="row" style={{ gap: 6, marginBottom: 10 }}>
+        <button className={`tap${(draft.calorieGoalMode || 'manual') === 'manual' ? ' active' : ''}`} style={{ flex: 1 }} onClick={() => update({ calorieGoalMode: 'manual' })}>Manual</button>
+        <button className={`tap${draft.calorieGoalMode === 'tdee' ? ' active' : ''}`} style={{ flex: 1 }} onClick={() => update({ calorieGoalMode: 'tdee' })}>Auto (TDEE)</button>
+      </div>
+      {draft.calorieGoalMode === 'tdee' && (() => {
+        const fp = draft.fitnessProfile || {};
+        const tdee = computeTDEE(draft, body);
+        const setFp = (patch: any) => update({ fitnessProfile: { ...fp, ...patch } });
+        return (
+          <div style={{ marginBottom: 10 }}>
+            <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+              <div style={{ flex: 1 }}><label>Height (in)</label><input type="number" inputMode="decimal" value={fp.heightIn ?? ''} onChange={(e) => setFp({ heightIn: e.target.value === '' ? null : parseFloat(e.target.value) })} /></div>
+              <div style={{ flex: 1 }}><label>Age</label><input type="number" inputMode="numeric" value={fp.age ?? ''} onChange={(e) => setFp({ age: e.target.value === '' ? null : parseInt(e.target.value) })} /></div>
+            </div>
+            <label>Sex (for metabolic estimate)</label>
+            <div className="row" style={{ gap: 6, marginBottom: 8 }}>
+              <button className={`tap${fp.sex === 'male' ? ' active' : ''}`} style={{ flex: 1 }} onClick={() => setFp({ sex: 'male' })}>Male</button>
+              <button className={`tap${fp.sex === 'female' ? ' active' : ''}`} style={{ flex: 1 }} onClick={() => setFp({ sex: 'female' })}>Female</button>
+            </div>
+            <label>Activity level</label>
+            <select value={fp.activityLevel || 'moderate'} onChange={(e) => setFp({ activityLevel: e.target.value })} style={{ marginBottom: 8, width: '100%' }}>
+              <option value="sedentary">Sedentary (little exercise)</option>
+              <option value="light">Light (1–3 days/wk)</option>
+              <option value="moderate">Moderate (3–5 days/wk)</option>
+              <option value="active">Active (6–7 days/wk)</option>
+              <option value="veryActive">Very active (physical job)</option>
+            </select>
+            <p className="muted tiny" style={{ marginBottom: 4, lineHeight: 1.4 }}>
+              {tdee != null
+                ? `Estimated TDEE ≈ ${tdee} cal/day. Daily goal ≈ ${calorieGoal(draft, body)} cal (adjusted for your weight goal).`
+                : 'Add height, age, sex, and a body weight (Body tab) to estimate your TDEE.'}
+            </p>
+          </div>
+        );
+      })()}
+      <label>Water goal (fl oz)</label>
+      <input type="number" inputMode="numeric" value={draft.waterGoalOz ?? 64} onChange={(e) => update({ waterGoalOz: parseInt(e.target.value) || 0 })} style={{ marginBottom: 16 }} />
 
       <div className="between" style={{ marginBottom: 8, marginTop: 8 }}>
         <div className="h2">Micros (vitamins &amp; minerals)</div>
