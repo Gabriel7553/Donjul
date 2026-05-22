@@ -6,7 +6,8 @@ import {
   Download, Upload, History, Repeat, Zap, Play, AlertTriangle, RotateCcw, MapPin, Building2, TreePine,
   Camera, BookMarked, TrendingUp as Journal, DollarSign, ShoppingCart, Briefcase, Car, ChevronUp, Trophy, Archive, Infinity, Mic,
   Wallet, PiggyBank, CreditCard, PieChart, Receipt, Pencil, ArrowUpRight, ArrowDownRight, Sparkles,
-  ArrowRightLeft, Users, Banknote, BadgeAlert, CircleDollarSign, HandCoins, GripVertical
+  ArrowRightLeft, Users, Banknote, BadgeAlert, CircleDollarSign, HandCoins, GripVertical,
+  Droplets, Utensils, Bike
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
@@ -52,10 +53,12 @@ const K = {
   spending: 'st:spending',
   tax: 'st:tax',
   customChallenges: 'st:customChallenges',
+  water: 'st:water',
+  exercise: 'st:exercise',
 };
 
 // Keys included in a full data snapshot (for auto-backup + export/restore).
-const BACKUP_KEYS = ['settings', 'totals', 'body', 'workout', 'meals', 'plans', 'streaks', 'journal', 'challengeHistory', 'busyPresets', 'activity', 'checkins', 'spending', 'tax', 'customChallenges'] as const;
+const BACKUP_KEYS = ['settings', 'totals', 'body', 'workout', 'meals', 'plans', 'streaks', 'journal', 'challengeHistory', 'busyPresets', 'activity', 'checkins', 'spending', 'tax', 'customChallenges', 'water', 'exercise'] as const;
 const MAX_BACKUPS = 10;
 
 async function safeGet(key: string, fallback: any): Promise<any> {
@@ -337,6 +340,70 @@ function suggestMicros(latestBody: any, bodyGoals: any) {
   return out;
 }
 
+// ════════════════════════════════════════════════════════════════════════════════
+// CALORIE BALANCE — TDEE, daily calorie goal, and exercise burn (MyFitnessPal-style)
+// ════════════════════════════════════════════════════════════════════════════════
+const lbToKg = (lb: number) => lb * 0.45359237;
+const inToCm = (inches: number) => inches * 2.54;
+
+// Latest logged bodyweight in lb (converts if the user stores kg).
+function latestWeightLb(body: any, settings: any): number | null {
+  const e = body?.entries?.[body.entries.length - 1];
+  const w = Number(e?.weight);
+  if (!w) return null;
+  return settings?.weightUnit === 'kg' ? w / 0.45359237 : w;
+}
+
+// Mifflin–St Jeor (metric). Returns null if any input is missing.
+function computeBMR(weightLb: number | null, heightIn: number | null, age: number | null, sex: string | null): number | null {
+  if (!weightLb || !heightIn || !age || !sex) return null;
+  const base = 10 * lbToKg(weightLb) + 6.25 * inToCm(heightIn) - 5 * age;
+  return Math.round(sex === 'female' ? base - 161 : base + 5);
+}
+
+function activityFactor(level: string | null): number {
+  switch (level) {
+    case 'sedentary': return 1.2;
+    case 'light': return 1.375;
+    case 'active': return 1.725;
+    case 'veryActive': return 1.9;
+    default: return 1.55; // moderate
+  }
+}
+
+function computeTDEE(settings: any, body: any): number | null {
+  const p = settings?.fitnessProfile || {};
+  const bmr = computeBMR(latestWeightLb(body, settings), Number(p.heightIn) || null, Number(p.age) || null, p.sex || null);
+  return bmr == null ? null : Math.round(bmr * activityFactor(p.activityLevel));
+}
+
+// Daily calorie goal. In 'tdee' mode (with a complete profile) we adjust for the
+// weight-goal direction; otherwise we fall back to the manual macro calorie target.
+function calorieGoal(settings: any, body: any): number {
+  if (settings?.calorieGoalMode === 'tdee') {
+    const tdee = computeTDEE(settings, body);
+    if (tdee != null) {
+      const dir = settings?.bodyGoals?.weight?.direction || 'maintain';
+      const delta = dir === 'down' ? -500 : dir === 'up' ? 300 : 0;
+      return Math.max(1200, Math.round((tdee + delta) / 10) * 10);
+    }
+  }
+  return Number(settings?.macroTargets?.calories) || 2000;
+}
+
+const MET_BY_TYPE: Record<string, number> = { run: 9.8, walk: 3.5, cycle: 7.5, cardio: 7, strength: 5, other: 4 };
+
+// MET-based estimate: kcal = MET · kg · hours (needs a duration).
+function estimateBurn(entry: any, weightLb: number | null): number {
+  const mins = Number(entry?.durationMin) || 0;
+  const met = MET_BY_TYPE[entry?.type] ?? 4;
+  return Math.max(0, Math.round(met * lbToKg(weightLb || 160) * (mins / 60)));
+}
+
+function sumBurn(dayList: any[]): number {
+  return (dayList || []).reduce((a: number, e: any) => a + (Number(e.caloriesBurned) || 0), 0);
+}
+
 function projectedDate(subjectKey: string, settings: any, totals: any, daily: any) {
   const s = settings.subjects[subjectKey];
   if (!s || !s.deadline) return null;
@@ -385,6 +452,9 @@ const DEFAULT_SETTINGS: Record<string, any> = {
   macroTargets: { protein: 170, carbs: 230, fat: 75, calories: 2300 },
   microTargets: DEFAULT_MICRO_TARGETS,
   microsEnabled: true,
+  waterGoalOz: 64,
+  calorieGoalMode: 'manual',
+  fitnessProfile: { heightIn: null, age: null, sex: null, activityLevel: 'moderate' },
   journal: {
     tradesEnabled: true,
     tradesLabel: 'Trades',
@@ -1066,6 +1136,7 @@ function Header({ date, onSettings }: { date: string; onSettings: () => void }) 
 function BottomNav({ tab, setTab }: { tab: string; setTab: (t: string) => void }) {
   const items = [
     { key: 'today', label: 'Today', icon: Sun },
+    { key: 'food', label: 'Food', icon: Apple },
     { key: 'body', label: 'Body', icon: Activity },
     { key: 'workout', label: 'Lift', icon: Dumbbell },
     { key: 'money', label: 'Money', icon: Wallet },
@@ -3782,7 +3853,7 @@ function QtyStepper({ qty, setQty }: any) {
   );
 }
 
-function LogMealModal({ meals, settings, onSave, onClose, targetDate }: any) {
+function LogMealModal({ meals, settings, onSave, onClose, targetDate, mealType }: any) {
   const target = targetDate || todayStr();
   const isToday = target === todayStr();
   const [mode, setMode] = useState('preset');
@@ -3819,7 +3890,7 @@ function LogMealModal({ meals, settings, onSave, onClose, targetDate }: any) {
   const logItem = async (item: any, q = 1) => {
     const s = scaled(item, q);
     const name = q !== 1 ? `${item.name} ×${q}` : item.name;
-    await onSave(addMealEntry(meals, target, { name, source: item.source || '', qty: q, ...s }));
+    await onSave(addMealEntry(meals, target, { name, source: item.source || '', qty: q, ...s, ...(mealType ? { meal: mealType } : {}) }));
     onClose();
   };
 
@@ -3933,7 +4004,7 @@ function LogMealModal({ meals, settings, onSave, onClose, targetDate }: any) {
     const withPresets = newPresets.length
       ? { ...meals, presets: [...(meals.presets || []), ...newPresets] }
       : meals;
-    await onSave(addMealEntry(withPresets, target, { name, source: 'Combo', qty: 1, ...s }));
+    await onSave(addMealEntry(withPresets, target, { name, source: 'Combo', qty: 1, ...s, ...(mealType ? { meal: mealType } : {}) }));
     onClose();
   };
   const updatePart = (idx: number, patch: any) => setParts((ps: any[]) => ps.map((p, i) => i === idx ? { ...p, ...patch } : p));
@@ -7650,6 +7721,227 @@ function AccountTransferModal({ spending, onSave, onClose }: any) {
 // ════════════════════════════════════════════════════════════════════════════════
 // ROOT
 // ════════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════════
+// FOOD TAB — MyFitnessPal-style calories in/out, meals, water, exercise
+// ════════════════════════════════════════════════════════════════════════════════
+function ExerciseLogModal({ date, exercise, settings, body, onSave, onClose }: any) {
+  const isToday = date === todayStr();
+  const wLb = latestWeightLb(body, settings);
+  const [type, setType] = useState('run');
+  const [name, setName] = useState('');
+  const [distance, setDistance] = useState('');
+  const [distanceUnit, setDistanceUnit] = useState(settings?.weightUnit === 'kg' ? 'km' : 'mi');
+  const [durationMin, setDurationMin] = useState('');
+  const [calories, setCalories] = useState('');
+  const [caloriesTouched, setCaloriesTouched] = useState(false);
+
+  const typeLabels: Record<string, string> = { run: 'Run', walk: 'Walk', cycle: 'Cycle', cardio: 'Cardio', strength: 'Strength', other: 'Other' };
+  const showDistance = type === 'run' || type === 'walk' || type === 'cycle';
+  const estimate = estimateBurn({ type, durationMin: Number(durationMin) || 0 }, wLb);
+  useEffect(() => { if (!caloriesTouched) setCalories(estimate ? String(estimate) : ''); }, [estimate, caloriesTouched]);
+
+  const save = async () => {
+    const entry: any = {
+      id: 'ex' + Date.now() + Math.random().toString(36).slice(2, 6),
+      time: nowHHMM(), type, name: name.trim() || typeLabels[type],
+      durationMin: Number(durationMin) || 0, caloriesBurned: Number(calories) || 0,
+    };
+    if (showDistance && distance) { entry.distance = Number(distance) || 0; entry.distanceUnit = distanceUnit; }
+    await onSave({ ...exercise, [date]: [...(exercise?.[date] || []), entry] });
+  };
+
+  return (
+    <ModalShell title={isToday ? 'Log exercise' : `Log exercise · ${fmtShortDate(date)}`} icon={<Flame size={18} color="#B8460E" />} onClose={onClose}>
+      <label>Activity</label>
+      <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+        {Object.keys(typeLabels).map((t) => (
+          <button key={t} className={`tap${type === t ? ' active' : ''}`} onClick={() => setType(t)}>{typeLabels[t]}</button>
+        ))}
+      </div>
+      <label>Name (optional)</label>
+      <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={typeLabels[type]} style={{ marginBottom: 12 }} />
+      {showDistance && (
+        <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+          <div style={{ flex: 2 }}><label>Distance</label><input type="number" inputMode="decimal" value={distance} onChange={(e) => setDistance(e.target.value)} placeholder="0" /></div>
+          <div style={{ flex: 1 }}><label>Unit</label><select value={distanceUnit} onChange={(e) => setDistanceUnit(e.target.value)}><option value="mi">mi</option><option value="km">km</option></select></div>
+        </div>
+      )}
+      <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+        <div style={{ flex: 1 }}><label>Duration (min)</label><input type="number" inputMode="numeric" value={durationMin} onChange={(e) => setDurationMin(e.target.value)} placeholder="0" /></div>
+        <div style={{ flex: 1 }}><label>Calories burned</label><input type="number" inputMode="numeric" value={calories} onChange={(e) => { setCaloriesTouched(true); setCalories(e.target.value); }} placeholder="0" /></div>
+      </div>
+      <p className="muted tiny" style={{ marginBottom: 12, lineHeight: 1.4 }}>
+        {wLb ? 'Calories are estimated from duration + your bodyweight — edit if you have a better number.' : 'Add a body weight on the Body tab for better calorie estimates.'}
+      </p>
+      <button className="btn" style={{ width: '100%' }} onClick={save} disabled={!(Number(durationMin) > 0 || Number(calories) > 0)}>Save</button>
+    </ModalShell>
+  );
+}
+
+function FoodTab({ settings, meals, water, exercise, body, onOpenLogger, onSaveMeals, onSaveWater, onSaveExercise, onLogExercise, onCoach }: any) {
+  const [selDate, setSelDate] = useState(todayStr());
+  const [showMicros, setShowMicros] = useState(false);
+  const sensors = useDndSensors();
+  const isToday = selDate === todayStr();
+  const shiftDay = (n: number) => {
+    const d = new Date(selDate + 'T00:00:00'); d.setDate(d.getDate() + n);
+    const ns = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    if (diffDays(ns) > 0) return;
+    setSelDate(ns);
+  };
+
+  const dayEntries: any[] = meals.entries?.[selDate] || [];
+  const totals: any = meals.log?.[selDate] || mealTotalsFromEntries(dayEntries);
+  const goal = calorieGoal(settings, body);
+  const foodCals = Math.round(Number(totals.calories) || 0);
+  const exDay: any[] = exercise?.[selDate] || [];
+  const burn = sumBurn(exDay);
+  const remaining = goal - foodCals + burn;
+  const over = remaining < 0;
+  const macroTargets: any = settings.macroTargets || {};
+
+  const SECTIONS = [
+    { key: 'breakfast', label: 'Breakfast', icon: Coffee },
+    { key: 'lunch', label: 'Lunch', icon: Utensils },
+    { key: 'dinner', label: 'Dinner', icon: Utensils },
+    { key: 'snacks', label: 'Snacks', icon: Apple },
+  ];
+  const sectionFor = (e: any) => (['breakfast', 'lunch', 'dinner', 'snacks'].includes(e.meal) ? e.meal : 'snacks');
+  const bySection: Record<string, any[]> = { breakfast: [], lunch: [], dinner: [], snacks: [] };
+  for (const e of dayEntries) bySection[sectionFor(e)].push(e);
+
+  const reorderSection = (key: string, oi: number, ni: number) => {
+    const slice = arrayMove(bySection[key], oi, ni);
+    const merged = [
+      ...(key === 'breakfast' ? slice : bySection.breakfast),
+      ...(key === 'lunch' ? slice : bySection.lunch),
+      ...(key === 'dinner' ? slice : bySection.dinner),
+      ...(key === 'snacks' ? slice : bySection.snacks),
+    ];
+    onSaveMeals({ ...meals, entries: { ...(meals.entries || {}), [selDate]: merged } });
+  };
+
+  const waterOz = Number(water?.[selDate]) || 0;
+  const waterGoal = Number(settings.waterGoalOz) || 64;
+  const setWaterOz = (oz: number) => onSaveWater({ ...water, [selDate]: Math.max(0, Math.round(oz)) });
+  const trashStyle: React.CSSProperties = { background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 2, display: 'flex' };
+
+  const macroBar = (label: string, val: number, tgt: number, color: string) => {
+    const pct = tgt > 0 ? Math.min(100, (val / tgt) * 100) : 0;
+    return (
+      <div style={{ flex: 1 }}>
+        <div className="between" style={{ marginBottom: 4 }}><span className="tiny muted">{label}</span><span className="tiny mono">{Math.round(val)}/{tgt}g</span></div>
+        <div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%`, background: color }} /></div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div className="between" style={{ marginBottom: 14 }}>
+        <button className="tap" onClick={() => shiftDay(-1)}><ChevronLeft size={16} /></button>
+        <div style={{ textAlign: 'center' }}>
+          <div className="h2">{isToday ? 'Today' : fmtShortDate(selDate)}</div>
+          {!isToday && <button style={{ background: 'none', border: 'none', color: '#B8460E', cursor: 'pointer', fontSize: 12 }} onClick={() => setSelDate(todayStr())}>Jump to today</button>}
+        </div>
+        <button className="tap" onClick={() => shiftDay(1)} disabled={isToday}><ChevronRight size={16} /></button>
+      </div>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div className="between" style={{ alignItems: 'flex-end', marginBottom: 10 }}>
+          <div><div className="muted small">Calories remaining</div><div className="h1" style={{ color: over ? '#B8460E' : '#4A6741' }}>{remaining}</div></div>
+          <div className="tiny muted" style={{ textAlign: 'right', lineHeight: 1.6 }}><div>{goal} goal</div><div>− {foodCals} food</div><div>+ {burn} exercise</div></div>
+        </div>
+        <div className="progress-bar"><div className="progress-fill" style={{ width: `${Math.min(100, goal > 0 ? (foodCals / goal) * 100 : 0)}%`, background: over ? '#B8460E' : '#4A6741' }} /></div>
+        <div className="row" style={{ gap: 10, marginTop: 12 }}>
+          {macroBar('Protein', Number(totals.protein) || 0, Number(macroTargets.protein) || 0, '#B8460E')}
+          {macroBar('Carbs', Number(totals.carbs) || 0, Number(macroTargets.carbs) || 0, '#3B5C6B')}
+          {macroBar('Fat', Number(totals.fat) || 0, Number(macroTargets.fat) || 0, '#C8932E')}
+        </div>
+        <div className="row" style={{ gap: 8, marginTop: 12 }}>
+          <button className="tap" style={{ flex: 1 }} onClick={onCoach}><Sparkles size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />Coach</button>
+          {settings.microsEnabled && <button className="tap" style={{ flex: 1 }} onClick={() => setShowMicros((v) => !v)}>{showMicros ? 'Hide micros' : 'Micros'}</button>}
+        </div>
+      </div>
+
+      {showMicros && settings.microsEnabled && <div style={{ marginBottom: 14 }}><MicrosCard targets={settings.microTargets} totals={totals} /></div>}
+
+      {SECTIONS.map((sec) => {
+        const list = bySection[sec.key];
+        const cals = Math.round(list.reduce((a: number, e: any) => a + (Number(e.calories) || 0), 0));
+        return (
+          <div className="card" key={sec.key} style={{ marginBottom: 12 }}>
+            <div className="between" style={{ marginBottom: list.length ? 10 : 0 }}>
+              <div className="row" style={{ gap: 8, alignItems: 'center' }}><sec.icon size={15} color="#8E4585" /><span className="h2">{sec.label}</span></div>
+              <span className="mono tiny muted">{cals} cal</span>
+            </div>
+            {list.length > 0 && (
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(ev: DragEndEvent) => {
+                const { active, over } = ev;
+                if (!over || active.id === over.id) return;
+                const oi = list.findIndex((x: any) => x.id === active.id);
+                const ni = list.findIndex((x: any) => x.id === over.id);
+                if (oi >= 0 && ni >= 0) reorderSection(sec.key, oi, ni);
+              }}>
+                <SortableContext items={list.map((x: any) => x.id)} strategy={verticalListSortingStrategy}>
+                  {list.map((e: any) => (
+                    <SortableRow key={e.id} id={e.id}>
+                      <div className="between" style={{ flex: 1, alignItems: 'center', minWidth: 0 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div className="small" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.name}</div>
+                          {(e.source || (e.qty && e.qty !== 1)) && <div className="tiny muted">{[e.source, e.qty && e.qty !== 1 ? `×${e.qty}` : ''].filter(Boolean).join(' · ')}</div>}
+                        </div>
+                        <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+                          <span className="mono tiny">{Math.round(Number(e.calories) || 0)}</span>
+                          <button style={trashStyle} onClick={() => onSaveMeals(removeMealEntry(meals, selDate, e.id))}><Trash2 size={14} /></button>
+                        </div>
+                      </div>
+                    </SortableRow>
+                  ))}
+                </SortableContext>
+              </DndContext>
+            )}
+            <button className="tap" style={{ width: '100%', marginTop: 10 }} onClick={() => onOpenLogger(selDate, sec.key)}><Plus size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />Add food</button>
+          </div>
+        );
+      })}
+
+      <div className="card" style={{ marginBottom: 12 }}>
+        <div className="between" style={{ marginBottom: 10 }}>
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}><Droplets size={15} color="#3B5C6B" /><span className="h2">Water</span></div>
+          <span className="mono tiny muted">{waterOz} / {waterGoal} oz</span>
+        </div>
+        <div className="progress-bar" style={{ marginBottom: 10 }}><div className="progress-fill" style={{ width: `${Math.min(100, waterGoal > 0 ? (waterOz / waterGoal) * 100 : 0)}%`, background: '#3B5C6B' }} /></div>
+        <div className="row" style={{ gap: 8 }}>
+          <button className="tap" style={{ flex: 1 }} onClick={() => setWaterOz(waterOz - 8)}>−8 oz</button>
+          <button className="tap" style={{ flex: 1 }} onClick={() => setWaterOz(waterOz + 8)}>+8 oz</button>
+          <button className="tap" style={{ flex: 1 }} onClick={() => setWaterOz(waterOz + 16)}>+16 oz</button>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 12 }}>
+        <div className="between" style={{ marginBottom: exDay.length ? 10 : 0 }}>
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}><Flame size={15} color="#B8460E" /><span className="h2">Exercise</span></div>
+          <span className="mono tiny muted">{burn} cal</span>
+        </div>
+        {exDay.map((ex: any) => (
+          <div key={ex.id} className="between" style={{ padding: '6px 0', alignItems: 'center' }}>
+            <div style={{ minWidth: 0 }}>
+              <div className="small">{ex.name}</div>
+              <div className="tiny muted">{[ex.distance ? `${ex.distance} ${ex.distanceUnit || ''}`.trim() : '', ex.durationMin ? `${ex.durationMin} min` : ''].filter(Boolean).join(' · ')}</div>
+            </div>
+            <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+              <span className="mono tiny" style={{ color: '#B8460E' }}>{Math.round(Number(ex.caloriesBurned) || 0)}</span>
+              <button style={trashStyle} onClick={() => onSaveExercise({ ...exercise, [selDate]: exDay.filter((x: any) => x.id !== ex.id) })}><Trash2 size={14} /></button>
+            </div>
+          </div>
+        ))}
+        <button className="tap" style={{ width: '100%', marginTop: 10 }} onClick={() => onLogExercise(selDate)}><Plus size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />Add exercise</button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [tab, setTab] = useState('today');
@@ -7670,6 +7962,8 @@ export default function App() {
   const [spending, setSpending] = useState<any>(DEFAULT_SPENDING);
   const [tax, setTax] = useState<any>(DEFAULT_TAX);
   const [customChallenges, setCustomChallenges] = useState<any[]>([]);
+  const [water, setWater] = useState<any>({});
+  const [exercise, setExercise] = useState<any>({});
   const [modal, setModal] = useState<any>(null);
 
   useEffect(() => {
@@ -7681,6 +7975,7 @@ export default function App() {
         subjects: { ...DEFAULT_SETTINGS.subjects, ...(s.subjects || {}) },
         macroTargets: { ...DEFAULT_SETTINGS.macroTargets, ...(s.macroTargets || {}) },
         microTargets: { ...DEFAULT_SETTINGS.microTargets, ...(s.microTargets || {}) },
+        fitnessProfile: { ...DEFAULT_SETTINGS.fitnessProfile, ...(s.fitnessProfile || {}) },
         journal: { ...DEFAULT_SETTINGS.journal, ...(s.journal || {}) },
       };
       // Normalize subjects to the flexible model and purge soft-deletes older than 15 days.
@@ -7764,6 +8059,8 @@ export default function App() {
       setBusyPresets(bp);
       setCheckins(ci);
       setActivity(ac);
+      setWater(await safeGet(K.water, {}));
+      setExercise(await safeGet(K.exercise, {}));
       const txData = migrateTax(await safeGet(K.tax, DEFAULT_TAX));
       const cc = await safeGet(K.customChallenges, []);
       // Pause any challenge whose last action was before yesterday (and yesterday wasn't a rest day).
@@ -7820,6 +8117,8 @@ export default function App() {
   const saveActivity = async (next: any) => { setActivity(next); await safeSet(K.activity, next); };
   const saveSpending = async (next: any) => { setSpending(next); await safeSet(K.spending, next); };
   const saveTax = async (next: any) => { setTax(next); await safeSet(K.tax, next); };
+  const saveWater = async (next: any) => { setWater(next); await safeSet(K.water, next); };
+  const saveExercise = async (next: any) => { setExercise(next); await safeSet(K.exercise, next); };
   const saveCustomChallenges = async (next: any[]) => { setCustomChallenges(next); await safeSet(K.customChallenges, next); };
   const restDayChallenge = async (challengeId: string) => {
     const today = todayStr();
@@ -8306,6 +8605,15 @@ export default function App() {
             onSelectDay={(date: string) => setModal({ type: 'dayDetail', date })}
           />
         )}
+        {tab === 'food' && (
+          <FoodTab
+            settings={settings} meals={meals} water={water} exercise={exercise} body={body}
+            onOpenLogger={(d: string, meal: string) => setModal({ type: 'logMeal', targetDate: d, mealType: meal })}
+            onSaveMeals={saveMeals} onSaveWater={saveWater} onSaveExercise={saveExercise}
+            onLogExercise={(d: string) => setModal({ type: 'logExercise', date: d })}
+            onCoach={() => setModal({ type: 'nutritionCoach' })}
+          />
+        )}
       </div>
 
       <BottomNav tab={tab} setTab={setTab} />
@@ -8322,10 +8630,11 @@ export default function App() {
       {modal?.type === 'logWorkout' && <LogWorkoutModal dayIdx={modal.dayIdx} workout={workout} onSave={saveWorkout} onClose={() => setModal(null)} />}
       {modal?.type === 'editSplit' && <EditSplitModal workout={workout} mode={modal.splitMode || 'gym'} onSave={saveWorkout} onClose={() => setModal(null)} />}
       {modal?.type === 'challenge' && <ChallengeModal settings={settings} challengeHistory={challengeHistory} onSave={saveSettings} onSaveHistory={saveChallengeHistory} onClose={() => setModal(null)} />}
-      {modal?.type === 'logMeal' && <LogMealModal meals={meals} settings={settings} onSave={saveMeals} targetDate={modal.targetDate} onClose={() => {
+      {modal?.type === 'logMeal' && <LogMealModal meals={meals} settings={settings} onSave={saveMeals} targetDate={modal.targetDate} mealType={modal.mealType} onClose={() => {
         // If we came from a day-detail view, return to it instead of closing everything.
         if (modal.returnTo) setModal(modal.returnTo); else setModal(null);
       }} />}
+      {modal?.type === 'logExercise' && <ExerciseLogModal date={modal.date} exercise={exercise} settings={settings} body={body} onSave={async (next: any) => { await saveExercise(next); setModal(null); }} onClose={() => setModal(null)} />}
       {modal?.type === 'nutritionCoach' && <NutritionCoachModal settings={settings} meals={meals} body={body} onLogItem={async (item: any) => { await saveMeals(addMealEntry(meals, todayStr(), { qty: 1, ...item })); toast(`Logged ${item.name}`); }} onClose={() => setModal(null)} />}
       {modal?.type === 'planDay' && <PlanDayModal date={modal.date} plans={plans} onSave={savePlans} onClose={() => setModal(null)} />}
       {modal?.type === 'dayDetail' && <DayDetailModal date={modal.date} settings={settings} totals={totals} workout={workout} meals={meals} body={body} activity={activity} checkins={checkins} spending={spending} customChallenges={customChallenges} onSaveMeals={saveMeals} onSaveWorkout={saveWorkout} onSaveTotals={saveTotals} onSaveCheckins={saveCheckins} onOpenMealLogger={(d: string) => setModal({ type: 'logMeal', targetDate: d, returnTo: { type: 'dayDetail', date: d } })} onClose={() => setModal(null)} />}
@@ -8340,7 +8649,7 @@ export default function App() {
       {modal?.type === 'taxModal' && <TaxModal tax={tax} spending={spending} onSave={saveTax} onClose={() => setModal(null)} />}
       {modal?.type === 'customChallenges' && <CustomChallengesModal challenges={customChallenges} settings={settings} onSave={saveCustomChallenges} onClose={() => setModal(null)} />}
       {modal?.type === 'challengePaused' && <ChallengePausedModal challenges={customChallenges} settings={settings} pausedIds={modal.items} onSave={saveCustomChallenges} onClose={() => setModal(null)} />}
-      {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, journal, challengeHistory, busyPresets, weeklyAck, spending, tax, customChallenges }} onImport={async (d: any) => {
+      {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, journal, challengeHistory, busyPresets, weeklyAck, spending, tax, customChallenges, water, exercise }} onImport={async (d: any) => {
         if (d.spending) { const sp = migrateSpending(d.spending); setSpending(sp); await safeSet(K.spending, sp); }
         if (d.settings) { setSettings(d.settings); await safeSet(K.settings, d.settings); }
         if (d.totals) { setTotals(d.totals); await safeSet(K.totals, d.totals); }
@@ -8356,6 +8665,8 @@ export default function App() {
         if (d.checkins) { setCheckins(d.checkins); await safeSet(K.checkins, d.checkins); }
         if (d.tax) { const tx = migrateTax(d.tax); setTax(tx); await safeSet(K.tax, tx); }
         if (d.customChallenges) { setCustomChallenges(d.customChallenges); await safeSet(K.customChallenges, d.customChallenges); }
+        if (d.water) { setWater(d.water); await safeSet(K.water, d.water); }
+        if (d.exercise) { setExercise(d.exercise); await safeSet(K.exercise, d.exercise); }
         toast.success('Data restored successfully.');
         setModal(null);
       }} onClose={() => setModal(null)} />}
