@@ -2423,7 +2423,7 @@ function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, setting
       <div className="card">
         <div className="between" style={{ marginBottom: 8 }}>
           <div className="h2">Weekly split</div>
-          <button onClick={onEditSplit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6457' }}>
+          <button onClick={() => onEditSplit(location)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6457' }}>
             <Edit3 size={16} />
           </button>
         </div>
@@ -3486,10 +3486,11 @@ function SortableExercise({ id, ex, onUpdate, onRemove }: any) {
   );
 }
 
-function SortableDayRow({ id, day, idx, openDay, setOpenDay, updateDay, updateExercise, addExercise, removeExercise }: any) {
+function SortableDayRow({ id, day, idx, openDay, setOpenDay, updateDay, updateExercise, addExercise, removeExercise, onDeleteDay }: any) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   const sensors = useDndSensors();
   const isOpen = openDay === idx;
+  const [confirmDel, setConfirmDel] = useState(false);
   const exIds = (day.exercises || []).map((_: any, j: number) => `${id}-ex-${j}`);
 
   return (
@@ -3500,7 +3501,7 @@ function SortableDayRow({ id, day, idx, openDay, setOpenDay, updateDay, updateEx
             <button {...attributes} {...listeners} style={{ background: 'none', border: 'none', cursor: 'grab', color: 'var(--text)', opacity: 0.4, padding: '4px 2px', touchAction: 'none' }}>
               <GripVertical size={16} />
             </button>
-            <span className="mono tiny muted">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day.day]}</span>
+            <span className="mono tiny muted">{['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day.day] ?? `Day ${idx + 1}`}</span>
             <span className="small" style={{ fontWeight: 600 }}>{day.name}</span>
             {day.rest && <span className="pill" style={{ fontSize: 10, padding: '2px 8px', background: 'var(--bg-inset)', color: 'var(--text)', opacity: 0.6 }}>Rest</span>}
           </div>
@@ -3511,10 +3512,21 @@ function SortableDayRow({ id, day, idx, openDay, setOpenDay, updateDay, updateEx
           <div style={{ marginTop: 12 }}>
             <label>Day name</label>
             <input type="text" value={day.name} onChange={e => updateDay({ name: e.target.value })} style={{ marginBottom: 10 }} />
-            <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+            <div className="between" style={{ marginBottom: 12 }}>
               <button className={`tap ${day.rest ? 'active' : ''}`} onClick={() => updateDay({ rest: !day.rest })}>
                 {day.rest ? '✓ Rest day' : 'Workout day'}
               </button>
+              {!confirmDel ? (
+                <button className="tap" style={{ fontSize: 11, color: '#B8460E', padding: '4px 10px' }} onClick={() => setConfirmDel(true)}>
+                  <Trash2 size={11} style={{ verticalAlign: 'middle', marginRight: 3 }} />Delete day
+                </button>
+              ) : (
+                <div className="row" style={{ gap: 6 }}>
+                  <span className="tiny muted">Delete?</span>
+                  <button className="tap" style={{ fontSize: 11, color: '#B8460E', padding: '3px 8px' }} onClick={() => { setConfirmDel(false); onDeleteDay?.(); }}>Yes</button>
+                  <button className="tap" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setConfirmDel(false)}>No</button>
+                </div>
+              )}
             </div>
             {!day.rest && (
               <>
@@ -3548,13 +3560,27 @@ function SortableDayRow({ id, day, idx, openDay, setOpenDay, updateDay, updateEx
   );
 }
 
-function EditSplitModal({ workout, onSave, onClose }: any) {
-  const [split, setSplit] = useState(() => workout.split.map((d: any, i: number) => ({ ...d, _uid: `day-${i}-${d.day}` })));
+function EditSplitModal({ workout, mode, onSave, onClose }: any) {
+  const isHome = mode === 'home';
+  const defaultSplit = isHome ? HOME_WORKOUT_SPLIT : DEFAULT_WORKOUT_SPLIT;
+  const sourceSplit = isHome ? (workout.homeSplit || HOME_WORKOUT_SPLIT) : (workout.split || DEFAULT_WORKOUT_SPLIT);
+
+  const [split, setSplit] = useState(() => sourceSplit.map((d: any, i: number) => ({ ...d, _uid: `day-${i}-${Date.now()}-${i}` })));
   const [openDay, setOpenDay] = useState<number | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
   const dayIds = split.map((d: any) => d._uid);
   const sensors = useDndSensors();
 
-  const updateDay = (idx: number, patch: any) => setSplit((s: any[]) => s.map((d, i) => i === idx ? { ...d, ...patch } : d));
+  const updateDay = (idx: number, patch: any) => setSplit((s: any[]) => s.map((d: any, i: number) => i === idx ? { ...d, ...patch } : d));
+  const removeDay = (idx: number) => {
+    setSplit((s: any[]) => s.filter((_: any, i: number) => i !== idx));
+    setOpenDay(null);
+  };
+  const addDay = () => {
+    const uid = `day-new-${Date.now()}`;
+    setSplit((s: any[]) => [...s, { day: s.length, name: 'New Day', rest: false, exercises: [], _uid: uid }]);
+    setOpenDay(split.length);
+  };
   const updateExercise = (dayIdx: number, exIdx: number, patch: any) =>
     updateDay(dayIdx, { exercises: split[dayIdx].exercises.map((e: any, i: number) => i === exIdx ? { ...e, ...patch } : e) });
   const addExercise = (dayIdx: number) =>
@@ -3562,11 +3588,31 @@ function EditSplitModal({ workout, onSave, onClose }: any) {
   const removeExercise = (dayIdx: number, exIdx: number) =>
     updateDay(dayIdx, { exercises: split[dayIdx].exercises.filter((_: any, i: number) => i !== exIdx) });
 
+  const doReset = () => {
+    setSplit(defaultSplit.map((d: any, i: number) => ({ ...d, _uid: `day-reset-${i}` })));
+    setOpenDay(null);
+    setConfirmReset(false);
+  };
+
   return (
-    <ModalShell title="Edit weekly split" onClose={onClose} icon={<Edit3 size={18} color="#3B5C6B" />}>
-      <p className="muted small" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 5 }}>
-        <GripVertical size={13} /> Drag to reorder days or exercises within a day.
-      </p>
+    <ModalShell title={isHome ? 'Edit home circuit' : 'Edit weekly split'} onClose={onClose} icon={<Edit3 size={18} color="#3B5C6B" />}>
+      <div className="between" style={{ marginBottom: 12 }}>
+        <p className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 5, margin: 0 }}>
+          <GripVertical size={13} /> Drag to reorder days.
+        </p>
+        {!confirmReset ? (
+          <button className="tap" style={{ fontSize: 11, padding: '4px 10px', color: '#B8460E' }} onClick={() => setConfirmReset(true)}>
+            <RotateCcw size={11} style={{ verticalAlign: 'middle', marginRight: 4 }} />Reset to default
+          </button>
+        ) : (
+          <div className="row" style={{ gap: 6 }}>
+            <span className="tiny muted">Reset all days?</span>
+            <button className="tap" style={{ fontSize: 11, padding: '3px 8px', color: '#B8460E' }} onClick={doReset}>Yes</button>
+            <button className="tap" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => setConfirmReset(false)}>No</button>
+          </div>
+        )}
+      </div>
+
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={({ active, over }: DragEndEvent) => {
         if (!over || active.id === over.id) return;
         const oldIdx = dayIds.indexOf(String(active.id));
@@ -3589,13 +3635,22 @@ function EditSplitModal({ workout, onSave, onClose }: any) {
               updateExercise={(exIdx: number, patch: any) => updateExercise(i, exIdx, patch)}
               addExercise={() => addExercise(i)}
               removeExercise={(exIdx: number) => removeExercise(i, exIdx)}
+              onDeleteDay={() => removeDay(i)}
             />
           ))}
         </SortableContext>
       </DndContext>
+
+      <button className="btn btn-ghost" style={{ width: '100%', marginTop: 8 }} onClick={addDay}>
+        <Plus size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Add day
+      </button>
       <button className="btn" style={{ width: '100%', marginTop: 8 }} onClick={async () => {
         const cleanSplit = split.map(({ _uid, ...d }: any) => d);
-        await onSave({ ...workout, split: cleanSplit });
+        if (isHome) {
+          await onSave({ ...workout, homeSplit: cleanSplit });
+        } else {
+          await onSave({ ...workout, split: cleanSplit });
+        }
         onClose();
       }}>
         <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save split
@@ -7821,7 +7876,7 @@ export default function App() {
           <WorkoutTab
             workout={workout} settings={settings}
             onLogWorkout={(idx: number) => setModal({ type: 'logWorkout', dayIdx: idx })}
-            onEditSplit={() => setModal({ type: 'editSplit' })}
+            onEditSplit={(loc: string) => setModal({ type: 'editSplit', splitMode: loc || 'gym' })}
             onSaveWorkout={saveWorkout}
           />
         )}
@@ -7877,7 +7932,7 @@ export default function App() {
       {modal?.type === 'addMeasurement' && <AddMeasurementModal onSave={async (entry: any) => { const next = { ...body, entries: [...body.entries, entry] }; const nextSettings = { ...settings, nextMeasurement: addMonth(todayStr(), 1) }; await saveBody(next); await saveSettings(nextSettings); setModal(null); }} onClose={() => setModal(null)} previous={body.entries[body.entries.length - 1]} />}
       {modal?.type === 'bodyGoals' && <BodyGoalsModal settings={settings} onSave={saveSettings} onClose={() => setModal(null)} />}
       {modal?.type === 'logWorkout' && <LogWorkoutModal dayIdx={modal.dayIdx} workout={workout} onSave={saveWorkout} onClose={() => setModal(null)} />}
-      {modal?.type === 'editSplit' && <EditSplitModal workout={workout} onSave={saveWorkout} onClose={() => setModal(null)} />}
+      {modal?.type === 'editSplit' && <EditSplitModal workout={workout} mode={modal.splitMode || 'gym'} onSave={saveWorkout} onClose={() => setModal(null)} />}
       {modal?.type === 'challenge' && <ChallengeModal settings={settings} challengeHistory={challengeHistory} onSave={saveSettings} onSaveHistory={saveChallengeHistory} onClose={() => setModal(null)} />}
       {modal?.type === 'logMeal' && <LogMealModal meals={meals} settings={settings} onSave={saveMeals} onClose={() => setModal(null)} />}
       {modal?.type === 'nutritionCoach' && <NutritionCoachModal settings={settings} meals={meals} body={body} onLogItem={async (item: any) => { await saveMeals(addMealEntry(meals, todayStr(), { qty: 1, ...item })); toast(`Logged ${item.name}`); }} onClose={() => setModal(null)} />}

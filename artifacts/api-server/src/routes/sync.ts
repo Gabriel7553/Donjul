@@ -57,10 +57,13 @@ router.get("/sync/latest", async (req, res): Promise<void> => {
   if (!hasDb) { res.status(503).json({ error: "Database not configured" }); return; }
   try {
     const { rows } = await getPool().query(
-      `SELECT user_id FROM kv_store
-       WHERE key = 'st:settings'
-         AND value->>'setupComplete' = 'true'
-       ORDER BY updated_at DESC
+      `SELECT s.user_id
+       FROM kv_store s
+       WHERE s.key = 'st:settings'
+         AND s.value->>'setupComplete' = 'true'
+       ORDER BY (
+         SELECT MAX(k.updated_at) FROM kv_store k WHERE k.user_id = s.user_id
+       ) DESC
        LIMIT 1`,
     );
     if (rows.length === 0) { res.json({ userId: null }); return; }
