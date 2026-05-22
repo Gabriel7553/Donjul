@@ -381,6 +381,7 @@ const DEFAULT_SETTINGS: Record<string, any> = {
   subjectOrder: ['cysa', 'spanish', 'running', 'guitar'],
   scheduleStartOffsetMin: 30,
   blockBreakMin: 15,
+  catchupSpread: 'deadline',
   macroTargets: { protein: 170, carbs: 230, fat: 75, calories: 2300 },
   microTargets: DEFAULT_MICRO_TARGETS,
   microsEnabled: true,
@@ -506,6 +507,15 @@ const HOME_WORKOUT_SPLIT = [
 // ════════════════════════════════════════════════════════════════════════════════
 // PROGRESS MATH
 // ════════════════════════════════════════════════════════════════════════════════
+const CATCHUP_SPREAD_OPTIONS = [
+  { value: 'deadline', label: 'To deadline', desc: 'spread evenly across all remaining days' },
+  { value: 'tomorrow', label: 'Tomorrow', desc: 'catch up everything tomorrow' },
+  { value: '2d', label: '2 days', desc: 'split over the next 2 days' },
+  { value: '3d', label: '3 days', desc: 'split over the next 3 days' },
+  { value: 'week', label: 'This week', desc: 'spread over remaining days this week' },
+  { value: '14d', label: '14 days', desc: 'spread over the next 2 weeks' },
+];
+
 function getRequiredDailyMins(k: string, settings: any, totals: any, daily: any): number {
   const s = settings.subjects[k];
   if (!s || !s.deadline) return s?.target || 0;
@@ -513,7 +523,33 @@ function getRequiredDailyMins(k: string, settings: any, totals: any, daily: any)
   const target = s.courseHours ? s.courseHours * 60 : targetTotalByDeadline(k, settings);
   const remaining = Math.max(0, target - totalDone);
   const daysLeft = Math.max(1, diffDays(s.deadline, todayStr()));
-  return Math.ceil(remaining / daysLeft);
+
+  const spreadSetting = settings.catchupSpread ?? 'deadline';
+
+  if (spreadSetting === 'deadline') {
+    // Current behaviour: remaining content ÷ days left (optimal gradual spread)
+    return Math.ceil(remaining / daysLeft);
+  }
+
+  // Windowed catch-up: keep base pace, sprint the deficit over a smaller window
+  const base = s.target || 0;
+  const elapsed = Math.max(1, diffDays(todayStr(), settings.startDate));
+  const expectedByNow = Math.round(elapsed * base * ((s.weeklyDays || 7) / 7));
+  const deficit = Math.max(0, expectedByNow - totalDone);
+
+  let spreadWindow: number;
+  if (spreadSetting === 'tomorrow') spreadWindow = 1;
+  else if (spreadSetting === '2d') spreadWindow = 2;
+  else if (spreadSetting === '3d') spreadWindow = 3;
+  else if (spreadSetting === 'week') spreadWindow = Math.max(1, daysLeftInWeek());
+  else if (spreadSetting === '14d') spreadWindow = 14;
+  else spreadWindow = daysLeft;
+
+  const catchWindow = Math.min(Math.max(1, spreadWindow), daysLeft);
+  const catchupTarget = base + Math.ceil(deficit / catchWindow);
+  // Must still finish all content by deadline, so take the larger of the two
+  const minRequired = Math.ceil(remaining / daysLeft);
+  return Math.max(catchupTarget, minRequired);
 }
 
 function daysLeftInWeek(): number {
@@ -1448,9 +1484,17 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, c
         if (weeklyMet) { status = `Done this week · ${weekDone}/${weeklyDays}`; sColor = '#4A6741'; sBg = '#E8EBE0'; }
         else if (countComplete) { status = 'Complete'; sColor = '#4A6741'; sBg = '#E8EBE0'; }
         else if (showPace) {
-          if (Math.abs(diff) < perDayAvg * 0.5) { status = 'on pace'; sColor = '#4A6741'; sBg = '#E8EBE0'; }
-          else if (diff > 0) { status = `${daysOff.toFixed(1)}d ahead`; sColor = '#4A6741'; sBg = '#E8EBE0'; }
-          else { status = `${daysOff.toFixed(1)}d behind`; sColor = '#B8460E'; sBg = '#F5E1D5'; }
+          // Use projected-vs-deadline gap — more accurate than elapsed-time comparison.
+          if (!proj || proj.projected === null) {
+            status = 'no data yet'; sColor = '#6B6457'; sBg = '#EEEAE0';
+          } else {
+            // diffDays(toDate, fromDate): positive = toDate is further in the future
+            const projGap = diffDays(proj.projected, proj.deadline); // pos = behind, neg = ahead
+            const daysOff = Math.abs(projGap);
+            if (daysOff < 1) { status = 'on pace'; sColor = '#4A6741'; sBg = '#E8EBE0'; }
+            else if (projGap < 0) { status = `${daysOff.toFixed(1)}d ahead`; sColor = '#4A6741'; sBg = '#E8EBE0'; }
+            else { status = `${daysOff.toFixed(1)}d behind`; sColor = '#B8460E'; sBg = '#F5E1D5'; }
+          }
         } else { status = `${weekDone}/${weeklyDays} this week`; }
 
         return (
@@ -4412,6 +4456,25 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
         <div style={{ flex: 1 }}>
           <label>Break between blocks (min)</label>
           <input type="number" value={draft.blockBreakMin ?? 15} onChange={(e) => update({ blockBreakMin: parseInt(e.target.value) || 15 })} />
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <label>Catch-up spread</label>
+        <p className="muted tiny" style={{ marginBottom: 8, lineHeight: 1.4 }}>When you fall behind on a deadline subject, how quickly should missed time be distributed into upcoming daily targets?</p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+          {CATCHUP_SPREAD_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              className={`tap ${(draft.catchupSpread ?? 'deadline') === opt.value ? 'active' : ''}`}
+              style={{ padding: '6px 4px', fontSize: 11, flexDirection: 'column', gap: 2, height: 'auto', lineHeight: 1.3 }}
+              onClick={() => update({ catchupSpread: opt.value })}
+              title={opt.desc}
+            >
+              <span style={{ fontWeight: 600 }}>{opt.label}</span>
+              <span className="muted" style={{ fontSize: 9, display: 'block' }}>{opt.desc}</span>
+            </button>
+          ))}
         </div>
       </div>
 
