@@ -3927,10 +3927,14 @@ function LogMealModal({ meals, settings, onSave, onClose, targetDate }: any) {
       for (const k of MICRO_KEYS) item[k] = parseFloat(p[k]) || 0;
       newPresets.push(item);
     }
-    if (newPresets.length) {
-      await onSave({ ...meals, presets: [...(meals.presets || []), ...newPresets] });
-    }
-    await logItem({ name, source: 'Combo', ...comboTotal }, 1);
+    // Build the meal entry inline so we can persist presets + entry in ONE save (avoid stale-closure overwrite).
+    const item = { name, source: 'Combo', ...comboTotal };
+    const s = scaled(item, 1);
+    const withPresets = newPresets.length
+      ? { ...meals, presets: [...(meals.presets || []), ...newPresets] }
+      : meals;
+    await onSave(addMealEntry(withPresets, target, { name, source: 'Combo', qty: 1, ...s }));
+    onClose();
   };
   const updatePart = (idx: number, patch: any) => setParts((ps: any[]) => ps.map((p, i) => i === idx ? { ...p, ...patch } : p));
   const applyComboScan = (data: any, idx: number) => {
@@ -6052,8 +6056,11 @@ function TaxModal({ tax, spending, onSave, onClose }: any) {
 // CHALLENGE PAUSED — prompt after a missed day
 // ════════════════════════════════════════════════════════════════════════════════
 function ChallengePausedModal({ challenges, settings, pausedIds, onSave, onClose }: any) {
-  const items = challenges.filter((c: any) => pausedIds.includes(c.id));
-  if (!items.length) { onClose(); return null; }
+  const idSet = new Set(Array.isArray(pausedIds) ? pausedIds : []);
+  // Only show items still flagged paused — once Restart/End runs, the item disappears.
+  const items = (challenges || []).filter((c: any) => idSet.has(c.id) && c.paused);
+  useEffect(() => { if (!items.length) onClose(); }, [items.length]);
+  if (!items.length) return null;
   const subjectName = (k: string) => settings?.subjects?.[k]?.name || k;
   const restart = async (id: string) => {
     const next = challenges.map((c: any) => c.id === id
