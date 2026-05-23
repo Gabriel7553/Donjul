@@ -1,4 +1,5 @@
 import { nowHHMM } from './date';
+import type { MealEntry, MealTotals, MealsState } from './types';
 
 // Keys we sum across a day's meal entries (macros + micros).
 export const MICRO_KEYS = [
@@ -8,7 +9,7 @@ export const MICRO_KEYS = [
 ] as const;
 
 // Sum a day's meal entries into a macro + micro total.
-export function mealTotalsFromEntries(entries: any[]): any {
+export function mealTotalsFromEntries(entries: MealEntry[]): MealTotals {
   const base: any = { protein: 0, carbs: 0, fat: 0, calories: 0 };
   for (const k of MICRO_KEYS) base[k] = 0;
   return (entries || []).reduce((acc: any, e: any) => {
@@ -42,21 +43,21 @@ export const MICRO_DEFS: MicroDef[] = [
 export const DEFAULT_MICRO_TARGETS: Record<string, number> = Object.fromEntries(MICRO_DEFS.map(d => [d.key, d.defaultTarget]));
 
 // Add a meal entry to a date and keep the cached daily total in sync.
-export function addMealEntry(meals: any, date: string, entry: any): any {
+export function addMealEntry(meals: MealsState, date: string, entry: Partial<MealEntry>): MealsState {
   const entries = { ...(meals.entries || {}) };
   const dayList = [...(entries[date] || []), { id: 'm' + Date.now() + Math.random().toString(36).slice(2, 6), time: nowHHMM(), ...entry }];
   entries[date] = dayList;
   return { ...meals, entries, log: { ...meals.log, [date]: mealTotalsFromEntries(dayList) } };
 }
 
-export function removeMealEntry(meals: any, date: string, id: string): any {
+export function removeMealEntry(meals: MealsState, date: string, id: string): MealsState {
   const entries = { ...(meals.entries || {}) };
   const dayList = (entries[date] || []).filter((e: any) => e.id !== id);
   entries[date] = dayList;
   return { ...meals, entries, log: { ...meals.log, [date]: mealTotalsFromEntries(dayList) } };
 }
 
-export function updateMealEntry(meals: any, date: string, id: string, patch: any): any {
+export function updateMealEntry(meals: MealsState, date: string, id: string, patch: Partial<MealEntry>): MealsState {
   const entries = { ...(meals.entries || {}) };
   const dayList = (entries[date] || []).map((e: any) => (e.id === id ? { ...e, ...patch } : e));
   entries[date] = dayList;

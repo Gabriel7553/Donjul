@@ -1,4 +1,5 @@
 import { MICRO_DEFS } from './nutrition';
+import type { Settings, BodyState } from './types';
 
 // Derive earned/locked achievement badges from existing data (no separate tracking needed).
 export function computeAchievements(totals: any, streaks: any, workout: any, body: any, meals: any) {
@@ -57,7 +58,7 @@ export const lbToKg = (lb: number) => lb * 0.45359237;
 export const inToCm = (inches: number) => inches * 2.54;
 
 // Latest logged bodyweight in lb (converts if the user stores kg).
-export function latestWeightLb(body: any, settings: any): number | null {
+export function latestWeightLb(body: BodyState, settings: Settings): number | null {
   const e = body?.entries?.[body.entries.length - 1];
   const w = Number(e?.weight);
   if (!w) return null;
@@ -81,7 +82,7 @@ export function activityFactor(level: string | null): number {
   }
 }
 
-export function computeTDEE(settings: any, body: any): number | null {
+export function computeTDEE(settings: Settings, body: BodyState): number | null {
   const p = settings?.fitnessProfile || {};
   const bmr = computeBMR(latestWeightLb(body, settings), Number(p.heightIn) || null, Number(p.age) || null, p.sex || null);
   return bmr == null ? null : Math.round(bmr * activityFactor(p.activityLevel));
@@ -89,7 +90,7 @@ export function computeTDEE(settings: any, body: any): number | null {
 
 // Daily calorie goal. In 'tdee' mode (with a complete profile) we adjust for the
 // weight-goal direction; otherwise we fall back to the manual macro calorie target.
-export function calorieGoal(settings: any, body: any): number {
+export function calorieGoal(settings: Settings, body: BodyState): number {
   if (settings?.calorieGoalMode === 'tdee') {
     const tdee = computeTDEE(settings, body);
     if (tdee != null) {

@@ -1,4 +1,5 @@
 import { pad } from './date';
+import type { SpendingEntry } from './types';
 
 export const DEFAULT_SPEND_CATEGORIES = [
   // Income
@@ -116,14 +117,14 @@ export function nextMonth(ym: string): string {
   const d = new Date(y, m, 1);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 }
-export function spendingByMonth(entries: any[], ym: string) {
+export function spendingByMonth(entries: SpendingEntry[], ym: string) {
   let income = 0, spent = 0;
   const byCat: Record<string, number> = {};
   for (const e of entries) {
     if (!e?.date || monthKey(e.date) !== ym) continue;
     const amt = Number(e.amount) || 0;
     if (e.type === 'in') income += amt;
-    else { spent += amt; byCat[e.categoryId] = (byCat[e.categoryId] || 0) + amt; }
+    else { spent += amt; if (e.categoryId) byCat[e.categoryId] = (byCat[e.categoryId] || 0) + amt; }
   }
   return { income, spent, net: income - spent, byCat };
 }

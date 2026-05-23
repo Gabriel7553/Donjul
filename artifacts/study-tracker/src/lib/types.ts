@@ -12,7 +12,7 @@ export interface MacroTargets { protein: number; carbs: number; fat: number; cal
 
 export interface MealEntry {
   id: string;
-  name: string;
+  name?: string;
   time?: string;
   baseName?: string;
   source?: string;
