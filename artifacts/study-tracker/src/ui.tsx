@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
-  GripVertical, Settings as SettingsIcon, X, Mic, Check,
+  GripVertical, Settings as SettingsIcon, X, Mic, Check, Plus,
   Sun, Apple, Activity, Dumbbell, Wallet, BookMarked, Calendar as CalIcon, History, TrendingUp,
 } from 'lucide-react';
 import { KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
@@ -185,6 +185,46 @@ export function BottomNav({ tab, setTab, order, hidden }: { tab: string; setTab:
         </button>
       ))}
     </div>
+  );
+}
+
+export function QuickAdd({ onPick }: { onPick: (action: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const actions = [
+    { key: 'meal', label: 'Meal', icon: Apple, color: '#4A6741' },
+    { key: 'weight', label: 'Weigh-in', icon: Activity, color: '#8E4585' },
+    { key: 'expense', label: 'Expense', icon: Wallet, color: '#B8460E' },
+    { key: 'income', label: 'Income', icon: Wallet, color: '#3F7A4F' },
+  ];
+  const pick = (k: string) => { setOpen(false); onPick(k); };
+  return (
+    <>
+      {open && <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />}
+      <div style={{ position: 'fixed', right: 18, bottom: 'calc(96px + env(safe-area-inset-bottom))', zIndex: 41, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 10 }}>
+        {open && actions.map((a, i) => (
+          <motion.button
+            key={a.key}
+            initial={{ opacity: 0, y: 10, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.12, delay: i * 0.03 }}
+            onClick={() => pick(a.key)}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 100, padding: '8px 14px', cursor: 'pointer', boxShadow: '0 2px 10px rgba(0,0,0,0.14)', fontFamily: 'inherit', color: 'var(--text)' }}
+          >
+            <a.icon size={15} color={a.color} />
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{a.label}</span>
+          </motion.button>
+        ))}
+        <motion.button
+          onClick={() => setOpen((o) => !o)}
+          animate={{ rotate: open ? 45 : 0 }}
+          transition={{ duration: 0.15 }}
+          aria-label="Quick add"
+          style={{ width: 52, height: 52, borderRadius: 26, background: '#B8460E', color: '#F5F0E6', border: 'none', cursor: 'pointer', boxShadow: '0 4px 14px rgba(184,70,14,0.42)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <Plus size={26} />
+        </motion.button>
+      </div>
+    </>
   );
 }
 

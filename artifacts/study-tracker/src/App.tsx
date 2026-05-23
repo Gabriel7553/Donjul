@@ -14,7 +14,7 @@ import { DEFAULT_WORKOUT_SPLIT } from './lib/workout';
 import { DEFAULT_SETTINGS } from './lib/defaults';
 import { fireDueReminders } from './lib/reminders';
 import type { Settings, MealsState, BodyState, WorkoutState, SpendingState, Streaks, StudyTotals, Checkins, WaterLog } from './lib/types';
-import { GlobalStyles, Header, BottomNav } from './ui';
+import { GlobalStyles, Header, BottomNav, QuickAdd } from './ui';
 import { TodayTab, NutritionCoachModal } from './features/today';
 import { InsightsTab } from './features/insights';
 import { LogMealModal, ExerciseLogModal, FoodTab } from './features/food';
@@ -722,6 +722,13 @@ export default function App() {
       </div>
 
       <BottomNav tab={tab} setTab={setTab} order={settings.navOrder} hidden={settings.navHidden} />
+
+      <QuickAdd onPick={(action) => {
+        if (action === 'meal') setModal({ type: 'logMeal', targetDate: todayStr() });
+        else if (action === 'weight') setModal({ type: 'addMeasurement' });
+        else if (action === 'expense') setModal({ type: 'addTransaction', defaultType: 'out' });
+        else if (action === 'income') setModal({ type: 'addTransaction', defaultType: 'in' });
+      }} />
 
       {modal?.type === 'settings' && <SettingsModal settings={settings} body={body} onSave={saveSettings} onClose={() => setModal(null)} onEditSubject={(k: string) => setModal({ type: 'editSubject', key: k })} onAddSubject={() => setModal({ type: 'editSubject', key: null })} onChallenge={() => setModal({ type: 'challenge' })} onCustomChallenges={() => setModal({ type: 'customChallenges' })} onExportImport={() => setModal({ type: 'exportImport' })} onResetDay={() => setModal({ type: 'resetDay' })} onSyncTransfer={() => setModal({ type: 'syncTransfer' })} onDiagnostics={() => setModal({ type: 'diagnostics' })} />}
       {modal?.type === 'syncTransfer' && <AccountModal onClose={() => setModal({ type: 'settings' })} />}
