@@ -684,6 +684,22 @@ export function FoodTab({ settings, meals, water, exercise, body, onOpenLogger, 
     onSaveMeals({ ...meals, entries: { ...(meals.entries || {}), [selDate]: dayList }, log: { ...meals.log, [selDate]: mealTotalsFromEntries(dayList) } });
   };
 
+  // 7-day calorie/protein summary ending at the viewed day.
+  const week7 = (() => {
+    const out: { date: string; cals: number; protein: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(selDate + 'T00:00:00'); d.setDate(d.getDate() - i);
+      const ds = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      const t: any = meals.log?.[ds] || mealTotalsFromEntries(meals.entries?.[ds] || []);
+      out.push({ date: ds, cals: Math.round(Number(t.calories) || 0), protein: Math.round(Number(t.protein) || 0) });
+    }
+    return out;
+  })();
+  const week7Logged = week7.filter((w) => w.cals > 0);
+  const week7AvgCal = week7Logged.length ? Math.round(week7Logged.reduce((a, w) => a + w.cals, 0) / week7Logged.length) : 0;
+  const week7AvgPro = week7Logged.length ? Math.round(week7Logged.reduce((a, w) => a + w.protein, 0) / week7Logged.length) : 0;
+  const week7Max = Math.max(goal, ...week7.map((w) => w.cals), 1);
+
   const macroBar = (label: string, val: number, tgt: number, color: string) => {
     const pct = tgt > 0 ? Math.min(100, (val / tgt) * 100) : 0;
     return (
@@ -723,6 +739,31 @@ export function FoodTab({ settings, meals, water, exercise, body, onOpenLogger, 
       </div>
 
       {showMicros && settings.microsEnabled && <div style={{ marginBottom: 14 }}><MicrosCard targets={settings.microTargets} totals={totals} /></div>}
+
+      {week7Logged.length > 0 && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div className="between" style={{ marginBottom: 10 }}>
+            <div className="row" style={{ gap: 8, alignItems: 'center' }}><TrendingUp size={15} color="#3B5C6B" /><span className="h2">7-day trend</span></div>
+            <span className="tiny muted">{week7Logged.length}/7 days logged</span>
+          </div>
+          <div style={{ position: 'relative', display: 'flex', gap: 5, alignItems: 'flex-end', height: 60, marginBottom: 10 }}>
+            {goal > 0 && <div title={`Goal ${goal}`} style={{ position: 'absolute', left: 0, right: 0, bottom: `${Math.min(100, (goal / week7Max) * 100)}%`, borderTop: '1px dashed #B8460E', opacity: 0.55 }} />}
+            {week7.map((w) => {
+              const h = (w.cals / week7Max) * 100;
+              const over = goal > 0 && w.cals > goal;
+              return (
+                <div key={w.date} title={`${fmtShortDate(w.date)} · ${w.cals} cal`} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%' }}>
+                  <div style={{ width: '100%', height: `${h}%`, minHeight: w.cals > 0 ? 3 : 0, background: w.cals === 0 ? '#E4DCC8' : over ? '#B8460E' : '#4A6741', borderRadius: '3px 3px 0 0' }} />
+                </div>
+              );
+            })}
+          </div>
+          <div className="row" style={{ gap: 10 }}>
+            <div style={{ flex: 1 }}><div className="tiny muted">Avg calories</div><div className="mono" style={{ fontWeight: 600 }}>{week7AvgCal}{goal > 0 && <span className="tiny muted" style={{ fontWeight: 400 }}> / {goal}</span>}</div></div>
+            <div style={{ flex: 1 }}><div className="tiny muted">Avg protein</div><div className="mono" style={{ fontWeight: 600 }}>{week7AvgPro}g{Number(macroTargets.protein) > 0 && <span className="tiny muted" style={{ fontWeight: 400 }}> / {macroTargets.protein}</span>}</div></div>
+          </div>
+        </div>
+      )}
 
       {dayEntries.length === 0 && prevEntries.length > 0 && (
         <button className="tap" style={{ width: '100%', marginBottom: 12 }} onClick={copyPrevDay}>
