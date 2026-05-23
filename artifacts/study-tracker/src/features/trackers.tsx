@@ -9,11 +9,11 @@ import {
   ArrowRightLeft, Users, Banknote, BadgeAlert, CircleDollarSign, HandCoins, GripVertical,
   Droplets, Utensils, Bike, Copy,
 } from 'lucide-react';
-import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { toast } from 'sonner';
 import { pad, todayStr, tomorrowStr, diffDays, fmtTime, fmtDate, fmtShortDate, dayOfWeek } from '../lib/date';
 import { MEASUREMENT_FIELDS } from '../lib/body';
-import { DEFAULT_WORKOUT_SPLIT, HOME_WORKOUT_SPLIT } from '../lib/workout';
+import { DEFAULT_WORKOUT_SPLIT, HOME_WORKOUT_SPLIT, computePRs, sessionVolume } from '../lib/workout';
 import { ModalShell, VoiceButton } from '../ui';
 
 export function BodyTab({ settings, body, workout, onAddEntry, onEditGoals }: any) {
@@ -441,6 +441,13 @@ export function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, 
     return map;
   }, [workout.logs]);
 
+  const prs = useMemo(() => computePRs(workout.logs), [workout.logs]);
+  const volTrend = useMemo(() => Object.entries(workout.logs)
+    .sort((a: any, b: any) => a[0].localeCompare(b[0]))
+    .map(([date, log]: any) => ({ label: fmtShortDate(date), volume: sessionVolume(log) }))
+    .filter((d) => d.volume > 0)
+    .slice(-10), [workout.logs]);
+
   const toggleMode = async () => {
     const newMode = mode === 'sequence' ? 'calendar' : 'sequence';
     await onSaveWorkout({ ...workout, mode: newMode });
@@ -541,9 +548,42 @@ export function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, 
                 <div className="small" style={{ fontWeight: 600 }}>{log.name || 'Session'}</div>
                 <div className="mono tiny muted">{fmtShortDate(date)}</div>
               </div>
-              <span className="mono tiny muted">{log.exercises?.length || 0} exercises</span>
+              <span className="mono tiny muted">{sessionVolume(log) > 0 ? `${sessionVolume(log).toLocaleString()} lb·reps` : `${log.exercises?.length || 0} ex`}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {prs.length > 0 && (
+        <div className="card">
+          <div className="h2" style={{ marginBottom: 10 }}>Personal records</div>
+          {prs.slice(0, 6).map((p) => (
+            <div key={p.name} className="between" style={{ padding: '8px 0', borderBottom: '1px solid #E4DCC8' }}>
+              <div style={{ minWidth: 0, flex: 1, paddingRight: 10 }}>
+                <div className="small" style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                <div className="mono tiny muted">{fmtShortDate(p.date)}</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div className="mono small" style={{ fontWeight: 600 }}>{p.weight}×{p.reps}</div>
+                <div className="mono tiny muted">~{p.e1rm} est. 1RM</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {volTrend.length >= 2 && (
+        <div className="card">
+          <div className="h2" style={{ marginBottom: 10 }}>Volume · last {volTrend.length} sessions</div>
+          <ResponsiveContainer width="100%" height={150}>
+            <BarChart data={volTrend} margin={{ top: 5, right: 8, left: -6, bottom: 0 }}>
+              <XAxis dataKey="label" tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} interval="preserveStartEnd" minTickGap={20} />
+              <YAxis tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} width={40} />
+              <Tooltip contentStyle={{ fontFamily: 'JetBrains Mono', fontSize: 12, borderRadius: 8 }} />
+              <Bar dataKey="volume" fill="#3B5C6B" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+          <div className="mono tiny muted" style={{ textAlign: 'center' }}>Σ weight × reps per session</div>
         </div>
       )}
 

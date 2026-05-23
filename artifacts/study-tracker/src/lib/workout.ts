@@ -69,3 +69,39 @@ export const HOME_WORKOUT_SPLIT = [
   { day: 5, name: 'The Circuit', rest: false, exercises: HOME_CIRCUIT_EXERCISES },
   { day: 6, name: 'Rest', rest: true, exercises: [] },
 ];
+
+// ── Logged-session analytics: volume, estimated 1RM, and per-exercise PRs ──
+
+// Total lifted = Σ weight × reps across every set in a session.
+export function sessionVolume(log: any): number {
+  let v = 0;
+  for (const ex of (log?.exercises || [])) {
+    for (const s of (ex.sets || [])) v += (Number(s.weight) || 0) * (Number(s.reps) || 0);
+  }
+  return Math.round(v);
+}
+
+// Epley estimated one-rep max.
+export function estimate1RM(weight: number, reps: number): number {
+  if (!weight || !reps) return 0;
+  return Math.round(weight * (1 + reps / 30));
+}
+
+export type PR = { name: string; weight: number; reps: number; e1rm: number; date: string };
+
+// Best set per exercise across all logs, ranked by estimated 1RM.
+export function computePRs(logs: Record<string, any>): PR[] {
+  const best: Record<string, PR> = {};
+  for (const [date, log] of Object.entries(logs || {})) {
+    for (const ex of ((log as any)?.exercises || [])) {
+      for (const s of (ex.sets || [])) {
+        const w = Number(s.weight) || 0, r = Number(s.reps) || 0;
+        if (!w || !r) continue;
+        const e1rm = estimate1RM(w, r);
+        const cur = best[ex.name];
+        if (!cur || e1rm > cur.e1rm) best[ex.name] = { name: ex.name, weight: w, reps: r, e1rm, date };
+      }
+    }
+  }
+  return Object.values(best).sort((a, b) => b.e1rm - a.e1rm);
+}
