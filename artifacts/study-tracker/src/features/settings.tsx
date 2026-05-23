@@ -19,7 +19,7 @@ import { MICRO_DEFS, DEFAULT_MICRO_TARGETS } from '../lib/nutrition';
 import { DEFAULT_SETTINGS, ICON_MAP } from '../lib/defaults';
 import { K, safeGet } from '../lib/storage';
 import { Checkbox, GlobalStyles, ModalShell, SortableRow, useDndSensors } from '../ui';
-import { getSyncId, setSyncId, getStoredUsername, setStoredUsername, clearStoredUsername, clearLocalSyncData, pushAllLocalData } from '../sync';
+import { getSyncId, setSyncId, getStoredUsername, setStoredUsername, clearStoredUsername, clearLocalSyncData, pushAllLocalData, hydrate } from '../sync';
 
 const AUTH_API = (() => {
   const base = (typeof import.meta !== 'undefined' ? (import.meta as any).env?.BASE_URL : '/') || '/';
@@ -1384,7 +1384,6 @@ export function Setup({ onComplete, onImport }: any) {
     try {
       clearLocalSyncData();
       setSyncId(id);
-      const { hydrate } = await import('../sync');
       await hydrate();
       window.location.reload();
     } catch {
