@@ -189,6 +189,13 @@ function removeMealEntry(meals: any, date: string, id: string): any {
   return { ...meals, entries, log: { ...meals.log, [date]: mealTotalsFromEntries(dayList) } };
 }
 
+function updateMealEntry(meals: any, date: string, id: string, patch: any): any {
+  const entries = { ...(meals.entries || {}) };
+  const dayList = (entries[date] || []).map((e: any) => (e.id === id ? { ...e, ...patch } : e));
+  entries[date] = dayList;
+  return { ...meals, entries, log: { ...meals.log, [date]: mealTotalsFromEntries(dayList) } };
+}
+
 // One-time migration: turn legacy daily totals into a single editable entry.
 // Also runs a ONE-TIME purge of macro-only presets (tracked via presetsMicrosMigrated)
 // so the user can re-add them via AI which now grabs micros. After that, manually-created
@@ -3851,6 +3858,11 @@ function servingLabelOf(size: any, unit: any): string {
   if (u !== 'serving') return `${fmtNum(s)} ${u}`;
   return s === 1 ? '1 serving' : `${fmtNum(s)} servings`;
 }
+// Entry name with portion baked in: "Chicken · 150 g" for real units, "Eggs ×2" for servings.
+function entryDisplayName(base: string, amount: number, unit: string, qty: number): string {
+  if (unit && unit !== 'serving') return `${base} · ${fmtNum(amount)} ${unit}`;
+  return qty !== 1 ? `${base} ×${fmtNum(qty)}` : base;
+}
 function QtyStepper({ qty, setQty }: any) {
   return (
     <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 10 }}>
@@ -3881,6 +3893,34 @@ function LogMealModal({ meals, settings, onSave, onClose, targetDate, mealType }
   const fileRef = useRef<HTMLInputElement>(null);
   const barcodeRef = useRef<HTMLInputElement>(null);
   const dayEntries = meals.entries?.[target] || [];
+  // Recently logged foods (distinct by name, newest first) reconstructed to per-serving macros for one-tap re-log.
+  const recents = useMemo(() => {
+    const seen = new Set<string>();
+    const out: any[] = [];
+    const dates = Object.keys(meals.entries || {}).sort().reverse();
+    for (const d of dates) {
+      const list = meals.entries[d] || [];
+      for (let i = list.length - 1; i >= 0; i--) {
+        const e = list[i];
+        const base = (e.baseName || e.name || '').trim();
+        if (!base || base === 'Logged earlier') continue;
+        const key = base.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const q = Number(e.qty) || 1;
+        const per = (v: any) => (Number(v) || 0) / (q || 1);
+        const item: any = {
+          name: base, source: e.source || '',
+          servingSize: Number(e.servingSize) || 1, servingUnit: e.unit || 'serving',
+          protein: Math.round(per(e.protein)), carbs: Math.round(per(e.carbs)), fat: Math.round(per(e.fat)), calories: Math.round(per(e.calories)),
+        };
+        for (const k of MICRO_KEYS) { const v = per(e[k]); item[k] = v < 10 ? Math.round(v * 10) / 10 : Math.round(v); }
+        out.push(item);
+        if (out.length >= 8) return out;
+      }
+    }
+    return out;
+  }, [meals.entries]);
   const scaled = (m: any, q: number) => {
     const out: any = {
       protein: Math.round((m.protein || 0) * q),
@@ -3902,8 +3942,8 @@ function LogMealModal({ meals, settings, onSave, onClose, targetDate, mealType }
     const u = item.servingUnit || 'serving';
     const realUnit = u !== 'serving';
     const amount = realUnit ? Math.round(q * size * 100) / 100 : q;
-    const name = realUnit ? `${item.name} · ${fmtNum(amount)} ${u}` : (q !== 1 ? `${item.name} ×${fmtNum(q)}` : item.name);
-    await onSave(addMealEntry(meals, target, { name, source: item.source || '', qty: q, amount, unit: u, servingSize: size, ...s, ...(mealType ? { meal: mealType } : {}) }));
+    const name = entryDisplayName(item.name, amount, u, q);
+    await onSave(addMealEntry(meals, target, { name, baseName: item.name, source: item.source || '', qty: q, amount, unit: u, servingSize: size, ...s, ...(mealType ? { meal: mealType } : {}) }));
     onClose();
   };
 
@@ -4139,6 +4179,19 @@ function LogMealModal({ meals, settings, onSave, onClose, targetDate, mealType }
         <>
           <div className="muted tiny" style={{ marginBottom: 10 }}>Set servings, then tap a meal to log it.</div>
           <QtyStepper qty={qty} setQty={setQty} />
+          {recents.length > 0 && (
+            <div style={{ marginBottom: 12 }}>
+              <div className="mono tiny muted" style={{ marginBottom: 6 }}>RECENT</div>
+              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                {recents.map((r: any, i: number) => (
+                  <button key={i} className="tap" style={{ textAlign: 'left', flex: '1 1 46%', minWidth: 0, padding: '7px 10px' }} onClick={() => logItem(r, qty)} title={`${r.protein}p · ${r.carbs}c · ${r.fat}f · ${r.calories}cal`}>
+                    <div className="small" style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</div>
+                    <div className="mono tiny muted">{r.calories}cal · {servingLabelOf(r.servingSize, r.servingUnit)}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {meals.presets.length === 0 && <p className="muted small" style={{ marginBottom: 10 }}>No presets yet — tap "+ Save" to add some.</p>}
           {meals.presets.map((p: any) => (
             <div key={p.id} className="card" style={{ padding: 12, marginBottom: 8, cursor: 'pointer' }} onClick={() => logItem(p, qty)}>
@@ -8026,6 +8079,8 @@ function ExerciseLogModal({ date, exercise, settings, body, onSave, onClose }: a
 function FoodTab({ settings, meals, water, exercise, body, onOpenLogger, onSaveMeals, onSaveWater, onSaveExercise, onLogExercise, onCoach }: any) {
   const [selDate, setSelDate] = useState(todayStr());
   const [showMicros, setShowMicros] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editVal, setEditVal] = useState('');
   const sensors = useDndSensors();
   const isToday = selDate === todayStr();
   const shiftDay = (n: number) => {
@@ -8070,6 +8125,21 @@ function FoodTab({ settings, meals, water, exercise, body, onOpenLogger, onSaveM
   const waterGoal = Number(settings.waterGoalOz) || 64;
   const setWaterOz = (oz: number) => onSaveWater({ ...water, [selDate]: Math.max(0, Math.round(oz)) });
   const trashStyle: React.CSSProperties = { background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 2, display: 'flex' };
+  const editStyle: React.CSSProperties = { background: 'none', border: 'none', cursor: 'pointer', color: '#3B5C6B', padding: 2, display: 'flex' };
+  const startEdit = (e: any) => { setEditId(e.id); setEditVal(fmtNum(Number(e.amount ?? e.qty) || 1)); };
+  // Rescale a logged entry to a new amount (in its own unit), keeping macros proportional.
+  const applyEdit = (e: any) => {
+    const next = parseFloat(editVal);
+    const old = Number(e.amount ?? e.qty) || 1;
+    if (!(next > 0) || old <= 0) { setEditId(null); return; }
+    const f = next / old;
+    const patch: any = { amount: next, qty: (Number(e.qty) || 1) * f };
+    for (const k of ['protein', 'carbs', 'fat', 'calories']) patch[k] = Math.round((Number(e[k]) || 0) * f);
+    for (const k of MICRO_KEYS) { const v = (Number(e[k]) || 0) * f; patch[k] = v < 10 ? Math.round(v * 10) / 10 : Math.round(v); }
+    patch.name = entryDisplayName(e.baseName || e.name, next, e.unit || 'serving', patch.qty);
+    onSaveMeals(updateMealEntry(meals, selDate, e.id, patch));
+    setEditId(null);
+  };
 
   const macroBar = (label: string, val: number, tgt: number, color: string) => {
     const pct = tgt > 0 ? Math.min(100, (val / tgt) * 100) : 0;
@@ -8136,10 +8206,22 @@ function FoodTab({ settings, meals, water, exercise, body, onOpenLogger, onSaveM
                           <div className="small" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.name}</div>
                           {e.source && <div className="tiny muted">{e.source}</div>}
                         </div>
-                        <div className="row" style={{ gap: 10, alignItems: 'center' }}>
-                          <span className="mono tiny">{Math.round(Number(e.calories) || 0)}</span>
-                          <button style={trashStyle} onClick={() => onSaveMeals(removeMealEntry(meals, selDate, e.id))}><Trash2 size={14} /></button>
-                        </div>
+                        {editId === e.id ? (
+                          <div className="row" style={{ gap: 4, alignItems: 'center' }}>
+                            <input type="number" inputMode="decimal" value={editVal} autoFocus onChange={(ev) => setEditVal(ev.target.value)}
+                              onKeyDown={(ev) => { if (ev.key === 'Enter') applyEdit(e); if (ev.key === 'Escape') setEditId(null); }}
+                              style={{ width: 56, textAlign: 'center', margin: 0, padding: '4px 6px' }} />
+                            <span className="tiny muted" style={{ whiteSpace: 'nowrap' }}>{e.unit && e.unit !== 'serving' ? e.unit : 'srv'}</span>
+                            <button style={{ ...editStyle, color: '#4A6741' }} onClick={() => applyEdit(e)}><Check size={15} /></button>
+                            <button style={trashStyle} onClick={() => setEditId(null)}><X size={15} /></button>
+                          </div>
+                        ) : (
+                          <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+                            <span className="mono tiny">{Math.round(Number(e.calories) || 0)}</span>
+                            <button style={editStyle} onClick={() => startEdit(e)}><Pencil size={13} /></button>
+                            <button style={trashStyle} onClick={() => onSaveMeals(removeMealEntry(meals, selDate, e.id))}><Trash2 size={14} /></button>
+                          </div>
+                        )}
                       </div>
                     </SortableRow>
                   ))}
