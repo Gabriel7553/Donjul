@@ -649,7 +649,7 @@ export function CustomChallengesModal({ challenges, settings, onSave, onClose }:
 // ════════════════════════════════════════════════════════════════════════════════
 // MONEY TAB — manual personal-finance tracker (Rocket Money inspired)
 // ════════════════════════════════════════════════════════════════════════════════
-export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onCategories, onAddAccount, onEditAccount, onAddDebt, onEditDebt, onAddOwed, onEditOwed, onTransfer, onEditIncome, onTaxModal, onCustomChallenges, onSaveLayout }: any) {
+export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onCategoryBudgets, onCategories, onAddAccount, onEditAccount, onAddDebt, onEditDebt, onAddOwed, onEditOwed, onTransfer, onEditIncome, onTaxModal, onCustomChallenges, onSaveLayout }: any) {
   const today = todayStr();
   const thisMonth = monthKey(today);
   const [viewMonth, setViewMonth] = useState(thisMonth);
@@ -857,6 +857,52 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
             <Target size={14} color="#8E4585" /><span className="small" style={{ flex: 1 }}>Set a monthly budget to track spending</span><ChevronRight size={14} color="#6B6457" />
           </button>
         );
+
+      case 'catbudgets': {
+        const cb = spending.categoryBudgets || {};
+        const budgeted = spending.categories
+          .filter((c: any) => c.kind === 'out' && Number(cb[c.id]) > 0)
+          .map((c: any) => ({ cat: c, limit: Number(cb[c.id]), spent: Math.round(cur.byCat?.[c.id] || 0) }))
+          .sort((a: any, b: any) => (b.spent / b.limit) - (a.spent / a.limit));
+        if (budgeted.length === 0) {
+          return (
+            <button className="tap" onClick={onCategoryBudgets} style={{ width: '100%', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', textAlign: 'left' }}>
+              <Target size={14} color="#6E5C8E" /><span className="small" style={{ flex: 1 }}>Set per-category budgets (e.g. Dining out $200/mo)</span><ChevronRight size={14} color="#6B6457" />
+            </button>
+          );
+        }
+        const totLimit = budgeted.reduce((a: number, b: any) => a + b.limit, 0);
+        const totSpent = budgeted.reduce((a: number, b: any) => a + b.spent, 0);
+        return (
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="between" style={{ marginBottom: 12 }}>
+              <div className="row" style={{ gap: 6 }}><Target size={14} color="#6E5C8E" /><span className="h2">Category budgets · {monthLabel(viewMonth)}</span></div>
+              <button className="tap" onClick={onCategoryBudgets} style={{ padding: '4px 8px', fontSize: 10 }}><Pencil size={10} style={{ verticalAlign: 'middle', marginRight: 3 }} /> Edit</button>
+            </div>
+            {budgeted.map(({ cat, limit, spent }: any) => {
+              const pct = limit > 0 ? (spent / limit) * 100 : 0;
+              const over = spent > limit;
+              const barColor = pct >= 100 ? '#B8460E' : pct >= 80 ? '#C8932E' : cat.color;
+              return (
+                <div key={cat.id} style={{ marginBottom: 12 }}>
+                  <div className="between" style={{ marginBottom: 4 }}>
+                    <span className="small"><span className="swatch" style={{ background: cat.color }} />{cat.name}</span>
+                    <span className="mono small" style={{ color: over ? '#B8460E' : undefined }}>{fmtMoney(spent)} / {fmtMoney(limit)}</span>
+                  </div>
+                  <div style={{ height: 6, background: '#F5F0E6', borderRadius: 4, overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.min(100, pct)}%`, height: '100%', background: barColor, transition: 'width 0.3s' }} />
+                  </div>
+                  <div className="tiny muted" style={{ marginTop: 2 }}>{over ? `Over by ${fmtMoney(spent - limit)}` : `${fmtMoney(limit - spent)} left`}</div>
+                </div>
+              );
+            })}
+            <div className="between" style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #E4DCC8' }}>
+              <span className="small" style={{ fontWeight: 600 }}>Total budgeted</span>
+              <span className="mono small" style={{ color: totSpent > totLimit ? '#B8460E' : undefined, fontWeight: 600 }}>{fmtMoney(totSpent)} / {fmtMoney(totLimit)}</span>
+            </div>
+          </div>
+        );
+      }
 
       case 'savings':
         return goal > 0 ? (
@@ -1569,6 +1615,47 @@ export function MoneyGoalsModal({ spending, onSave, onClose }: any) {
       <button className="btn" style={{ width: '100%' }} onClick={save}>
         <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save goals
       </button>
+    </ModalShell>
+  );
+}
+
+export function CategoryBudgetsModal({ spending, onSave, onClose }: any) {
+  const outCats = spending.categories.filter((c: any) => c.kind === 'out');
+  const [vals, setVals] = useState<Record<string, string>>(() => {
+    const cb = spending.categoryBudgets || {};
+    const o: Record<string, string> = {};
+    for (const c of outCats) o[c.id] = cb[c.id] ? String(cb[c.id]) : '';
+    return o;
+  });
+  const total = outCats.reduce((a: number, c: any) => a + (parseFloat(vals[c.id]) || 0), 0);
+  const save = () => {
+    const cb: Record<string, number> = {};
+    for (const c of outCats) { const n = parseFloat(vals[c.id]) || 0; if (n > 0) cb[c.id] = Math.round(n); }
+    onSave({ ...spending, categoryBudgets: cb });
+    onClose();
+  };
+  return (
+    <ModalShell title="Category budgets" onClose={onClose} icon={<Target size={18} color="#6E5C8E" />}>
+      <p className="muted small" style={{ marginBottom: 14, lineHeight: 1.4 }}>Set a monthly limit per spending category. Leave blank to skip — progress shows against the selected month.</p>
+      {outCats.length === 0 ? (
+        <div className="muted small">Add expense categories first.</div>
+      ) : (
+        <>
+          {outCats.map((c: any) => (
+            <div key={c.id} className="row" style={{ gap: 8, marginBottom: 8, alignItems: 'center' }}>
+              <span className="swatch" style={{ background: c.color }} />
+              <span className="small" style={{ flex: 1 }}>{c.name}</span>
+              <span className="mono muted tiny">$</span>
+              <input type="number" inputMode="decimal" value={vals[c.id]} onChange={(e) => setVals((v) => ({ ...v, [c.id]: e.target.value }))} placeholder="0" style={{ width: 90, margin: 0, padding: '6px 8px', textAlign: 'right' }} />
+            </div>
+          ))}
+          <div className="between" style={{ margin: '12px 0 16px', paddingTop: 10, borderTop: '1px solid #E4DCC8' }}>
+            <span className="small" style={{ fontWeight: 600 }}>Total monthly</span>
+            <span className="mono small" style={{ fontWeight: 600 }}>{fmtMoney(total)}</span>
+          </div>
+          <button className="btn" style={{ width: '100%' }} onClick={save}><Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save budgets</button>
+        </>
+      )}
     </ModalShell>
   );
 }

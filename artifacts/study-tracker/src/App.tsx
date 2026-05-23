@@ -23,7 +23,7 @@ import { HistoryTab, DayDetailModal } from './features/history';
 import { BodyTab, JournalTab, WorkoutTab, PlanTab, PlanDayModal } from './features/trackers';
 import { LogTimeModal, BusyModal, BusyBackModal, AddMeasurementModal, BodyGoalsModal, LogWorkoutModal, EditSplitModal, BUSY_PRESET_DEFAULTS } from './features/dialogs';
 import { AccountModal, SettingsModal, DiagnosticsModal, EditSubjectModal, WeeklyReviewModal, ChallengeModal, ResetDayModal, ExportImportModal, Setup } from './features/settings';
-import { IncomePlannerModal, TaxModal, ChallengePausedModal, CustomChallengesModal, MoneyTab, AddTransactionModal, MoneyGoalsModal, MoneyCategoriesModal, AddAccountModal, AddDebtModal, AddOwedModal, AccountTransferModal } from './features/money';
+import { IncomePlannerModal, TaxModal, ChallengePausedModal, CustomChallengesModal, MoneyTab, AddTransactionModal, MoneyGoalsModal, CategoryBudgetsModal, MoneyCategoriesModal, AddAccountModal, AddDebtModal, AddOwedModal, AccountTransferModal } from './features/money';
 
 // ════════════════════════════════════════════════════════════════════════════════
 // ROOT
@@ -691,6 +691,7 @@ export default function App() {
             onEdit={(entry: any) => setModal({ type: 'addTransaction', entry })}
             onDelete={deleteTransaction}
             onBudget={() => setModal({ type: 'moneyGoals' })}
+            onCategoryBudgets={() => setModal({ type: 'categoryBudgets' })}
             onCategories={() => setModal({ type: 'moneyCategories' })}
             onAddAccount={() => setModal({ type: 'addAccount' })}
             onEditAccount={(account: any) => setModal({ type: 'addAccount', account })}
@@ -765,6 +766,7 @@ export default function App() {
       {modal?.type === 'dayDetail' && <DayDetailModal date={modal.date} settings={settings} totals={totals} workout={workout} meals={meals} body={body} activity={activity} checkins={checkins} spending={spending} customChallenges={customChallenges} onSaveMeals={saveMeals} onSaveWorkout={saveWorkout} onSaveTotals={saveTotals} onSaveCheckins={saveCheckins} onOpenMealLogger={(d: string) => setModal({ type: 'logMeal', targetDate: d, returnTo: { type: 'dayDetail', date: d } })} onClose={() => setModal(null)} />}
       {modal?.type === 'addTransaction' && <AddTransactionModal entry={modal.entry} defaultType={modal.defaultType} spending={spending} onSave={upsertTransaction} onDelete={deleteTransaction} onClose={() => setModal(null)} />}
       {modal?.type === 'moneyGoals' && <MoneyGoalsModal spending={spending} onSave={saveSpending} onClose={() => setModal(null)} />}
+      {modal?.type === 'categoryBudgets' && <CategoryBudgetsModal spending={spending} onSave={saveSpending} onClose={() => setModal(null)} />}
       {modal?.type === 'moneyCategories' && <MoneyCategoriesModal spending={spending} onSave={saveSpending} onClose={() => setModal(null)} />}
       {modal?.type === 'addAccount' && <AddAccountModal account={modal.account} onSave={upsertAccount} onDelete={deleteAccount} onClose={() => setModal(null)} />}
       {modal?.type === 'addDebt' && <AddDebtModal debt={modal.debt} onSave={upsertDebt} onDelete={deleteDebt} onClose={() => setModal(null)} />}

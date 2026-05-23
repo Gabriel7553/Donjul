@@ -171,13 +171,14 @@ export function upcomingBills(spending: any, leadDays: number, today: string = t
 }
 
 export const MONEY_DEFAULT_ORDER = [
-  'ytd','accounts','budget','savings','trend','daily',
+  'ytd','accounts','budget','catbudgets','savings','trend','daily',
   'debt','income_payoff','tax','categories','recurring','owed','transactions',
 ];
 export const MONEY_LABELS: Record<string, string> = {
   ytd: '💰 YTD Income',
   accounts: '🏦 Accounts',
   budget: '📊 Budget',
+  catbudgets: '🎯 Category Budgets',
   savings: '🐷 Savings Goal',
   trend: '📈 6-Month Trend',
   daily: '📅 Daily Spending',
