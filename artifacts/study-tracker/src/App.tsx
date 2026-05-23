@@ -13,6 +13,7 @@ import { normalizeSubject, doneThisWeek } from './lib/study';
 import { DEFAULT_WORKOUT_SPLIT } from './lib/workout';
 import { DEFAULT_SETTINGS } from './lib/defaults';
 import { fireDueReminders } from './lib/reminders';
+import type { Settings, MealsState, BodyState, WorkoutState, SpendingState, Streaks, StudyTotals, Checkins, WaterLog } from './lib/types';
 import { GlobalStyles, Header, BottomNav } from './ui';
 import { TodayTab, NutritionCoachModal } from './features/today';
 import { InsightsTab } from './features/insights';
@@ -29,24 +30,24 @@ import { IncomePlannerModal, TaxModal, ChallengePausedModal, CustomChallengesMod
 export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [tab, setTab] = useState('today');
-  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS as Settings);
   const [daily, setDaily] = useState<any>(null);
-  const [totals, setTotals] = useState<any>({});
-  const [body, setBody] = useState<any>({ entries: [] });
-  const [workout, setWorkout] = useState<any>({ split: DEFAULT_WORKOUT_SPLIT, logs: {}, mode: 'sequence', sequencePosition: 1 });
-  const [meals, setMeals] = useState<any>({ presets: [], log: {} });
+  const [totals, setTotals] = useState<StudyTotals>({});
+  const [body, setBody] = useState<BodyState>({ entries: [] });
+  const [workout, setWorkout] = useState<WorkoutState>({ split: DEFAULT_WORKOUT_SPLIT, logs: {}, mode: 'sequence', sequencePosition: 1 });
+  const [meals, setMeals] = useState<MealsState>({ presets: [], log: {} });
   const [plans, setPlans] = useState<any>({});
-  const [streaks, setStreaks] = useState<any>({});
+  const [streaks, setStreaks] = useState<Streaks>({});
   const [weeklyAck, setWeeklyAck] = useState<any>({ lastAck: null });
   const [journal, setJournal] = useState<any>({});
   const [challengeHistory, setChallengeHistory] = useState<any[]>([]);
   const [busyPresets, setBusyPresets] = useState<string[]>(BUSY_PRESET_DEFAULTS);
-  const [checkins, setCheckins] = useState<any>({});
+  const [checkins, setCheckins] = useState<Checkins>({});
   const [activity, setActivity] = useState<any>({});
-  const [spending, setSpending] = useState<any>(DEFAULT_SPENDING);
+  const [spending, setSpending] = useState<SpendingState>(DEFAULT_SPENDING as SpendingState);
   const [tax, setTax] = useState<any>(DEFAULT_TAX);
   const [customChallenges, setCustomChallenges] = useState<any[]>([]);
-  const [water, setWater] = useState<any>({});
+  const [water, setWater] = useState<WaterLog>({});
   const [exercise, setExercise] = useState<any>({});
   const [modal, setModal] = useState<any>(null);
 
@@ -399,7 +400,7 @@ export default function App() {
       const cur = streaks[subject] || { current: 0, longest: 0, lastDate: null };
       if (cur.lastDate !== today) {
         const yest = (() => { const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; })();
-        const continuing = cur.lastDate === yest || diffDays(today, cur.lastDate) <= 2;
+        const continuing = !!cur.lastDate && (cur.lastDate === yest || diffDays(today, cur.lastDate) <= 2);
         const newCurrent = continuing ? cur.current + 1 : 1;
         await saveStreaks({ ...streaks, [subject]: { current: newCurrent, longest: Math.max(cur.longest, newCurrent), lastDate: today } });
       }
@@ -437,7 +438,7 @@ export default function App() {
       const cur = streaks[subject] || { current: 0, longest: 0, lastDate: null };
       if (cur.lastDate !== today) {
         const yest = (() => { const d = new Date(today + 'T00:00:00'); d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; })();
-        const continuing = cur.lastDate === yest || diffDays(today, cur.lastDate) <= 2;
+        const continuing = !!cur.lastDate && (cur.lastDate === yest || diffDays(today, cur.lastDate) <= 2);
         const newCurrent = continuing ? cur.current + 1 : 1;
         const next = { ...streaks, [subject]: { current: newCurrent, longest: Math.max(cur.longest, newCurrent), lastDate: today } };
         await saveStreaks(next);
