@@ -14,7 +14,7 @@ import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { toast } from 'sonner';
 import { pad, todayStr, diffDays, fmtShortDate } from '../lib/date';
-import { ACCOUNT_COLORS, DEBT_TYPES, MONEY_DEFAULT_ORDER, MONEY_LABELS, calcDailyInterest, calcMonthlyInterest, calcPayoffMonths, calcTotalInterestAtMin, fmtMoney, fmtPayoff, monthKey, monthLabel, monthShort, nextMonth, prevMonth, spendingByMonth } from '../lib/money';
+import { ACCOUNT_COLORS, DEBT_TYPES, MONEY_DEFAULT_ORDER, MONEY_LABELS, calcDailyInterest, calcMonthlyInterest, calcPayoffMonths, calcTotalInterestAtMin, fmtMoney, fmtPayoff, monthKey, monthLabel, monthShort, nextMonth, prevMonth, spendingByMonth, upcomingBills } from '../lib/money';
 import { CURRENT_TAX_YEAR, PAYER_PRESETS, calcTaxEstimate, makeYearData, migrateTax } from '../lib/tax';
 import { ModalShell, SortableRow, useDndSensors } from '../ui';
 
@@ -758,6 +758,24 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
     return [...saved.filter((x: string) => MONEY_DEFAULT_ORDER.includes(x)), ...MONEY_DEFAULT_ORDER.filter((x) => !saved.includes(x))];
   }, [spending.sectionOrder]);
 
+  // Export the full transaction history to a CSV download (resolves category/account names).
+  const exportCsv = () => {
+    const esc = (v: any) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const rows: any[][] = [['Date', 'Type', 'Amount', 'Category', 'Account', 'Name', 'Recurring']];
+    for (const e of [...spending.entries].sort((a: any, b: any) => String(b.date).localeCompare(String(a.date)))) {
+      const cat = catMap[e.categoryId];
+      const acct = accounts.find((a: any) => a.id === e.accountId);
+      rows.push([e.date, e.type === 'in' ? 'Income' : 'Expense', e.amount, cat?.name || 'Other', acct?.name || '', e.name || '', e.recurring ? 'yes' : '']);
+    }
+    const csv = rows.map((r) => r.map(esc).join(',')).join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = `donjul-transactions-${todayStr()}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast.success(`Exported ${spending.entries.length} transactions`);
+  };
+
   const netDelta = cur.net - prev.net;
   const spentDelta = prev.spent > 0 ? ((cur.spent - prev.spent) / prev.spent) * 100 : 0;
   const trendMax = Math.max(1, ...trend.map((t) => Math.max(t.income, t.spent)));
@@ -1156,6 +1174,28 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
           </div>
         ) : null;
 
+      case 'bills': {
+        const bills = upcomingBills(spending, 14);
+        if (bills.length === 0) return null;
+        return (
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div className="between" style={{ marginBottom: 12 }}>
+              <div className="row" style={{ gap: 6 }}><CalIcon size={14} color="#6E5C8E" /><span className="h2">Upcoming bills · 14 days</span></div>
+              <span className="mono tiny muted">{fmtMoney(bills.reduce((s: number, b: any) => s + b.amount, 0))}</span>
+            </div>
+            {bills.map((b: any, i: number) => (
+              <div key={i} className="between" style={{ padding: '8px 0', borderBottom: i < bills.length - 1 ? '1px solid #F0EAD8' : 'none' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div className="small" style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.label}</div>
+                  <div className="tiny muted">{fmtShortDate(b.dueDate)} · {b.daysUntil === 0 ? 'due today' : `in ${b.daysUntil}d`}</div>
+                </div>
+                {b.amount > 0 && <span className="mono small" style={{ color: '#B8460E' }}>{fmtMoney(b.amount)}</span>}
+              </div>
+            ))}
+          </div>
+        );
+      }
+
       case 'owed':
         return (
           <div className="card" style={{ marginBottom: 14 }}>
@@ -1183,7 +1223,10 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
           <div className="card">
             <div className="between" style={{ marginBottom: 10 }}>
               <div className="row" style={{ gap: 6 }}><Receipt size={14} color="#1A1A2E" /><span className="h2">Transactions</span></div>
-              <span className="tiny muted mono">{filteredRecent.length}{hasFilters ? ` / ${recent.length}` : ''} this month</span>
+              <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                {spending.entries.length > 0 && <button className="tap" onClick={exportCsv} style={{ padding: '4px 8px', fontSize: 10 }}><Download size={10} style={{ verticalAlign: 'middle', marginRight: 3 }} />CSV</button>}
+                <span className="tiny muted mono">{filteredRecent.length}{hasFilters ? ` / ${recent.length}` : ''} this month</span>
+              </div>
             </div>
             <div style={{ position: 'relative', marginBottom: 8 }}>
               <input type="text" value={txFilter} onChange={(e) => setTxFilter(e.target.value)} placeholder="Search by name…" style={{ paddingLeft: 32, fontSize: 13, padding: '8px 10px 8px 32px' }} />

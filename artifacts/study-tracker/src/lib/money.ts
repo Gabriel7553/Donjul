@@ -172,7 +172,7 @@ export function upcomingBills(spending: any, leadDays: number, today: string = t
 
 export const MONEY_DEFAULT_ORDER = [
   'ytd','accounts','budget','catbudgets','savings','trend','daily',
-  'debt','income_payoff','tax','categories','recurring','owed','transactions',
+  'debt','income_payoff','tax','categories','recurring','bills','owed','transactions',
 ];
 export const MONEY_LABELS: Record<string, string> = {
   ytd: '💰 YTD Income',
@@ -187,6 +187,7 @@ export const MONEY_LABELS: Record<string, string> = {
   tax: '🧾 Tax Tracker',
   categories: '🥧 Where It Went',
   recurring: '🔁 Recurring',
+  bills: '📅 Upcoming Bills',
   owed: '🤝 People Owe Me',
   transactions: '🧾 Transactions',
 };
