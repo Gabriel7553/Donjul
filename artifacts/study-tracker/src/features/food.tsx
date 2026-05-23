@@ -32,6 +32,8 @@ export function LogMealModal({ meals, settings, onSave, onClose, targetDate, mea
   const [scanState, setScanState] = useState<'idle'|'scanning'|'done'|'error'>('idle');
   const [scanError, setScanError] = useState('');
   const [review, setReview] = useState<any>(null); // parsed item awaiting log/save (scan/type/barcode)
+  const [editId, setEditId] = useState<string | null>(null); // preset being adjusted before logging
+  const [editQty, setEditQty] = useState(1);
   const [typeText, setTypeText] = useState('');
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -337,7 +339,9 @@ export function LogMealModal({ meals, settings, onSave, onClose, targetDate, mea
             </div>
           )}
           {meals.presets.length === 0 && <p className="muted small" style={{ marginBottom: 10 }}>No presets yet — tap "+ Save" to add some.</p>}
-          {meals.presets.map((p: any) => (
+          {meals.presets.map((p: any) => {
+            const isEditing = editId === p.id;
+            return (
             <div key={p.id} className="card" style={{ padding: 12, marginBottom: 8, cursor: 'pointer' }} onClick={() => logItem(p, qty)}>
               <div className="between">
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -348,12 +352,31 @@ export function LogMealModal({ meals, settings, onSave, onClose, targetDate, mea
                   )}
                   <div className="mono tiny muted" style={{ marginTop: 3 }}>{p.protein}p · {p.carbs}c · {p.fat}f · {p.calories}cal{qty !== 1 ? ` (×${qty})` : ''}</div>
                 </div>
-                <button onClick={(e) => { e.stopPropagation(); removePreset(p.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 4 }}>
-                  <Trash2 size={14} />
-                </button>
+                <div className="row" style={{ gap: 2 }}>
+                  <button onClick={(e) => { e.stopPropagation(); setEditId(isEditing ? null : p.id); setEditQty(1); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: isEditing ? '#1A1A2E' : '#6B6457', padding: 4 }} title="Adjust servings before logging">
+                    <Pencil size={14} />
+                  </button>
+                  <button onClick={(e) => { e.stopPropagation(); removePreset(p.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 4 }}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
+              {isEditing && (() => {
+                const sc = scaled(p, editQty);
+                const size = Number(p.servingSize) || 1;
+                const u = p.servingUnit || 'serving';
+                const amtLabel = u !== 'serving' ? `${fmtNum(editQty * size)} ${u}` : (editQty === 1 ? '1 serving' : `${fmtNum(editQty)} servings`);
+                return (
+                  <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #E4DCC8' }}>
+                    <QtyStepper qty={editQty} setQty={setEditQty} />
+                    <div className="mono tiny muted" style={{ marginBottom: 8 }}>{amtLabel} · {sc.protein}p · {sc.carbs}c · {sc.fat}f · {sc.calories}cal</div>
+                    <button className="btn" style={{ width: '100%' }} onClick={() => logItem(p, editQty)}>Log {amtLabel}</button>
+                  </div>
+                );
+              })()}
             </div>
-          ))}
+          );
+          })}
         </>
       )}
 
