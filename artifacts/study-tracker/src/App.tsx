@@ -1,40 +1,18 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import {
-  Sun, Home, Footprints, Check, Plus, Settings as SettingsIcon, X, Music, Languages, Shield,
-  Award, Save, Calendar as CalIcon, Activity, Dumbbell, Apple, ListChecks, ChevronRight, ChevronDown, ChevronLeft,
-  TrendingUp, TrendingDown, Edit3, Trash2, Flame, ArrowUp, ArrowDown, Minus, Target, BookOpen, Clock, Moon, Coffee,
-  Download, Upload, History, Repeat, Zap, Play, AlertTriangle, RotateCcw, MapPin, Building2, TreePine,
-  Camera, BookMarked, TrendingUp as Journal, DollarSign, ShoppingCart, Briefcase, Car, ChevronUp, Trophy, Archive, Infinity, Mic,
-  Wallet, PiggyBank, CreditCard, PieChart, Receipt, Pencil, ArrowUpRight, ArrowDownRight, Sparkles,
-  ArrowRightLeft, Users, Banknote, BadgeAlert, CircleDollarSign, HandCoins, GripVertical,
-  Droplets, Utensils, Bike, Copy
-} from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Check, Trophy } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import confetti from 'canvas-confetti';
-import { motion } from 'framer-motion';
-import { pushKey as syncPushKey, getSyncId, setSyncId, getStoredUsername, setStoredUsername, clearStoredUsername, clearLocalSyncData, pushAllLocalData } from './sync';
-import {
-  DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor,
-  useSensor, useSensors, type DragEndEvent
-} from '@dnd-kit/core';
-import {
-  arrayMove, SortableContext, sortableKeyboardCoordinates,
-  useSortable, verticalListSortingStrategy
-} from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
 import { haptic, celebrate } from './lib/haptics';
 import { K, safeGet, safeSet, createBackup } from './lib/storage';
-import { pad, todayStr, tomorrowStr, nowHHMM, addMonth, diffDays, addMinutes, fmtTime, fmtDate, fmtShortDate, dayOfWeek, isSunday, timeToMins, minsToHHMM, weekStartStr } from './lib/date';
-import { MICRO_KEYS, MICRO_DEFS, DEFAULT_MICRO_TARGETS, type MicroDef, mealTotalsFromEntries, addMealEntry, removeMealEntry, updateMealEntry, migrateMeals, fileToResizedBase64, SAMPLE_PRESETS, isCompletePreset, FOOD_UNITS, fmtNum, servingLabelOf, entryDisplayName } from './lib/nutrition';
-import { DEFAULT_SPEND_CATEGORIES, DEFAULT_SPENDING, migrateSpending, ACCOUNT_COLORS, DEBT_TYPES, calcDailyInterest, calcMonthlyInterest, calcPayoffMonths, calcTotalInterestAtMin, fmtPayoff, fmtMoney, monthKey, monthLabel, monthShort, prevMonth, nextMonth, spendingByMonth, MONEY_DEFAULT_ORDER, MONEY_LABELS } from './lib/money';
-import { CURRENT_TAX_YEAR, FED_BRACKETS, CA_BRACKETS, STD_DEDUCTION, SS_WAGE_BASE, CA_STD_DEDUCT, applyBrackets, PAYER_PRESETS, makeYearData, DEFAULT_TAX, migrateTax, calcTaxEstimate } from './lib/tax';
-import { CUSTOM_CHALLENGE_EMOJIS, getCustomStreak, tickChallengesForSubject, pauseStaleChallenges } from './lib/challenges';
-import { computeAchievements, suggestMacros, suggestMicros, lbToKg, inToCm, latestWeightLb, computeBMR, activityFactor, computeTDEE, calorieGoal, MET_BY_TYPE, estimateBurn, sumBurn, MEASUREMENT_FIELDS } from './lib/body';
-import { SUBJECTS_DEFAULT, normalizeSubject, subjectGoalKind, doneThisWeek, doneTotal, projectedDate, CATCHUP_SPREAD_OPTIONS, getRequiredDailyMins, daysLeftInWeek, expectedTotal, targetTotalByDeadline, buildSchedule, splitSpanish } from './lib/study';
-import { DEFAULT_WORKOUT_SPLIT, HOME_CIRCUIT_EXERCISES, HOME_WORKOUT_SPLIT } from './lib/workout';
-import { ICON_MAP, DEFAULT_SETTINGS } from './lib/defaults';
-import { useCurrentTime, SortableRow, useDndSensors, GlobalStyles, Header, BottomNav, ModalShell, VoiceButton, QtyStepper, Checkbox } from './ui';
+import { pad, todayStr, nowHHMM, addMonth, diffDays, addMinutes, isSunday, timeToMins } from './lib/date';
+import { addMealEntry, migrateMeals, SAMPLE_PRESETS } from './lib/nutrition';
+import { DEFAULT_SPENDING, migrateSpending, calcDailyInterest, fmtMoney } from './lib/money';
+import { DEFAULT_TAX, migrateTax } from './lib/tax';
+import { tickChallengesForSubject, pauseStaleChallenges } from './lib/challenges';
+import { computeAchievements } from './lib/body';
+import { normalizeSubject, doneThisWeek } from './lib/study';
+import { DEFAULT_WORKOUT_SPLIT } from './lib/workout';
+import { DEFAULT_SETTINGS } from './lib/defaults';
+import { GlobalStyles, Header, BottomNav } from './ui';
 import { TodayTab, NutritionCoachModal } from './features/today';
 import { LogMealModal, ExerciseLogModal, FoodTab } from './features/food';
 import { HistoryTab, DayDetailModal } from './features/history';
@@ -42,12 +20,6 @@ import { BodyTab, JournalTab, WorkoutTab, PlanTab, PlanDayModal } from './featur
 import { LogTimeModal, BusyModal, BusyBackModal, AddMeasurementModal, BodyGoalsModal, LogWorkoutModal, EditSplitModal, BUSY_PRESET_DEFAULTS } from './features/dialogs';
 import { AccountModal, SettingsModal, DiagnosticsModal, EditSubjectModal, WeeklyReviewModal, ChallengeModal, ResetDayModal, ExportImportModal, Setup } from './features/settings';
 import { IncomePlannerModal, TaxModal, ChallengePausedModal, CustomChallengesModal, MoneyTab, AddTransactionModal, MoneyGoalsModal, MoneyCategoriesModal, AddAccountModal, AddDebtModal, AddOwedModal, AccountTransferModal } from './features/money';
-
-
-
-
-
-
 
 // ════════════════════════════════════════════════════════════════════════════════
 // ROOT
