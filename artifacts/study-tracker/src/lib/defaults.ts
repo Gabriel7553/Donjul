@@ -2,6 +2,7 @@ import { Languages, Music, Shield, BookOpen, Target, Dumbbell, Activity } from '
 import { todayStr, tomorrowStr } from './date';
 import { DEFAULT_MICRO_TARGETS } from './nutrition';
 import { SUBJECTS_DEFAULT } from './study';
+import { DEFAULT_REMINDERS } from './reminders';
 
 export const ICON_MAP: Record<string, any> = { languages: Languages, music: Music, shield: Shield, book: BookOpen, target: Target, dumbbell: Dumbbell, activity: Activity, run: Activity };
 
@@ -15,6 +16,7 @@ export const DEFAULT_SETTINGS: Record<string, any> = {
   lengthUnit: 'in',
   weekStart: 'sun',
   reminders: false,
+  reminderList: DEFAULT_REMINDERS,
   theme: 'light',
   todayLayout: ['schedule', 'progress', 'nutrition', 'challenges'],
   subjects: SUBJECTS_DEFAULT,

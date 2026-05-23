@@ -12,6 +12,7 @@ import { computeAchievements } from './lib/body';
 import { normalizeSubject, doneThisWeek } from './lib/study';
 import { DEFAULT_WORKOUT_SPLIT } from './lib/workout';
 import { DEFAULT_SETTINGS } from './lib/defaults';
+import { fireDueReminders } from './lib/reminders';
 import { GlobalStyles, Header, BottomNav } from './ui';
 import { TodayTab, NutritionCoachModal } from './features/today';
 import { InsightsTab } from './features/insights';
@@ -53,6 +54,15 @@ export default function App() {
   useEffect(() => {
     if (tab !== 'today' && (settings.navHidden || []).includes(tab)) setTab('today');
   }, [tab, settings.navHidden]);
+
+  // Fire local reminders while the app is open (no push server; foreground only).
+  useEffect(() => {
+    if (!settings.reminders) return;
+    const check = () => fireDueReminders(settings.reminderList || [], nowHHMM(), todayStr());
+    check();
+    const id = setInterval(check, 30000);
+    return () => clearInterval(id);
+  }, [settings.reminders, settings.reminderList]);
 
   useEffect(() => {
     (async () => {

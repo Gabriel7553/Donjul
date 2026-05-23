@@ -7,7 +7,7 @@ import {
   Camera, BookMarked, TrendingUp as Journal, DollarSign, ShoppingCart, Briefcase, Car, ChevronUp, Trophy, Archive, Infinity, Mic,
   Wallet, PiggyBank, CreditCard, PieChart, Receipt, Pencil, ArrowUpRight, ArrowDownRight, Sparkles,
   ArrowRightLeft, Users, Banknote, BadgeAlert, CircleDollarSign, HandCoins, GripVertical,
-  Droplets, Utensils, Bike, Copy, Eye, EyeOff,
+  Droplets, Utensils, Bike, Copy, Eye, EyeOff, Bell,
 } from 'lucide-react';
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -17,6 +17,7 @@ import { normalizeSubject, subjectGoalKind, expectedTotal, CATCHUP_SPREAD_OPTION
 import { suggestMacros, suggestMicros, computeTDEE, calorieGoal } from '../lib/body';
 import { MICRO_DEFS, DEFAULT_MICRO_TARGETS } from '../lib/nutrition';
 import { DEFAULT_SETTINGS, ICON_MAP } from '../lib/defaults';
+import { requestNotifyPermission, notificationsSupported } from '../lib/reminders';
 import { K, safeGet } from '../lib/storage';
 import { Checkbox, GlobalStyles, ModalShell, SortableRow, useDndSensors, NAV_TABS } from '../ui';
 import { getSyncId, setSyncId, getStoredUsername, setStoredUsername, clearStoredUsername, clearLocalSyncData, pushAllLocalData, hydrate } from '../sync';
@@ -272,6 +273,21 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
     const next = navHidden.includes(key) ? navHidden.filter((k) => k !== key) : [...navHidden, key];
     const nd2 = { ...draft, navHidden: next };
     setDraft(nd2); onSave(nd2);
+  };
+
+  const [reminderErr, setReminderErr] = useState('');
+  const updateReminder = (id: string, patch: any) => {
+    const list = (draft.reminderList || []).map((r: any) => (r.id === id ? { ...r, ...patch } : r));
+    const nd2 = { ...draft, reminderList: list };
+    setDraft(nd2); onSave(nd2);
+  };
+  const toggleReminders = async () => {
+    if (!draft.reminders) {
+      const ok = await requestNotifyPermission();
+      if (!ok) { setReminderErr(notificationsSupported() ? 'Allow notifications in your browser settings to enable reminders.' : 'This device does not support notifications.'); return; }
+      setReminderErr('');
+    }
+    update({ reminders: !draft.reminders });
   };
 
   return (
@@ -608,15 +624,32 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
         </div>
       </div>
 
-      <div className="between" style={{ padding: '8px 0', borderBottom: '1px solid #E4DCC8' }}>
-        <span className="small">Reminders / notifications</span>
-        <button
-          className="tap"
-          style={{ padding: '4px 12px', fontSize: 12, color: draft.reminders ? '#4A6741' : '#6B6457' }}
-          onClick={() => update({ reminders: !draft.reminders })}
-        >
-          {draft.reminders ? 'On' : 'Off'}
-        </button>
+      <div style={{ padding: '8px 0', borderBottom: '1px solid #E4DCC8' }}>
+        <div className="between">
+          <span className="small"><Bell size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} />Reminders</span>
+          <button
+            className="tap"
+            style={{ padding: '4px 12px', fontSize: 12, color: draft.reminders ? '#4A6741' : '#6B6457' }}
+            onClick={toggleReminders}
+          >
+            {draft.reminders ? 'On' : 'Off'}
+          </button>
+        </div>
+        {reminderErr && <div className="tiny" style={{ color: '#B8460E', marginTop: 4, lineHeight: 1.4 }}>{reminderErr}</div>}
+        {draft.reminders && (
+          <>
+            <div className="muted tiny" style={{ margin: '6px 0 8px', lineHeight: 1.5 }}>Fires while the app is open in your browser. Times are local.</div>
+            {(draft.reminderList || []).map((r: any) => (
+              <div key={r.id} className="between" style={{ padding: '6px 0' }}>
+                <div className="row" style={{ gap: 8, minWidth: 0 }}>
+                  <Checkbox checked={r.enabled} onChange={() => updateReminder(r.id, { enabled: !r.enabled })} accent="#4A6741" />
+                  <span className="small" onClick={() => updateReminder(r.id, { enabled: !r.enabled })} style={{ cursor: 'pointer', color: r.enabled ? undefined : '#6B6457' }}>{r.label}</span>
+                </div>
+                <input type="time" value={r.time} onChange={(e) => updateReminder(r.id, { time: e.target.value })} disabled={!r.enabled} style={{ width: 116 }} />
+              </div>
+            ))}
+          </>
+        )}
       </div>
 
       <div className="between" style={{ padding: '8px 0', marginBottom: 8, borderBottom: '1px solid #E4DCC8' }}>
