@@ -15,7 +15,7 @@ Personal study / fitness / nutrition / spending tracker. Single-user offline-fir
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
-- SPA: React + Vite (single big `App.tsx`, ~8.3k lines, intentionally monolithic for now)
+- SPA: React + Vite (modular: thin `App.tsx` root + `src/lib` logic, `src/features` screens/modals, `src/ui.tsx` primitives)
 - API: Express 5
 - DB: PostgreSQL + Drizzle ORM (Zod via `zod/v4`, `drizzle-zod`)
 - API codegen: Orval (from OpenAPI spec)
@@ -23,15 +23,20 @@ Personal study / fitness / nutrition / spending tracker. Single-user offline-fir
 
 ## Where things live
 
-- `artifacts/study-tracker/src/App.tsx` — entire SPA (state, modals, screens)
-- `artifacts/study-tracker/src/ErrorBoundary.tsx` — React error UI + log to `localStorage:st:errorLog`
-- `artifacts/study-tracker/src/main.tsx` — boot shell with loading spinner + 8s hydrate timeout + global error listeners
-- `artifacts/study-tracker/src/sync.ts` — `hydrate()` / push / pull, talks to API server
+SPA paths are under `artifacts/study-tracker/src/`.
+
+- `App.tsx` — the root `App()` only: top-level state, hydration/persistence effects, modal router, and tab switch (~760 lines)
+- `lib/` — pure logic & data, no JSX: `date`, `storage`, `haptics`, `nutrition`, `money`, `tax`, `challenges`, `body`, `study`, `workout`, `defaults`
+- `ui.tsx` — shared presentational primitives (GlobalStyles, Header, BottomNav, Checkbox, QtyStepper, VoiceButton, SortableRow, shared hooks)
+- `features/` — screens + their modals: `today`, `food`, `history`, `trackers`, `dialogs`, `settings`, `money`, `cards`
+- `ErrorBoundary.tsx` — React error UI + log to `localStorage:st:errorLog`
+- `main.tsx` — boot shell with loading spinner + 8s hydrate timeout + global error listeners
+- `sync.ts` — `hydrate()` / push / pull, talks to API server
 - `artifacts/api-server/src/routes/sync.ts` — sync endpoints
 
 ## Architecture decisions
 
-- `App.tsx` is a single file by design; refactor only with strong justification.
+- `App.tsx` was split (2026-05-23) into `lib/` (pure logic), `ui.tsx` (shared primitives), and `features/` (screens + modals). `App()` itself stays the thin root that owns state and routes modals/tabs. Put new pure helpers in `lib/`, shared UI in `ui.tsx`, and screen/modal code in `features/`.
 - `Infinity` is shadowed by a Lucide import — use `Number.POSITIVE_INFINITY`.
 - All meal operations must persist presets + entries in **one** `onSave` call (avoid stale-closure overwrites — see `logCombo`).
 - Boot path always renders a shell first (`main.tsx` → `BootShell`) so a hung `hydrate()` cannot produce a blank page.
@@ -58,11 +63,12 @@ Daily tracker with: schedule (subjects/tasks with catch-up), Body/Lift, Money (s
 ## Session log
 
 - **2026-05-22**: ErrorBoundary + global error listeners; LogMealModal refactor (`targetDate` prop, Scan styling normalized); combo auto-saves ingredients as presets in a single save; DayDetailModal "Open full logger" button with return-to-day-detail; Settings prominent sign-in card; `pauseStaleChallenges` + `ChallengePausedModal` (Restart/End); boot shell in `main.tsx` with loading spinner, 8s hydrate timeout, and "Continue offline" recovery so the page is never blank. Service worker cache version bumped to `donjul-v3-20260522`; SW auto-update + reload-on-controllerchange added so users always get the latest bundle; `window.__donjulReset()` console helper unregisters SW + clears caches for hard recovery.
+- **2026-05-23**: Split the monolithic `App.tsx` (~9k lines) into focused modules — `src/lib/*` (pure logic/data), `src/ui.tsx` (shared primitives), `src/features/*` (screens + modals). `App.tsx` is now the ~760-line root (state, hydration, modal router, tab switch). Mechanical move, behavior unchanged; full typecheck + production build green. SW cache bumped `donjul-v3-20260522` → `donjul-v4-20260523`. Not yet smoke-tested in a browser.
 - **Deferred**: Fuel tab (MFP-style meal-time grouping + water + calorie-burn); preset-edit-before-log (qty/unit edit inline before adding).
 
 ## Cache / blank-screen recovery
 
-Whenever shipping changes that touch `App.tsx`, `main.tsx`, or assets, bump `CACHE` in `artifacts/study-tracker/public/sw.js` (e.g. `donjul-v3-…` → `donjul-v4-…`). If a user reports a blank page, ask them to: (1) hard-refresh (Ctrl/Cmd+Shift+R), or (2) open devtools console and run `__donjulReset()`.
+Whenever shipping changes that touch `App.tsx`, `main.tsx`, or assets, bump `CACHE` in `artifacts/study-tracker/public/sw.js` (e.g. `donjul-v4-…` → `donjul-v5-…`). If a user reports a blank page, ask them to: (1) hard-refresh (Ctrl/Cmd+Shift+R), or (2) open devtools console and run `__donjulReset()`.
 
 ## Pointers
 
