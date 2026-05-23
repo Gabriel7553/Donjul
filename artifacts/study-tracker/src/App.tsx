@@ -4377,12 +4377,13 @@ function AccountModal({ onClose }: { onClose: () => void }) {
   const [loggedInAs] = useState(() => getStoredUsername());
   const [tab, setTab] = useState<'signin' | 'signup'>('signin');
   const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
 
-  const reset = () => { setUsername(''); setPassword(''); setConfirmPw(''); setErr(''); };
+  const reset = () => { setUsername(''); setEmail(''); setPassword(''); setConfirmPw(''); setErr(''); };
 
   const handleSignIn = async () => {
     setErr('');
@@ -4417,7 +4418,7 @@ function AccountModal({ onClose }: { onClose: () => void }) {
       const resp = await fetch(`${AUTH_API}/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: username.trim(), password }),
+        body: JSON.stringify({ username: username.trim(), password, email: email.trim() || undefined }),
       });
       const data = await resp.json();
       if (!resp.ok) { setErr(data.error || 'Registration failed.'); setLoading(false); return; }
@@ -4445,17 +4446,22 @@ function AccountModal({ onClose }: { onClose: () => void }) {
   if (loggedInAs) {
     return (
       <ModalShell title="Account" onClose={onClose} icon={<Users size={18} color="#8E4585" />}>
-        <div style={{ padding: '14px 0', borderBottom: '1px solid var(--border)', marginBottom: 16 }}>
-          <div className="small muted" style={{ marginBottom: 4 }}>Signed in as</div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', padding: '6px 0 18px' }}>
+          <div style={{ width: 64, height: 64, borderRadius: '50%', background: '#8E4585', color: '#F5F0E6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, fontWeight: 600, marginBottom: 12 }}>
+            {(loggedInAs[0] || '?').toUpperCase()}
+          </div>
+          <div className="small muted" style={{ marginBottom: 2 }}>Signed in as</div>
           <div className="h2" style={{ color: '#8E4585' }}>{loggedInAs}</div>
+          <div className="row" style={{ gap: 5, alignItems: 'center', marginTop: 8, color: '#4A6741' }}>
+            <Check size={13} /><span className="tiny">Syncing across your devices</span>
+          </div>
         </div>
-        <p className="small muted" style={{ marginBottom: 18, lineHeight: 1.5 }}>
-          Your data syncs automatically across all devices logged into this account.
-          Sign in with the same username and password on any device.
+        <p className="small muted" style={{ marginBottom: 18, lineHeight: 1.5, textAlign: 'center' }}>
+          Your data syncs automatically. Sign in with the same username and password on any device.
         </p>
         <button
           className="tap"
-          style={{ width: '100%', color: '#B8460E', borderColor: '#B8460E', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}
+          style={{ width: '100%', color: '#B8460E', borderColor: '#B8460E', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
           onClick={handleSignOut}
         >
           <X size={14} /> Sign out of this device
@@ -4466,17 +4472,32 @@ function AccountModal({ onClose }: { onClose: () => void }) {
 
   return (
     <ModalShell title="Account & sync" onClose={onClose} icon={<Users size={18} color="#8E4585" />}>
-      <p className="small muted" style={{ marginBottom: 16, lineHeight: 1.5 }}>
-        Create an account to sync your data across devices. Sign in on any device with the same username and password.
-      </p>
+      <div style={{ textAlign: 'center', marginBottom: 18 }}>
+        <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(142,69,133,0.12)', color: '#8E4585', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: 10 }}>
+          <Users size={24} />
+        </div>
+        <div className="h2" style={{ marginBottom: 4 }}>{tab === 'signin' ? 'Welcome back' : 'Create your account'}</div>
+        <p className="small muted" style={{ lineHeight: 1.5, margin: '0 auto', maxWidth: 320 }}>
+          {tab === 'signin' ? 'Sign in to sync your data to this device.' : 'Sync your data across every device you use.'}
+        </p>
+      </div>
 
-      <div className="row" style={{ gap: 6, marginBottom: 18 }}>
-        <button className={`tap${tab === 'signin' ? ' active' : ''}`} style={{ flex: 1 }} onClick={() => { setTab('signin'); reset(); }}>
-          Sign in
-        </button>
-        <button className={`tap${tab === 'signup' ? ' active' : ''}`} style={{ flex: 1 }} onClick={() => { setTab('signup'); reset(); }}>
-          Create account
-        </button>
+      <div style={{ display: 'flex', background: 'var(--border)', borderRadius: 10, padding: 3, marginBottom: 18 }}>
+        {(['signin', 'signup'] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => { setTab(t); reset(); }}
+            style={{
+              flex: 1, padding: '8px 0', border: 'none', borderRadius: 8, cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
+              background: tab === t ? '#F5F0E6' : 'transparent',
+              color: tab === t ? '#1A1A2E' : 'rgba(26,26,46,0.55)',
+              boxShadow: tab === t ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
+            }}
+          >
+            {t === 'signin' ? 'Sign in' : 'Create account'}
+          </button>
+        ))}
       </div>
 
       <label>Username</label>
@@ -4487,17 +4508,31 @@ function AccountModal({ onClose }: { onClose: () => void }) {
         placeholder="e.g. donjul"
         autoCapitalize="none"
         autoCorrect="off"
-        style={{ marginBottom: 10 }}
-        onKeyDown={(e) => e.key === 'Enter' && (tab === 'signin' ? handleSignIn() : undefined)}
+        style={{ marginBottom: 12 }}
+        onKeyDown={(e) => { if (e.key === 'Enter' && tab === 'signin') handleSignIn(); }}
       />
+      {tab === 'signup' && (
+        <>
+          <label>Email <span className="muted tiny">(optional)</span></label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => { setEmail(e.target.value); setErr(''); }}
+            placeholder="you@example.com"
+            autoCapitalize="none"
+            autoCorrect="off"
+            style={{ marginBottom: 12 }}
+          />
+        </>
+      )}
       <label>Password</label>
       <input
         type="password"
         value={password}
         onChange={(e) => { setPassword(e.target.value); setErr(''); }}
         placeholder={tab === 'signup' ? 'At least 6 characters' : ''}
-        style={{ marginBottom: tab === 'signup' ? 10 : 14 }}
-        onKeyDown={(e) => e.key === 'Enter' && (tab === 'signin' ? handleSignIn() : undefined)}
+        style={{ marginBottom: tab === 'signup' ? 12 : 14 }}
+        onKeyDown={(e) => { if (e.key === 'Enter' && tab === 'signin') handleSignIn(); }}
       />
       {tab === 'signup' && (
         <>
@@ -4508,6 +4543,7 @@ function AccountModal({ onClose }: { onClose: () => void }) {
             onChange={(e) => { setConfirmPw(e.target.value); setErr(''); }}
             placeholder="Repeat password"
             style={{ marginBottom: 14 }}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleSignUp(); }}
           />
         </>
       )}
@@ -4518,16 +4554,11 @@ function AccountModal({ onClose }: { onClose: () => void }) {
         {loading ? 'Please wait…' : tab === 'signin' ? 'Sign in' : 'Create account'}
       </button>
 
-      {tab === 'signup' && (
-        <p className="muted tiny" style={{ marginTop: 10, lineHeight: 1.5 }}>
-          Your current data will be linked to this new account and synced going forward.
-        </p>
-      )}
-      {tab === 'signin' && (
-        <p className="muted tiny" style={{ marginTop: 10, lineHeight: 1.5 }}>
-          Signing in pulls your account's data to this device, replacing any local data.
-        </p>
-      )}
+      <p className="muted tiny" style={{ marginTop: 12, lineHeight: 1.5, textAlign: 'center' }}>
+        {tab === 'signup'
+          ? 'Your current data links to the new account and syncs going forward.'
+          : "Signing in pulls your account's data to this device, replacing local data."}
+      </p>
     </ModalShell>
   );
 }

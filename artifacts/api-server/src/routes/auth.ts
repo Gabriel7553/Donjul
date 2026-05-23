@@ -16,9 +16,11 @@ async function ensureTable(): Promise<void> {
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         username TEXT UNIQUE NOT NULL,
         password_hash TEXT NOT NULL,
+        email TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
+    await getPool().query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT`);
     tableReady = true;
   } catch (err) {
     logger.error({ err }, "Failed to create users table");
@@ -45,7 +47,7 @@ async function verifyPassword(password: string, stored: string): Promise<boolean
 router.post("/auth/register", async (req, res): Promise<void> => {
   if (!hasDb) { res.status(503).json({ error: "Database not configured" }); return; }
   await ensureTable();
-  const { username, password } = req.body ?? {};
+  const { username, password, email } = req.body ?? {};
   if (!username || typeof username !== "string" || username.length < 2 || username.length > 32) {
     res.status(400).json({ error: "Username must be 2–32 characters" }); return;
   }
@@ -56,11 +58,18 @@ router.post("/auth/register", async (req, res): Promise<void> => {
   if (!/^[a-z0-9_]+$/.test(clean)) {
     res.status(400).json({ error: "Username can only contain letters, numbers and underscores" }); return;
   }
+  let cleanEmail: string | null = null;
+  if (email != null && String(email).trim() !== "") {
+    cleanEmail = String(email).trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      res.status(400).json({ error: "Enter a valid email or leave it blank" }); return;
+    }
+  }
   try {
     const hash = await hashPassword(password);
     const { rows } = await getPool().query(
-      "INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username",
-      [clean, hash],
+      "INSERT INTO users (username, password_hash, email) VALUES ($1, $2, $3) RETURNING id, username",
+      [clean, hash, cleanEmail],
     );
     res.json({ userId: rows[0].id, username: rows[0].username });
   } catch (err: any) {
