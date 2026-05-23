@@ -4563,7 +4563,7 @@ function AccountModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSubject, onChallenge, onCustomChallenges, onExportImport, onResetDay, onSyncTransfer }: any) {
+function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSubject, onChallenge, onCustomChallenges, onExportImport, onResetDay, onSyncTransfer, onDiagnostics }: any) {
   const [draft, setDraft] = useState(settings);
   const [subTab, setSubTab] = useState<'active' | 'archived' | 'deleted'>('active');
   const latestBody = body?.entries?.[body.entries.length - 1];
@@ -4960,11 +4960,151 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
         <span style={{ flex: 1 }}>{getStoredUsername() ? `Account: ${getStoredUsername()}` : 'Account & sync'}</span>
         <ChevronRight size={14} color="#6B6457" />
       </button>
+      <button className="tap" onClick={onDiagnostics} style={{ width: '100%', marginBottom: 8, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Activity size={14} color="#4A6741" />
+        <span style={{ flex: 1 }}>Diagnostics</span>
+        <ChevronRight size={14} color="#6B6457" />
+      </button>
       <button className="tap" onClick={onResetDay} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
         <RotateCcw size={14} color="#B8460E" />
         <span style={{ flex: 1 }}>Reset today</span>
         <ChevronRight size={14} color="#6B6457" />
       </button>
+    </ModalShell>
+  );
+}
+
+function DiagnosticsModal({ onClose }: { onClose: () => void }) {
+  const [tests, setTests] = useState<any[]>([]);
+  const [running, setRunning] = useState(true);
+  const [copied, setCopied] = useState(false);
+
+  const errorLog: any[] = (() => { try { return JSON.parse(localStorage.getItem('st:errorLog') || '[]'); } catch { return []; } })();
+  const storage = (() => {
+    const rows: { key: string; bytes: number }[] = [];
+    let total = 0;
+    for (const name of Object.keys(K)) {
+      const raw = localStorage.getItem((K as any)[name]);
+      const bytes = raw ? new Blob([raw]).size : 0;
+      total += bytes;
+      if (bytes > 0) rows.push({ key: name, bytes });
+    }
+    rows.sort((a, b) => b.bytes - a.bytes);
+    return { rows, total };
+  })();
+  const env = {
+    online: typeof navigator !== 'undefined' ? navigator.onLine : true,
+    standalone: typeof window !== 'undefined' && !!(window.matchMedia?.('(display-mode: standalone)').matches || (navigator as any).standalone === true),
+    userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+    screen: typeof window !== 'undefined' ? `${window.innerWidth}×${window.innerHeight}` : '',
+    sw: typeof navigator !== 'undefined' && 'serviceWorker' in navigator,
+    base: (typeof import.meta !== 'undefined' ? (import.meta as any).env?.BASE_URL : '/') || '/',
+    mode: (typeof import.meta !== 'undefined' ? (import.meta as any).env?.MODE : '') || '',
+  };
+  const sync = { syncId: getSyncId(), username: getStoredUsername() || '(anonymous)' };
+
+  useEffect(() => {
+    (async () => {
+      const out: any[] = [];
+      try { localStorage.setItem('st:__diag', '1'); localStorage.removeItem('st:__diag'); out.push({ name: 'Local storage', ok: true, detail: 'read/write OK' }); }
+      catch (e: any) { out.push({ name: 'Local storage', ok: false, detail: e?.message || 'unavailable' }); }
+      let bad = 0;
+      for (const name of Object.keys(K)) {
+        const raw = localStorage.getItem((K as any)[name]);
+        if (raw == null) continue;
+        try { JSON.parse(raw); } catch { bad++; }
+      }
+      out.push({ name: 'Saved data integrity', ok: bad === 0, detail: bad === 0 ? 'all stores valid JSON' : `${bad} store(s) corrupted` });
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 5000);
+        const resp = await fetch(`${AUTH_API}/healthz`, { signal: ctrl.signal });
+        clearTimeout(t);
+        out.push({ name: 'Server connection', ok: resp.ok, detail: resp.ok ? 'reachable (200)' : `HTTP ${resp.status}` });
+      } catch (e: any) {
+        out.push({ name: 'Server connection', ok: false, detail: e?.name === 'AbortError' ? 'timed out' : 'unreachable' });
+      }
+      setTests(out);
+      setRunning(false);
+    })();
+  }, []);
+
+  const buildReport = () => [
+    'DONJUL DIAGNOSTICS',
+    `Time: ${new Date().toISOString()}`,
+    `Mode: ${env.mode}  Base: ${env.base}`,
+    `Online: ${env.online}  PWA: ${env.standalone}  SW: ${env.sw}`,
+    `Viewport: ${env.screen}`,
+    `UserAgent: ${env.userAgent}`,
+    `Account: ${sync.username}  id=${sync.syncId}`,
+    '',
+    'SELF-TESTS:',
+    ...tests.map((t) => `  [${t.ok ? 'PASS' : 'FAIL'}] ${t.name} — ${t.detail}`),
+    '',
+    `STORAGE (${(storage.total / 1024).toFixed(1)} KB total):`,
+    ...storage.rows.map((r) => `  ${r.key}: ${(r.bytes / 1024).toFixed(1)} KB`),
+    '',
+    `RECENT ERRORS (${errorLog.length}):`,
+    ...(errorLog.length ? errorLog.slice().reverse().map((e: any) => `  ${e.ts || ''} [${e.kind || 'error'}] ${e.message || ''}${e.stack ? '\n    ' + String(e.stack).split('\n').slice(0, 3).join('\n    ') : ''}`) : ['  (none)']),
+  ].join('\n');
+
+  const copy = async () => {
+    const txt = buildReport();
+    try { await navigator.clipboard.writeText(txt); setCopied(true); toast.success('Diagnostics copied'); setTimeout(() => setCopied(false), 2000); }
+    catch { window.prompt('Copy this and paste it to share:', txt); }
+  };
+  const clearErrors = () => { try { localStorage.removeItem('st:errorLog'); } catch {} toast('Error log cleared'); onClose(); };
+
+  return (
+    <ModalShell title="Diagnostics" onClose={onClose} icon={<Activity size={18} color="#4A6741" />}>
+      <p className="muted tiny" style={{ marginBottom: 14, lineHeight: 1.5 }}>
+        A snapshot of the app's health. Tap "Copy diagnostics" and paste it to me if something's wrong.
+      </p>
+
+      <div className="h2" style={{ marginBottom: 8 }}>Self-tests</div>
+      <div style={{ marginBottom: 16 }}>
+        {running && <div className="small muted">Running checks…</div>}
+        {tests.map((t, i) => (
+          <div key={i} className="between" style={{ padding: '6px 0', alignItems: 'center' }}>
+            <span className="small">{t.name}</span>
+            <span className="tiny mono" style={{ color: t.ok ? '#4A6741' : '#B8460E' }}>{t.ok ? '●' : '○'} {t.detail}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="h2" style={{ marginBottom: 8 }}>Environment</div>
+      <div className="small" style={{ marginBottom: 16, lineHeight: 1.7 }}>
+        <div className="between"><span className="muted">Connection</span><span>{env.online ? 'Online' : 'Offline'}</span></div>
+        <div className="between"><span className="muted">Installed (PWA)</span><span>{env.standalone ? 'Yes' : 'No'}</span></div>
+        <div className="between"><span className="muted">Account</span><span>{sync.username}</span></div>
+        <div className="between"><span className="muted">Viewport</span><span className="mono tiny">{env.screen}</span></div>
+      </div>
+
+      <div className="between" style={{ marginBottom: 8 }}><div className="h2">Storage</div><span className="mono tiny muted">{(storage.total / 1024).toFixed(1)} KB</span></div>
+      <div style={{ marginBottom: 16 }}>
+        {storage.rows.slice(0, 6).map((r) => (
+          <div key={r.key} className="between" style={{ padding: '3px 0' }}><span className="tiny muted">{r.key}</span><span className="mono tiny">{(r.bytes / 1024).toFixed(1)} KB</span></div>
+        ))}
+      </div>
+
+      <div className="between" style={{ marginBottom: 8 }}><div className="h2">Recent errors</div><span className="mono tiny muted">{errorLog.length}</span></div>
+      {errorLog.length === 0 ? (
+        <p className="tiny muted" style={{ marginBottom: 16 }}>No errors logged.</p>
+      ) : (
+        <div style={{ marginBottom: 16, maxHeight: 160, overflowY: 'auto' }}>
+          {errorLog.slice().reverse().map((e: any, i: number) => (
+            <div key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+              <div className="tiny mono" style={{ color: '#B8460E' }}>{e.kind || 'error'}{e.ts ? ` · ${fmtShortDate(String(e.ts).slice(0, 10))}` : ''}</div>
+              <div className="tiny" style={{ lineHeight: 1.4, wordBreak: 'break-word' }}>{e.message || '(no message)'}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <button className="btn" style={{ width: '100%', marginBottom: 8 }} onClick={copy}>
+        <Download size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />{copied ? 'Copied!' : 'Copy diagnostics'}
+      </button>
+      {errorLog.length > 0 && <button className="tap" style={{ width: '100%', color: '#B8460E', borderColor: '#B8460E' }} onClick={clearErrors}>Clear error log</button>}
     </ModalShell>
   );
 }
@@ -8697,8 +8837,9 @@ export default function App() {
 
       <BottomNav tab={tab} setTab={setTab} />
 
-      {modal?.type === 'settings' && <SettingsModal settings={settings} body={body} onSave={saveSettings} onClose={() => setModal(null)} onEditSubject={(k: string) => setModal({ type: 'editSubject', key: k })} onAddSubject={() => setModal({ type: 'editSubject', key: null })} onChallenge={() => setModal({ type: 'challenge' })} onCustomChallenges={() => setModal({ type: 'customChallenges' })} onExportImport={() => setModal({ type: 'exportImport' })} onResetDay={() => setModal({ type: 'resetDay' })} onSyncTransfer={() => setModal({ type: 'syncTransfer' })} />}
+      {modal?.type === 'settings' && <SettingsModal settings={settings} body={body} onSave={saveSettings} onClose={() => setModal(null)} onEditSubject={(k: string) => setModal({ type: 'editSubject', key: k })} onAddSubject={() => setModal({ type: 'editSubject', key: null })} onChallenge={() => setModal({ type: 'challenge' })} onCustomChallenges={() => setModal({ type: 'customChallenges' })} onExportImport={() => setModal({ type: 'exportImport' })} onResetDay={() => setModal({ type: 'resetDay' })} onSyncTransfer={() => setModal({ type: 'syncTransfer' })} onDiagnostics={() => setModal({ type: 'diagnostics' })} />}
       {modal?.type === 'syncTransfer' && <AccountModal onClose={() => setModal({ type: 'settings' })} />}
+      {modal?.type === 'diagnostics' && <DiagnosticsModal onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'resetDay' && <ResetDayModal onReset={resetDay} onFullReset={fullReset} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'editSubject' && <EditSubjectModal subjectKey={modal.key} settings={settings} onSave={saveSettings} onClose={() => setModal({ type: 'settings' })} />}
       {modal?.type === 'logTime' && <LogTimeModal subject={modal.subject} settings={settings} daily={daily} editMode={modal.editMode} onLog={(m: number) => { logTime(modal.subject, m); setModal(null); }} onSet={(m: number) => { setSubjectTime(modal.subject, m); setModal(null); }} onClose={() => setModal(null)} />}
