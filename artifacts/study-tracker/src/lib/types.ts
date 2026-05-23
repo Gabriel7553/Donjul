@@ -8,7 +8,7 @@
 import type { Reminder } from './reminders';
 export type { Reminder };
 
-export interface MacroTargets { protein: number; carbs: number; fat: number; calories: number; }
+export interface MacroTargets { protein: number; carbs: number; fat: number; calories: number; [k: string]: number; }
 
 export interface MealEntry {
   id: string;

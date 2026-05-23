@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { RotateCcw, Plus, Zap, Apple, ChevronUp, ChevronDown } from 'lucide-react';
 import { DEFAULT_MICRO_TARGETS, MICRO_DEFS, type MicroDef } from '../lib/nutrition';
+import type { MacroTargets, MealTotals } from '../lib/types';
 
-export function MacrosCard({ targets, totals, onLog, onReset, onCoach }: any) {
+export function MacrosCard({ targets, totals, onLog, onReset, onCoach }: { targets: MacroTargets; totals: MealTotals; onLog?: any; onReset?: any; onCoach?: any }) {
   const [confirmReset, setConfirmReset] = useState(false);
   const items = [
     { key: 'protein', label: 'Protein', unit: 'g', primary: true, color: '#B8460E' },
@@ -59,7 +60,7 @@ export function MacrosCard({ targets, totals, onLog, onReset, onCoach }: any) {
   );
 }
 
-export function MicrosCard({ targets, totals }: any) {
+export function MicrosCard({ targets, totals }: { targets: Record<string, number>; totals: MealTotals }) {
   const [open, setOpen] = useState(false);
   const t = { ...DEFAULT_MICRO_TARGETS, ...(targets || {}) };
   const groups: Array<{ title: string; group: MicroDef['group'] }> = [

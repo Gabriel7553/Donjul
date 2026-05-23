@@ -4,6 +4,7 @@ import { Scale, Apple, Wallet, Flame } from 'lucide-react';
 import { todayStr, pad, fmtShortDate } from '../lib/date';
 import { fmtMoney, spendingByMonth, monthKey, monthShort, prevMonth } from '../lib/money';
 import { calorieGoal } from '../lib/body';
+import type { Settings, BodyState, MealsState, SpendingState, StudyTotals, Checkins, Streaks } from '../lib/types';
 
 const RANGES = [{ k: 30, label: '30d' }, { k: 90, label: '90d' }];
 const AXIS = { fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#6B6457' } as const;
@@ -29,7 +30,10 @@ function StatTile({ icon, label, value, sub, color }: any) {
   );
 }
 
-export function InsightsTab({ settings, body, meals, spending, totals, checkins, streaks }: any) {
+export function InsightsTab({ settings, body, meals, spending, totals, checkins, streaks }: {
+  settings: Settings; body: BodyState; meals: MealsState; spending: SpendingState;
+  totals: StudyTotals; checkins: Checkins; streaks: Streaks;
+}) {
   const [range, setRange] = useState(30);
   const unit = settings?.weightUnit || 'lb';
 
