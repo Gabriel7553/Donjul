@@ -611,6 +611,79 @@ export function ExerciseLogModal({ date, exercise, settings, body, onSave, onClo
   );
 }
 
+const FAST_PRESETS = [
+  { h: 16, label: '16:8' },
+  { h: 18, label: '18:6' },
+  { h: 20, label: '20:4' },
+  { h: 23, label: 'OMAD' },
+];
+
+// Self-contained so the live 1s tick only re-renders this card, not the whole tab.
+function FastingCard({ fasting, onChange }: any) {
+  const [now, setNow] = useState(() => Date.now());
+  const active = !!fasting?.active;
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+
+  const targetHours = Number(fasting?.targetHours) || 16;
+  const history: any[] = fasting?.history || [];
+  const last = history[history.length - 1];
+  const fmtDur = (ms: number) => {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    return `${Math.floor(s / 3600)}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
+  };
+  const start = () => onChange({ ...(fasting || {}), active: true, startTs: Date.now(), targetHours, history });
+  const end = () => {
+    const startTs = Number(fasting?.startTs) || now;
+    const hours = Math.max(0, (now - startTs) / 3600000);
+    const hist = [...history, { start: startTs, end: now, hours: Math.round(hours * 10) / 10, target: targetHours }].slice(-30);
+    onChange({ ...(fasting || {}), active: false, startTs: null, history: hist });
+  };
+  const setTarget = (h: number) => onChange({ ...(fasting || {}), targetHours: h });
+
+  if (active) {
+    const startTs = Number(fasting?.startTs) || now;
+    const elapsedMs = now - startTs;
+    const elapsedH = elapsedMs / 3600000;
+    const pct = Math.min(100, (elapsedH / targetHours) * 100);
+    const reached = elapsedH >= targetHours;
+    const accent = reached ? '#4A6741' : '#8E4585';
+    return (
+      <div className="card" style={{ marginBottom: 14, borderLeft: `3px solid ${accent}` }}>
+        <div className="between" style={{ marginBottom: 10 }}>
+          <div className="row" style={{ gap: 8, alignItems: 'center' }}><Clock size={15} color={accent} /><span className="h2">Fasting · {FAST_PRESETS.find((p) => p.h === targetHours)?.label || `${targetHours}h`}</span></div>
+          <span className="pill" style={{ fontSize: 10, padding: '2px 8px', background: accent + '22', color: accent }}>{reached ? 'Goal reached' : 'Fasting'}</span>
+        </div>
+        <div className="mono" style={{ fontSize: 30, fontWeight: 600, lineHeight: 1, marginBottom: 8 }}>{fmtDur(elapsedMs)}</div>
+        <div className="progress-bar" style={{ marginBottom: 6 }}><div className="progress-fill" style={{ width: `${pct}%`, background: accent }} /></div>
+        <div className="between tiny muted" style={{ marginBottom: 12 }}>
+          <span>{reached ? `${Math.round((elapsedH - targetHours) * 10) / 10}h past ${targetHours}h goal` : `${fmtDur(targetHours * 3600000 - elapsedMs)} to ${targetHours}h`}</span>
+          <span>since {new Date(startTs).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+        </div>
+        <button className="btn" style={{ width: '100%' }} onClick={end}>End fast</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 14 }}>
+      <div className="between" style={{ marginBottom: 10 }}>
+        <div className="row" style={{ gap: 8, alignItems: 'center' }}><Clock size={15} color="#8E4585" /><span className="h2">Fasting</span></div>
+        {last && <span className="tiny muted">last fast {last.hours}h</span>}
+      </div>
+      <div className="row" style={{ gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+        {FAST_PRESETS.map((p) => (
+          <button key={p.h} className={`tap ${targetHours === p.h ? 'active' : ''}`} onClick={() => setTarget(p.h)} style={{ flex: 1, minWidth: 56, fontSize: 12 }}>{p.label}</button>
+        ))}
+      </div>
+      <button className="btn" style={{ width: '100%' }} onClick={start}><Play size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} />Start {targetHours}h fast</button>
+    </div>
+  );
+}
+
 export function FoodTab({ settings, meals, water, exercise, body, onOpenLogger, onSaveMeals, onSaveWater, onSaveExercise, onLogExercise, onCoach }: any) {
   const [selDate, setSelDate] = useState(todayStr());
   const [showMicros, setShowMicros] = useState(false);
@@ -684,6 +757,16 @@ export function FoodTab({ settings, meals, water, exercise, body, onOpenLogger, 
     onSaveMeals({ ...meals, entries: { ...(meals.entries || {}), [selDate]: dayList }, log: { ...meals.log, [selDate]: mealTotalsFromEntries(dayList) } });
   };
 
+  const prevBySection: Record<string, any[]> = { breakfast: [], lunch: [], dinner: [], snacks: [] };
+  for (const e of prevEntries) prevBySection[sectionFor(e)].push(e);
+  const copyPrevSection = (key: string) => {
+    const src = prevBySection[key];
+    if (!src.length) return;
+    const cloned = src.map((e: any, i: number) => ({ ...e, id: 'm' + Date.now() + i + Math.random().toString(36).slice(2, 5), time: nowHHMM() }));
+    const dayList = [...dayEntries, ...cloned];
+    onSaveMeals({ ...meals, entries: { ...(meals.entries || {}), [selDate]: dayList }, log: { ...meals.log, [selDate]: mealTotalsFromEntries(dayList) } });
+  };
+
   // 7-day calorie/protein summary ending at the viewed day.
   const week7 = (() => {
     const out: { date: string; cals: number; protein: number }[] = [];
@@ -737,6 +820,8 @@ export function FoodTab({ settings, meals, water, exercise, body, onOpenLogger, 
           {settings.microsEnabled && <button className="tap" style={{ flex: 1 }} onClick={() => setShowMicros((v) => !v)}>{showMicros ? 'Hide micros' : 'Micros'}</button>}
         </div>
       </div>
+
+      <FastingCard fasting={meals.fasting} onChange={(f: any) => onSaveMeals({ ...meals, fasting: f })} />
 
       {showMicros && settings.microsEnabled && <div style={{ marginBottom: 14 }}><MicrosCard targets={settings.microTargets} totals={totals} /></div>}
 
@@ -819,6 +904,11 @@ export function FoodTab({ settings, meals, water, exercise, body, onOpenLogger, 
               </DndContext>
             )}
             <button className="tap" style={{ width: '100%', marginTop: 10 }} onClick={() => onOpenLogger(selDate, sec.key)}><Plus size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />Add food</button>
+            {list.length === 0 && prevBySection[sec.key].length > 0 && (
+              <button className="tap" style={{ width: '100%', marginTop: 6, fontSize: 12, color: '#6B6457' }} onClick={() => copyPrevSection(sec.key)}>
+                <Copy size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Copy yesterday's {sec.label.toLowerCase()} ({prevBySection[sec.key].length})
+              </button>
+            )}
           </div>
         );
       })}
