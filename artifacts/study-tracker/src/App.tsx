@@ -14,6 +14,7 @@ import { DEFAULT_WORKOUT_SPLIT } from './lib/workout';
 import { DEFAULT_SETTINGS } from './lib/defaults';
 import { GlobalStyles, Header, BottomNav } from './ui';
 import { TodayTab, NutritionCoachModal } from './features/today';
+import { InsightsTab } from './features/insights';
 import { LogMealModal, ExerciseLogModal, FoodTab } from './features/food';
 import { HistoryTab, DayDetailModal } from './features/history';
 import { BodyTab, JournalTab, WorkoutTab, PlanTab, PlanDayModal } from './features/trackers';
@@ -694,6 +695,12 @@ export default function App() {
             onSaveMeals={saveMeals} onSaveWater={saveWater} onSaveExercise={saveExercise}
             onLogExercise={(d: string) => setModal({ type: 'logExercise', date: d })}
             onCoach={() => setModal({ type: 'nutritionCoach' })}
+          />
+        )}
+        {tab === 'insights' && (
+          <InsightsTab
+            settings={settings} body={body} meals={meals} spending={spending}
+            totals={totals} checkins={checkins} streaks={streaks}
           />
         )}
       </div>

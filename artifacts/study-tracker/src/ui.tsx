@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   GripVertical, Settings as SettingsIcon, X, Mic, Check,
-  Sun, Apple, Activity, Dumbbell, Wallet, BookMarked, Calendar as CalIcon, History,
+  Sun, Apple, Activity, Dumbbell, Wallet, BookMarked, Calendar as CalIcon, History, TrendingUp,
 } from 'lucide-react';
 import { KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable';
@@ -169,6 +169,7 @@ export function BottomNav({ tab, setTab }: { tab: string; setTab: (t: string) =>
     { key: 'journal', label: 'Journal', icon: BookMarked },
     { key: 'plan', label: 'Plan', icon: CalIcon },
     { key: 'history', label: 'History', icon: History },
+    { key: 'insights', label: 'Trends', icon: TrendingUp },
   ];
   return (
     <div className="bottom-nav">
