@@ -728,7 +728,7 @@ export default function App() {
         {tab === 'insights' && (
           <InsightsTab
             settings={settings} body={body} meals={meals} spending={spending}
-            totals={totals} checkins={checkins} streaks={streaks} onNavigate={setTab}
+            totals={totals} checkins={checkins} streaks={streaks} workout={workout} onNavigate={setTab}
           />
         )}
       </div>

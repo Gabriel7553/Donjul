@@ -9,6 +9,8 @@ import type { Settings, BodyState, MealsState, SpendingState, StudyTotals, Check
 const RANGES = [{ k: 30, label: '30d' }, { k: 90, label: '90d' }];
 const AXIS = { fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#6B6457' } as const;
 const TIP = { fontFamily: 'JetBrains Mono', fontSize: 12, borderRadius: 8 } as const;
+const HEAT = ['#EAE3D2', '#C9DDBB', '#9DC086', '#6E9E5A', '#4A6741'];
+const HEAT_WEEKS = 16;
 const MEASURES = [
   { key: 'waist', label: 'Waist', color: '#B8460E' },
   { key: 'chest', label: 'Chest', color: '#3B5C6B' },
@@ -41,9 +43,9 @@ function StatTile({ icon, label, value, sub, color, onClick }: any) {
   );
 }
 
-export function InsightsTab({ settings, body, meals, spending, totals, checkins, streaks, onNavigate }: {
+export function InsightsTab({ settings, body, meals, spending, totals, checkins, streaks, workout, onNavigate }: {
   settings: Settings; body: BodyState; meals: MealsState; spending: SpendingState;
-  totals: StudyTotals; checkins: Checkins; streaks: Streaks; onNavigate?: (tab: string) => void;
+  totals: StudyTotals; checkins: Checkins; streaks: Streaks; workout?: any; onNavigate?: (tab: string) => void;
 }) {
   const [range, setRange] = useState(30);
   const unit = settings?.weightUnit || 'lb';
@@ -100,6 +102,34 @@ export function InsightsTab({ settings, body, meals, spending, totals, checkins,
   const bestStreak = Math.max(0, ...Object.values(streaks || {}).map((s: any) => Number(s?.current) || 0));
   const hasStudy = Object.keys(checkByDay).length > 0;
   const totalMins = (Object.values(totals || {}) as any[]).reduce((a: number, b: any) => a + (Number(b) || 0), 0);
+
+  // ── Activity heatmap (domains logged per day, last 16 weeks) ──
+  const bodyDates = new Set((body?.entries || []).map((e: any) => e.date));
+  const moneyDates = new Set((spending?.entries || []).map((e: any) => e.date));
+  const domainCount = (ds: string) => {
+    let n = 0;
+    if ((checkByDay[ds] || 0) > 0) n++;
+    if (workout?.logs?.[ds]) n++;
+    if ((meals?.log?.[ds]?.calories || 0) > 0) n++;
+    if (bodyDates.has(ds)) n++;
+    if (moneyDates.has(ds)) n++;
+    return n;
+  };
+  const heatStart = new Date(todayStr() + 'T00:00:00');
+  heatStart.setDate(heatStart.getDate() - heatStart.getDay() - (HEAT_WEEKS - 1) * 7);
+  const heatWeeks: ({ date: string; count: number } | null)[][] = [];
+  const heatCur = new Date(heatStart);
+  const heatToday = todayStr();
+  for (let w = 0; w < HEAT_WEEKS; w++) {
+    const col: ({ date: string; count: number } | null)[] = [];
+    for (let d = 0; d < 7; d++) {
+      const ds = `${heatCur.getFullYear()}-${pad(heatCur.getMonth() + 1)}-${pad(heatCur.getDate())}`;
+      col.push(ds > heatToday ? null : { date: ds, count: domainCount(ds) });
+      heatCur.setDate(heatCur.getDate() + 1);
+    }
+    heatWeeks.push(col);
+  }
+  const heatActive = heatWeeks.reduce((a, wk) => a + wk.filter((c) => c && c.count > 0).length, 0);
 
   // ── Projections (at recent pace) ──
   const wGoal = Number(settings?.bodyGoals?.weight?.target) || 0;
@@ -177,13 +207,37 @@ export function InsightsTab({ settings, body, meals, spending, totals, checkins,
             </div>
           )}
 
+          {heatActive > 0 && (
+            <div className="card">
+              <div className="between" style={{ marginBottom: 10 }}>
+                <div className="h2" style={{ margin: 0 }}>Activity · {HEAT_WEEKS} weeks</div>
+                <div className="row" style={{ gap: 3, alignItems: 'center' }}>
+                  <span className="tiny muted" style={{ marginRight: 2 }}>less</span>
+                  {HEAT.map((c, i) => <span key={i} style={{ width: 10, height: 10, borderRadius: 2, background: c, display: 'inline-block' }} />)}
+                  <span className="tiny muted" style={{ marginLeft: 2 }}>more</span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 3, overflowX: 'auto', paddingBottom: 2 }}>
+                {heatWeeks.map((wk, wi) => (
+                  <div key={wi} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    {wk.map((cell, di) => (
+                      <div key={di} title={cell ? `${cell.date} · ${cell.count} logged` : ''}
+                        style={{ width: 12, height: 12, borderRadius: 2, flex: '0 0 auto', background: cell ? HEAT[cell.count === 0 ? 0 : Math.min(4, cell.count)] : 'transparent' }} />
+                    ))}
+                  </div>
+                ))}
+              </div>
+              <div className="mono tiny muted" style={{ textAlign: 'center', marginTop: 8 }}>Domains logged per day · {heatActive} active days</div>
+            </div>
+          )}
+
           {wData.length >= 2 && (
             <div className="card">
               <div className="h2" style={{ marginBottom: 10 }}>Weight · {unit}</div>
               <ResponsiveContainer width="100%" height={170}>
-                <LineChart data={wData} margin={{ top: 5, right: 12, left: -16, bottom: 0 }}>
+                <LineChart data={wData} margin={{ top: 5, right: 12, left: -4, bottom: 0 }}>
                   <XAxis dataKey="label" tick={AXIS} interval="preserveStartEnd" minTickGap={28} />
-                  <YAxis tick={AXIS} domain={['dataMin - 2', 'dataMax + 2'] as any} width={34} />
+                  <YAxis tick={AXIS} domain={['dataMin - 2', 'dataMax + 2'] as any} width={42} />
                   <Tooltip contentStyle={TIP} />
                   <Line type="monotone" dataKey="weight" stroke="#8E4585" strokeWidth={2} dot={{ r: 2.5, fill: '#8E4585' }} />
                 </LineChart>
@@ -200,9 +254,9 @@ export function InsightsTab({ settings, body, meals, spending, totals, checkins,
                 </div>
               </div>
               <ResponsiveContainer width="100%" height={160}>
-                <LineChart data={measureData} margin={{ top: 5, right: 12, left: -18, bottom: 0 }}>
+                <LineChart data={measureData} margin={{ top: 5, right: 12, left: -4, bottom: 0 }}>
                   <XAxis dataKey="label" tick={AXIS} interval="preserveStartEnd" minTickGap={28} />
-                  <YAxis tick={AXIS} domain={['dataMin - 1', 'dataMax + 1'] as any} width={34} />
+                  <YAxis tick={AXIS} domain={['dataMin - 1', 'dataMax + 1'] as any} width={42} />
                   <Tooltip contentStyle={TIP} />
                   {presentMeasures.map((m) => <Line key={m.key} type="monotone" dataKey={m.key} stroke={m.color} strokeWidth={2} dot={{ r: 2, fill: m.color }} connectNulls />)}
                 </LineChart>
@@ -214,9 +268,9 @@ export function InsightsTab({ settings, body, meals, spending, totals, checkins,
             <div className="card">
               <div className="h2" style={{ marginBottom: 10 }}>Calories · last {range} days</div>
               <ResponsiveContainer width="100%" height={160}>
-                <BarChart data={calData} margin={{ top: 5, right: 8, left: -14, bottom: 0 }}>
+                <BarChart data={calData} margin={{ top: 5, right: 8, left: -4, bottom: 0 }}>
                   <XAxis dataKey="label" tick={AXIS} interval={tick} />
-                  <YAxis tick={AXIS} width={34} />
+                  <YAxis tick={AXIS} width={42} />
                   <Tooltip contentStyle={TIP} />
                   <ReferenceLine y={calGoal} stroke="#B8460E" strokeDasharray="4 3" />
                   <Bar dataKey="calories" fill="#4A6741" radius={[3, 3, 0, 0]} />
