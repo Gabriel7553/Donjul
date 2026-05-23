@@ -13,7 +13,7 @@ import { Bar, BarChart, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YA
 import { toast } from 'sonner';
 import { pad, todayStr, tomorrowStr, diffDays, fmtTime, fmtDate, fmtShortDate, dayOfWeek } from '../lib/date';
 import { MEASUREMENT_FIELDS } from '../lib/body';
-import { DEFAULT_WORKOUT_SPLIT, HOME_WORKOUT_SPLIT, computePRs, sessionVolume } from '../lib/workout';
+import { DEFAULT_WORKOUT_SPLIT, HOME_WORKOUT_SPLIT, computePRs, sessionVolume, exerciseHistory } from '../lib/workout';
 import { ModalShell, VoiceButton } from '../ui';
 
 export function BodyTab({ settings, body, workout, onAddEntry, onEditGoals }: any) {
@@ -441,6 +441,7 @@ export function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, 
     return map;
   }, [workout.logs]);
 
+  const [detailEx, setDetailEx] = useState<string | null>(null);
   const prs = useMemo(() => computePRs(workout.logs), [workout.logs]);
   const volTrend = useMemo(() => Object.entries(workout.logs)
     .sort((a: any, b: any) => a[0].localeCompare(b[0]))
@@ -510,7 +511,7 @@ export function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, 
             const logged = todayLog?.exercises?.[i];
             const lastW = lastWeights[ex.name];
             return (
-              <div key={i} style={{ padding: '10px 0', borderBottom: i < todayWorkout.exercises.length - 1 ? '1px solid #E4DCC8' : 'none' }}>
+              <div key={i} onClick={() => setDetailEx(ex.name)} style={{ padding: '10px 0', borderBottom: i < todayWorkout.exercises.length - 1 ? '1px solid #E4DCC8' : 'none', cursor: 'pointer' }}>
                 <div className="between">
                   <span className="small" style={{ fontWeight: 600 }}>{ex.name}</span>
                   <span className="mono tiny muted">{ex.sets} × {ex.reps}</span>
@@ -558,7 +559,7 @@ export function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, 
         <div className="card">
           <div className="h2" style={{ marginBottom: 10 }}>Personal records</div>
           {prs.slice(0, 6).map((p) => (
-            <div key={p.name} className="between" style={{ padding: '8px 0', borderBottom: '1px solid #E4DCC8' }}>
+            <div key={p.name} onClick={() => setDetailEx(p.name)} className="between" style={{ padding: '8px 0', borderBottom: '1px solid #E4DCC8', cursor: 'pointer' }}>
               <div style={{ minWidth: 0, flex: 1, paddingRight: 10 }}>
                 <div className="small" style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
                 <div className="mono tiny muted">{fmtShortDate(p.date)}</div>
@@ -606,7 +607,51 @@ export function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, 
           </div>
         ))}
       </div>
+
+      {detailEx && <ExerciseDetailModal name={detailEx} logs={workout.logs} unit={settings?.weightUnit || 'lb'} onClose={() => setDetailEx(null)} />}
     </>
+  );
+}
+
+function ExerciseDetailModal({ name, logs, unit, onClose }: any) {
+  const hist = useMemo(() => exerciseHistory(logs, name), [logs, name]);
+  const best = hist.reduce((b: any, h: any) => (h.e1rm > (b?.e1rm || 0) ? h : b), null as any);
+  const chartData = hist.filter((h) => h.topWeight > 0).map((h) => ({ label: fmtShortDate(h.date), weight: h.topWeight }));
+  return (
+    <ModalShell title={name} onClose={onClose} icon={<Dumbbell size={18} />} color="#3B5C6B">
+      {hist.length === 0 ? (
+        <div className="muted small">No logged sets for this exercise yet.</div>
+      ) : (
+        <>
+          {best && best.e1rm > 0 && (
+            <div className="card" style={{ margin: '0 0 14px', background: '#F3EFE4' }}>
+              <div className="between"><span className="small muted">Best set</span><span className="mono small" style={{ fontWeight: 600 }}>{best.topWeight}×{best.topReps} {unit}</span></div>
+              <div className="between" style={{ marginTop: 5 }}><span className="small muted">Est. 1RM</span><span className="mono small">{best.e1rm} {unit} · {fmtShortDate(best.date)}</span></div>
+            </div>
+          )}
+          {chartData.length >= 2 && (
+            <div style={{ marginBottom: 14 }}>
+              <div className="h3" style={{ marginBottom: 8 }}>Top-set weight · {unit}</div>
+              <ResponsiveContainer width="100%" height={150}>
+                <LineChart data={chartData} margin={{ top: 5, right: 12, left: -4, bottom: 0 }}>
+                  <XAxis dataKey="label" tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} interval="preserveStartEnd" minTickGap={24} />
+                  <YAxis tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#6B6457' }} domain={['dataMin - 5', 'dataMax + 5'] as any} width={42} />
+                  <Tooltip contentStyle={{ fontFamily: 'JetBrains Mono', fontSize: 12, borderRadius: 8 }} />
+                  <Line type="monotone" dataKey="weight" stroke="#3B5C6B" strokeWidth={2} dot={{ r: 2.5, fill: '#3B5C6B' }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          <div className="h3" style={{ marginBottom: 8 }}>History · {hist.length} session{hist.length === 1 ? '' : 's'}</div>
+          {[...hist].reverse().map((h) => (
+            <div key={h.date} className="between" style={{ padding: '7px 0', borderBottom: '1px solid #E4DCC8' }}>
+              <span className="mono tiny muted">{fmtShortDate(h.date)}</span>
+              <span className="mono tiny">{h.sets.filter((s: any) => s.weight).map((s: any) => `${s.weight}×${s.reps || '—'}`).join('  ') || '—'}</span>
+            </div>
+          ))}
+        </>
+      )}
+    </ModalShell>
   );
 }
 

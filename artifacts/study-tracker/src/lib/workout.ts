@@ -105,3 +105,24 @@ export function computePRs(logs: Record<string, any>): PR[] {
   }
   return Object.values(best).sort((a, b) => b.e1rm - a.e1rm);
 }
+
+export type ExerciseSession = { date: string; topWeight: number; topReps: number; e1rm: number; volume: number; sets: any[] };
+
+// Per-session progression for one exercise (chronological): top set (by 1RM),
+// estimated 1RM, and total volume on each date it was logged.
+export function exerciseHistory(logs: Record<string, any>, name: string): ExerciseSession[] {
+  const out: ExerciseSession[] = [];
+  for (const [date, log] of Object.entries(logs || {})) {
+    const ex = ((log as any)?.exercises || []).find((e: any) => e.name === name);
+    if (!ex) continue;
+    let topWeight = 0, topReps = 0, e1rm = 0, vol = 0;
+    for (const s of (ex.sets || [])) {
+      const w = Number(s.weight) || 0, r = Number(s.reps) || 0;
+      vol += w * r;
+      const e = estimate1RM(w, r);
+      if (e > e1rm) { e1rm = e; topWeight = w; topReps = r; }
+    }
+    out.push({ date, topWeight, topReps, e1rm, volume: Math.round(vol), sets: ex.sets || [] });
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
