@@ -7,7 +7,7 @@ import {
   Camera, BookMarked, TrendingUp as Journal, DollarSign, ShoppingCart, Briefcase, Car, ChevronUp, Trophy, Archive, Infinity, Mic,
   Wallet, PiggyBank, CreditCard, PieChart, Receipt, Pencil, ArrowUpRight, ArrowDownRight, Sparkles,
   ArrowRightLeft, Users, Banknote, BadgeAlert, CircleDollarSign, HandCoins, GripVertical,
-  Droplets, Utensils, Bike
+  Droplets, Utensils, Bike, Copy
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
@@ -8140,6 +8140,14 @@ function FoodTab({ settings, meals, water, exercise, body, onOpenLogger, onSaveM
     onSaveMeals(updateMealEntry(meals, selDate, e.id, patch));
     setEditId(null);
   };
+  const prevStr = (() => { const d = new Date(selDate + 'T00:00:00'); d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; })();
+  const prevEntries: any[] = meals.entries?.[prevStr] || [];
+  const copyPrevDay = () => {
+    if (!prevEntries.length) return;
+    const cloned = prevEntries.map((e: any, i: number) => ({ ...e, id: 'm' + Date.now() + i + Math.random().toString(36).slice(2, 5), time: nowHHMM() }));
+    const dayList = [...dayEntries, ...cloned];
+    onSaveMeals({ ...meals, entries: { ...(meals.entries || {}), [selDate]: dayList }, log: { ...meals.log, [selDate]: mealTotalsFromEntries(dayList) } });
+  };
 
   const macroBar = (label: string, val: number, tgt: number, color: string) => {
     const pct = tgt > 0 ? Math.min(100, (val / tgt) * 100) : 0;
@@ -8180,6 +8188,12 @@ function FoodTab({ settings, meals, water, exercise, body, onOpenLogger, onSaveM
       </div>
 
       {showMicros && settings.microsEnabled && <div style={{ marginBottom: 14 }}><MicrosCard targets={settings.microTargets} totals={totals} /></div>}
+
+      {dayEntries.length === 0 && prevEntries.length > 0 && (
+        <button className="tap" style={{ width: '100%', marginBottom: 12 }} onClick={copyPrevDay}>
+          <Copy size={13} style={{ verticalAlign: 'middle', marginRight: 6 }} />Copy {prevEntries.length} {prevEntries.length === 1 ? 'meal' : 'meals'} from {fmtShortDate(prevStr)}
+        </button>
+      )}
 
       {SECTIONS.map((sec) => {
         const list = bySection[sec.key];
