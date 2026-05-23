@@ -1,4 +1,4 @@
-import { pad } from './date';
+import { pad, diffDays, todayStr } from './date';
 import type { SpendingEntry } from './types';
 
 export const DEFAULT_SPEND_CATEGORIES = [
@@ -127,6 +127,47 @@ export function spendingByMonth(entries: SpendingEntry[], ym: string) {
     else { spent += amt; if (e.categoryId) byCat[e.categoryId] = (byCat[e.categoryId] || 0) + amt; }
   }
   return { income, spent, net: income - spent, byCat };
+}
+
+function daysInMonth(y: number, m: number) { return new Date(y, m + 1, 0).getDate(); }
+
+// Bills due within `leadDays`: credit-card + debt payments (by dueDay) and
+// flagged recurring expenses (by their logged day-of-month). Each maps to the
+// next on/after-today occurrence of its day-of-month.
+export type UpcomingBill = { label: string; amount: number; dueDate: string; daysUntil: number };
+export function upcomingBills(spending: any, leadDays: number, today: string = todayStr()): UpcomingBill[] {
+  const base = new Date(today + 'T00:00:00');
+  const nextDue = (day: number): string => {
+    if (!day || day < 1) return '';
+    const y = base.getFullYear(), m = base.getMonth();
+    const mk = (yy: number, mm: number) => new Date(yy, mm, Math.min(day, daysInMonth(yy, mm)));
+    let cand = mk(y, m);
+    if (cand < base) cand = mk(m === 11 ? y + 1 : y, (m + 1) % 12);
+    return `${cand.getFullYear()}-${pad(cand.getMonth() + 1)}-${pad(cand.getDate())}`;
+  };
+  const items: { label: string; amount: number; dueDay: number }[] = [];
+  for (const a of (spending?.accounts || [])) {
+    if (a.type === 'credit' && a.dueDay) items.push({ label: `${a.name || 'Card'} payment`, amount: Math.abs(Number(a.balance) || 0), dueDay: Number(a.dueDay) });
+  }
+  for (const d of (spending?.debts || [])) {
+    if (d.dueDay) items.push({ label: `${d.name || 'Debt'} payment`, amount: Number(d.minPayment) || 0, dueDay: Number(d.dueDay) });
+  }
+  const seen = new Set<string>();
+  for (const e of (spending?.entries || [])) {
+    if (!e.recurring || e.type !== 'out' || !e.date) continue;
+    const key = (e.name || '').toLowerCase().trim();
+    if (key && seen.has(key)) continue;
+    if (key) seen.add(key);
+    items.push({ label: e.name || 'Subscription', amount: Number(e.amount) || 0, dueDay: Number(e.date.slice(8, 10)) });
+  }
+  const out: UpcomingBill[] = [];
+  for (const it of items) {
+    const dueDate = nextDue(it.dueDay);
+    if (!dueDate) continue;
+    const daysUntil = diffDays(dueDate, today);
+    if (daysUntil >= 0 && daysUntil <= leadDays) out.push({ label: it.label, amount: it.amount, dueDate, daysUntil });
+  }
+  return out.sort((a, b) => a.daysUntil - b.daysUntil);
 }
 
 export const MONEY_DEFAULT_ORDER = [

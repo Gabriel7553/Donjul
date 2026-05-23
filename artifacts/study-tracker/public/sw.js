@@ -1,5 +1,5 @@
 // Bump CACHE version on every release to invalidate stale clients (prevents blank-screen-after-deploy).
-const CACHE = 'donjul-v14-20260523';
+const CACHE = 'donjul-v15-20260523';
 const PRECACHE = ['/'];
 
 self.addEventListener('install', (e) => {

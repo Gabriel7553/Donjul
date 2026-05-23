@@ -52,6 +52,15 @@ export function markFired(key: string, today: string) {
   try { localStorage.setItem(FIRED_KEY, JSON.stringify(pruned)); } catch { /* quota — ignore */ }
 }
 
+// Fire a one-off notification at most once per day for a given key.
+export function fireOncePerDay(key: string, today: string, title: string, body: string) {
+  if (!notificationsSupported() || Notification.permission !== 'granted') return;
+  const k = `${today}:${key}`;
+  if (alreadyFired(k)) return;
+  try { new Notification(title, { body, tag: key }); } catch { /* ignore */ }
+  markFired(k, today);
+}
+
 export function fireDueReminders(list: Reminder[], nowHHMM: string, today: string) {
   if (!notificationsSupported() || Notification.permission !== 'granted') return;
   for (const r of list || []) {

@@ -700,6 +700,24 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
                 <input type="time" value={r.time} onChange={(e) => updateReminder(r.id, { time: e.target.value })} disabled={!r.enabled} style={{ width: 116 }} />
               </div>
             ))}
+            <div style={{ borderTop: '1px solid #E4DCC8', marginTop: 8, paddingTop: 10 }}>
+              <div className="row" style={{ gap: 8 }}>
+                <Checkbox checked={!!draft.billReminders} onChange={() => update({ billReminders: !draft.billReminders })} accent="#6E5C8E" />
+                <span className="small" onClick={() => update({ billReminders: !draft.billReminders })} style={{ cursor: 'pointer', color: draft.billReminders ? undefined : '#6B6457' }}>Bill &amp; subscription due dates</span>
+              </div>
+              {draft.billReminders && (
+                <div className="row" style={{ gap: 8, marginTop: 8, paddingLeft: 30 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: 10 }}>Days before</label>
+                    <input type="number" min={0} max={14} value={draft.billReminderLeadDays ?? 3} onChange={(e) => update({ billReminderLeadDays: Math.max(0, Math.min(14, parseInt(e.target.value) || 0)) })} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ fontSize: 10 }}>Notify at</label>
+                    <input type="time" value={draft.billReminderTime || '09:00'} onChange={(e) => update({ billReminderTime: e.target.value })} />
+                  </div>
+                </div>
+              )}
+            </div>
           </>
         )}
       </div>

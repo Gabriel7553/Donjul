@@ -12,7 +12,8 @@ import { computeAchievements } from './lib/body';
 import { normalizeSubject, doneThisWeek } from './lib/study';
 import { DEFAULT_WORKOUT_SPLIT } from './lib/workout';
 import { DEFAULT_SETTINGS } from './lib/defaults';
-import { fireDueReminders } from './lib/reminders';
+import { fireDueReminders, fireOncePerDay } from './lib/reminders';
+import { upcomingBills } from './lib/money';
 import type { Settings, MealsState, BodyState, WorkoutState, SpendingState, Streaks, StudyTotals, Checkins, WaterLog } from './lib/types';
 import { GlobalStyles, Header, BottomNav, QuickAdd } from './ui';
 import { TodayTab, NutritionCoachModal } from './features/today';
@@ -59,11 +60,22 @@ export default function App() {
   // Fire local reminders while the app is open (no push server; foreground only).
   useEffect(() => {
     if (!settings.reminders) return;
-    const check = () => fireDueReminders(settings.reminderList || [], nowHHMM(), todayStr());
+    const check = () => {
+      fireDueReminders(settings.reminderList || [], nowHHMM(), todayStr());
+      if (settings.billReminders && (settings.billReminderTime || '09:00') === nowHHMM()) {
+        const bills = upcomingBills(spending, settings.billReminderLeadDays ?? 3, todayStr());
+        if (bills.length) {
+          const body = bills.length === 1
+            ? `${bills[0].label} due ${bills[0].daysUntil === 0 ? 'today' : `in ${bills[0].daysUntil}d`}`
+            : `${bills.length} bills due soon: ${bills.slice(0, 3).map((b) => b.label).join(', ')}`;
+          fireOncePerDay('bills', todayStr(), 'Donjul · upcoming bills', body);
+        }
+      }
+    };
     check();
     const id = setInterval(check, 30000);
     return () => clearInterval(id);
-  }, [settings.reminders, settings.reminderList]);
+  }, [settings.reminders, settings.reminderList, settings.billReminders, settings.billReminderTime, settings.billReminderLeadDays, spending]);
 
   useEffect(() => {
     (async () => {
