@@ -26,7 +26,7 @@ Personal study / fitness / nutrition / spending tracker. Single-user offline-fir
 SPA paths are under `artifacts/study-tracker/src/`.
 
 - `App.tsx` — the root `App()` only: top-level state, hydration/persistence effects, modal router, and tab switch (~760 lines)
-- `lib/` — pure logic & data, no JSX: `date`, `storage`, `haptics`, `nutrition`, `money`, `tax`, `challenges`, `body`, `study`, `workout`, `defaults`
+- `lib/` — pure logic & data, no JSX: `date`, `storage`, `haptics`, `nutrition`, `money`, `tax`, `challenges`, `body`, `study`, `workout`, `defaults`, `reminders`, `types`
 - `ui.tsx` — shared presentational primitives (GlobalStyles, Header, BottomNav, Checkbox, QtyStepper, VoiceButton, SortableRow, shared hooks)
 - `features/` — screens + their modals: `today`, `food`, `history`, `trackers`, `dialogs`, `settings`, `money`, `cards`, `insights`
 - `ErrorBoundary.tsx` — React error UI + log to `localStorage:st:errorLog`
@@ -40,10 +40,12 @@ SPA paths are under `artifacts/study-tracker/src/`.
 - `Infinity` is shadowed by a Lucide import — use `Number.POSITIVE_INFINITY`.
 - All meal operations must persist presets + entries in **one** `onSave` call (avoid stale-closure overwrites — see `logCombo`).
 - Boot path always renders a shell first (`main.tsx` → `BootShell`) so a hung `hydrate()` cannot produce a blank page.
+- Persisted-state shapes live in `lib/types.ts` (Settings, Meals, Body, Workout, Spending + leaf models). Aggregates keep an index signature so loose access compiles; tighten incrementally.
+- Vendors are split via `manualChunks` in `vite.config.ts` (charts/motion/dnd/react/vendor). Keep heavy deps **eager-importable** so the SW caches them on first load — don't add route-level dynamic `import()` without a precache manifest or offline/unvisited tabs break (violates the no-blank-screen rule).
 
 ## Product
 
-Daily tracker with: schedule (subjects/tasks with catch-up), Body/Lift, Money (spending, debts, tax), Journal, Plan, History, Meals (Presets/Type/Manual/Combo/Scan/+Save), custom challenges/streaks, achievements, optional sync.
+Daily tracker with: schedule (subjects/tasks with catch-up), Body/Lift, Money (spending, debts, tax), Journal, Plan, History, Meals (Presets/Type/Manual/Combo/Scan/+Save), Insights (cross-domain trends), custom challenges/streaks, achievements, local reminders, customizable/hideable bottom-nav tabs, optional sync.
 
 ## User preferences
 
@@ -51,7 +53,7 @@ Daily tracker with: schedule (subjects/tasks with catch-up), Body/Lift, Money (s
 - Combo logging auto-saves named ingredients as presets (dedupe by lowercase name).
 - Missed-day on a challenge → auto-pause + prompt Restart/End on next open. Rest days protect streaks.
 - Old dates in DayDetailModal must support scan/type/combo (use full logger button).
-- Fuel tab (MFP-style breakfast/lunch/dinner/snacks) is **deferred** — handle in a dedicated session.
+- Food tab is MFP-style (breakfast/lunch/dinner/snacks + water + calorie burn) — shipped. Bottom-nav tabs are reorderable/hideable in Settings → "Tabs & navigation" (Today always shown).
 
 ## Gotchas
 
@@ -66,11 +68,12 @@ Daily tracker with: schedule (subjects/tasks with catch-up), Body/Lift, Money (s
 - **2026-05-23**: Split the monolithic `App.tsx` (~9k lines) into focused modules — `src/lib/*` (pure logic/data), `src/ui.tsx` (shared primitives), `src/features/*` (screens + modals). `App.tsx` is now the ~760-line root (state, hydration, modal router, tab switch). Mechanical move, behavior unchanged; full typecheck + production build green. SW cache bumped `donjul-v3-20260522` → `donjul-v4-20260523`. Not yet smoke-tested in a browser.
 - **2026-05-22 (sync check)**: Verified `main` is already at the same commit as `origin/Repli` (`630a258`) — no merge required. Typecheck passes; SPA boots to the Welcome onboarding in a clean env.
 - **2026-05-23 (cont.)**: Added an **Insights** tab (`features/insights.tsx`) — summary tiles + recharts trends for weight, calories (vs goal), 6-month income/spending, and study consistency, with a 30/90-day toggle; wired into `BottomNav` as "Trends". Also made `sync.hydrate` a static import (removed a Vite mixed-import warning) and added a SessionStart hook (`.claude/`) that installs deps + sets `PORT`/`BASE_PATH` for web sessions. SW cache → `donjul-v5-20260523`.
-- **Deferred**: preset-edit-before-log (qty/unit edit inline before adding). (The MFP-style meal-time Fuel grouping + water + calorie-burn already shipped in the Food tab.)
+- **2026-05-23 (features batch)**: Reviewed the module split (no bugs — verified Infinity/Lucide shadow, the `logCombo` single-save invariant, prop seams). Then shipped: customizable bottom-nav (reorder + show/hide tabs via `settings.navOrder`/`navHidden`); per-preset edit-before-log in the meal logger; local reminders (`lib/reminders.ts` — Notification permission + per-day fired tracking, foreground-only, Settings panel); `manualChunks` vendor split (main chunk ~1.16MB → ~371kB, >500kB warning gone); and central domain types (`lib/types.ts`) adopted at the App state layer (caught a `diffDays(today, null)` streak bug). SW cache → `donjul-v10-20260523`. Typecheck + build green throughout; not browser-tested.
+- **Deferred**: route-level lazy-loading (needs a SW precache manifest to keep offline/unvisited tabs working — see Architecture decisions).
 
 ## Cache / blank-screen recovery
 
-Whenever shipping changes that touch `App.tsx`, `main.tsx`, or assets, bump `CACHE` in `artifacts/study-tracker/public/sw.js` (e.g. `donjul-v5-…` → `donjul-v6-…`). If a user reports a blank page, ask them to: (1) hard-refresh (Ctrl/Cmd+Shift+R), or (2) open devtools console and run `__donjulReset()`.
+Whenever shipping changes that touch `App.tsx`, `main.tsx`, or assets, bump `CACHE` in `artifacts/study-tracker/public/sw.js` (e.g. `donjul-v10-…` → `donjul-v11-…`). If a user reports a blank page, ask them to: (1) hard-refresh (Ctrl/Cmd+Shift+R), or (2) open devtools console and run `__donjulReset()`.
 
 ## Pointers
 
