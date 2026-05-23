@@ -7,7 +7,7 @@ import {
   Camera, BookMarked, TrendingUp as Journal, DollarSign, ShoppingCart, Briefcase, Car, ChevronUp, Trophy, Archive, Infinity, Mic,
   Wallet, PiggyBank, CreditCard, PieChart, Receipt, Pencil, ArrowUpRight, ArrowDownRight, Sparkles,
   ArrowRightLeft, Users, Banknote, BadgeAlert, CircleDollarSign, HandCoins, GripVertical,
-  Droplets, Utensils, Bike, Copy,
+  Droplets, Utensils, Bike, Copy, Eye, EyeOff,
 } from 'lucide-react';
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -18,7 +18,7 @@ import { suggestMacros, suggestMicros, computeTDEE, calorieGoal } from '../lib/b
 import { MICRO_DEFS, DEFAULT_MICRO_TARGETS } from '../lib/nutrition';
 import { DEFAULT_SETTINGS, ICON_MAP } from '../lib/defaults';
 import { K, safeGet } from '../lib/storage';
-import { Checkbox, GlobalStyles, ModalShell, SortableRow, useDndSensors } from '../ui';
+import { Checkbox, GlobalStyles, ModalShell, SortableRow, useDndSensors, NAV_TABS } from '../ui';
 import { getSyncId, setSyncId, getStoredUsername, setStoredUsername, clearStoredUsername, clearLocalSyncData, pushAllLocalData, hydrate } from '../sync';
 
 const AUTH_API = (() => {
@@ -253,6 +253,27 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
     setDraft(nd); onSave(nd);
   };
 
+  const navSensors = useDndSensors();
+  const navHidden: string[] = draft.navHidden || [];
+  const navOrder: string[] = (() => {
+    const saved = Array.isArray(draft.navOrder) ? draft.navOrder.filter((k: string) => NAV_TABS.some((t) => t.key === k)) : [];
+    return [...saved, ...NAV_TABS.filter((t) => !saved.includes(t.key)).map((t) => t.key)];
+  })();
+  const handleNavDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    const oldIdx = navOrder.indexOf(String(active.id));
+    const newIdx = navOrder.indexOf(String(over.id));
+    if (oldIdx === -1 || newIdx === -1) return;
+    const nd2 = { ...draft, navOrder: arrayMove(navOrder, oldIdx, newIdx) };
+    setDraft(nd2); onSave(nd2);
+  };
+  const toggleNavHidden = (key: string) => {
+    if (key === 'today') return;
+    const next = navHidden.includes(key) ? navHidden.filter((k) => k !== key) : [...navHidden, key];
+    const nd2 = { ...draft, navHidden: next };
+    setDraft(nd2); onSave(nd2);
+  };
+
   return (
     <ModalShell title="Settings" onClose={onClose}>
       {!getStoredUsername() ? (
@@ -414,6 +435,31 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
       <button className="tap" onClick={onAddSubject} style={{ width: '100%', marginTop: 10, marginBottom: 16 }}>
         <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Add subject
       </button>
+
+      <div className="h2" style={{ marginBottom: 8, marginTop: 16 }}>Tabs &amp; navigation</div>
+      <p className="muted tiny" style={{ marginBottom: 8, lineHeight: 1.5 }}>Drag to reorder. Tap the eye to show or hide a tab in the bottom bar. Today always stays.</p>
+      <DndContext sensors={navSensors} collisionDetection={closestCenter} onDragEnd={handleNavDragEnd}>
+        <SortableContext items={navOrder} strategy={verticalListSortingStrategy}>
+          {navOrder.map((key: string) => {
+            const t = NAV_TABS.find((x) => x.key === key)!;
+            const Icon = t.icon;
+            const hidden = key !== 'today' && navHidden.includes(key);
+            return (
+              <SortableRow key={key} id={key}>
+                <div className="between" style={{ padding: '10px 0', paddingLeft: 22, borderBottom: '1px solid #E4DCC8', opacity: hidden ? 0.5 : 1 }}>
+                  <div className="row" style={{ gap: 10 }}>
+                    <Icon size={16} />
+                    <span className="small" style={{ fontWeight: 600 }}>{t.label}</span>
+                  </div>
+                  <button className="tap" style={{ padding: '4px 8px' }} onClick={() => toggleNavHidden(key)} disabled={key === 'today'} title={key === 'today' ? 'Always shown' : hidden ? 'Show' : 'Hide'}>
+                    {hidden ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+              </SortableRow>
+            );
+          })}
+        </SortableContext>
+      </DndContext>
 
       <div className="h2" style={{ marginBottom: 8, marginTop: 8 }}>Macros</div>
       <div className="row" style={{ gap: 8, marginBottom: 8 }}>

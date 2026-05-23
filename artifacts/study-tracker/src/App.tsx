@@ -49,6 +49,11 @@ export default function App() {
   const [exercise, setExercise] = useState<any>({});
   const [modal, setModal] = useState<any>(null);
 
+  // If the active tab gets hidden from the nav, fall back to Today.
+  useEffect(() => {
+    if (tab !== 'today' && (settings.navHidden || []).includes(tab)) setTab('today');
+  }, [tab, settings.navHidden]);
+
   useEffect(() => {
     (async () => {
       const s = await safeGet(K.settings, DEFAULT_SETTINGS);
@@ -705,7 +710,7 @@ export default function App() {
         )}
       </div>
 
-      <BottomNav tab={tab} setTab={setTab} />
+      <BottomNav tab={tab} setTab={setTab} order={settings.navOrder} hidden={settings.navHidden} />
 
       {modal?.type === 'settings' && <SettingsModal settings={settings} body={body} onSave={saveSettings} onClose={() => setModal(null)} onEditSubject={(k: string) => setModal({ type: 'editSubject', key: k })} onAddSubject={() => setModal({ type: 'editSubject', key: null })} onChallenge={() => setModal({ type: 'challenge' })} onCustomChallenges={() => setModal({ type: 'customChallenges' })} onExportImport={() => setModal({ type: 'exportImport' })} onResetDay={() => setModal({ type: 'resetDay' })} onSyncTransfer={() => setModal({ type: 'syncTransfer' })} onDiagnostics={() => setModal({ type: 'diagnostics' })} />}
       {modal?.type === 'syncTransfer' && <AccountModal onClose={() => setModal({ type: 'settings' })} />}

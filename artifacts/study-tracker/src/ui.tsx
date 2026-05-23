@@ -159,18 +159,23 @@ export function Header({ date, onSettings }: { date: string; onSettings: () => v
   );
 }
 
-export function BottomNav({ tab, setTab }: { tab: string; setTab: (t: string) => void }) {
-  const items = [
-    { key: 'today', label: 'Today', icon: Sun },
-    { key: 'food', label: 'Food', icon: Apple },
-    { key: 'body', label: 'Body', icon: Activity },
-    { key: 'workout', label: 'Lift', icon: Dumbbell },
-    { key: 'money', label: 'Money', icon: Wallet },
-    { key: 'journal', label: 'Journal', icon: BookMarked },
-    { key: 'plan', label: 'Plan', icon: CalIcon },
-    { key: 'history', label: 'History', icon: History },
-    { key: 'insights', label: 'Trends', icon: TrendingUp },
-  ];
+export const NAV_TABS = [
+  { key: 'today', label: 'Today', icon: Sun },
+  { key: 'food', label: 'Food', icon: Apple },
+  { key: 'body', label: 'Body', icon: Activity },
+  { key: 'workout', label: 'Lift', icon: Dumbbell },
+  { key: 'money', label: 'Money', icon: Wallet },
+  { key: 'journal', label: 'Journal', icon: BookMarked },
+  { key: 'plan', label: 'Plan', icon: CalIcon },
+  { key: 'history', label: 'History', icon: History },
+  { key: 'insights', label: 'Trends', icon: TrendingUp },
+];
+
+export function BottomNav({ tab, setTab, order, hidden }: { tab: string; setTab: (t: string) => void; order?: string[]; hidden?: string[] }) {
+  const hiddenSet = new Set(hidden || []);
+  const saved = (order || []).filter((k) => NAV_TABS.some((t) => t.key === k));
+  const ordered = [...saved.map((k) => NAV_TABS.find((t) => t.key === k)!), ...NAV_TABS.filter((t) => !saved.includes(t.key))];
+  const items = ordered.filter((t) => t.key === 'today' || !hiddenSet.has(t.key));
   return (
     <div className="bottom-nav">
       {items.map(it => (
