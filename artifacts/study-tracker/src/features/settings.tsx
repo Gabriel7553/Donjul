@@ -290,6 +290,33 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
     update({ reminders: !draft.reminders });
   };
 
+  const todaySensors = useDndSensors();
+  const TODAY_CARDS = [
+    { key: 'schedule', label: 'Schedule', icon: CalIcon },
+    { key: 'progress', label: 'Progress', icon: Target },
+    { key: 'challenges', label: 'Challenges', icon: Trophy },
+    { key: 'nutrition', label: 'Nutrition', icon: Apple },
+    { key: 'weekly', label: 'Weekly summary', icon: TrendingUp },
+  ];
+  const todayHidden: string[] = draft.todayHidden || [];
+  const todayOrder: string[] = (() => {
+    const saved = Array.isArray(draft.todayLayout) ? draft.todayLayout.filter((k: string) => TODAY_CARDS.some((t) => t.key === k)) : [];
+    return [...saved, ...TODAY_CARDS.filter((t) => !saved.includes(t.key)).map((t) => t.key)];
+  })();
+  const handleTodayDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    const oldIdx = todayOrder.indexOf(String(active.id));
+    const newIdx = todayOrder.indexOf(String(over.id));
+    if (oldIdx === -1 || newIdx === -1) return;
+    const nd2 = { ...draft, todayLayout: arrayMove(todayOrder, oldIdx, newIdx) };
+    setDraft(nd2); onSave(nd2);
+  };
+  const toggleTodayHidden = (key: string) => {
+    const next = todayHidden.includes(key) ? todayHidden.filter((k) => k !== key) : [...todayHidden, key];
+    const nd2 = { ...draft, todayHidden: next };
+    setDraft(nd2); onSave(nd2);
+  };
+
   return (
     <ModalShell title="Settings" onClose={onClose}>
       {!getStoredUsername() ? (
@@ -468,6 +495,31 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
                     <span className="small" style={{ fontWeight: 600 }}>{t.label}</span>
                   </div>
                   <button className="tap" style={{ padding: '4px 8px' }} onClick={() => toggleNavHidden(key)} disabled={key === 'today'} title={key === 'today' ? 'Always shown' : hidden ? 'Show' : 'Hide'}>
+                    {hidden ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+              </SortableRow>
+            );
+          })}
+        </SortableContext>
+      </DndContext>
+
+      <div className="h2" style={{ marginBottom: 8, marginTop: 16 }}>Today screen</div>
+      <p className="muted tiny" style={{ marginBottom: 8, lineHeight: 1.5 }}>Drag to reorder the cards on your Today screen. Tap the eye to hide one.</p>
+      <DndContext sensors={todaySensors} collisionDetection={closestCenter} onDragEnd={handleTodayDragEnd}>
+        <SortableContext items={todayOrder} strategy={verticalListSortingStrategy}>
+          {todayOrder.map((key: string) => {
+            const t = TODAY_CARDS.find((x) => x.key === key)!;
+            const Icon = t.icon;
+            const hidden = todayHidden.includes(key);
+            return (
+              <SortableRow key={key} id={key}>
+                <div className="between" style={{ padding: '10px 0', paddingLeft: 22, borderBottom: '1px solid #E4DCC8', opacity: hidden ? 0.5 : 1 }}>
+                  <div className="row" style={{ gap: 10 }}>
+                    <Icon size={16} />
+                    <span className="small" style={{ fontWeight: 600 }}>{t.label}</span>
+                  </div>
+                  <button className="tap" style={{ padding: '4px 8px' }} onClick={() => toggleTodayHidden(key)} title={hidden ? 'Show' : 'Hide'}>
                     {hidden ? <EyeOff size={14} /> : <Eye size={14} />}
                   </button>
                 </div>

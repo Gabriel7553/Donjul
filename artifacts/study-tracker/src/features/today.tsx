@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, Fragment } from 'react';
 import {
   Sun, Home, Footprints, Check, Plus, Settings as SettingsIcon, X, Music, Languages, Shield,
   Award, Save, Calendar as CalIcon, Activity, Dumbbell, Apple, ListChecks, ChevronRight, ChevronDown, ChevronLeft,
@@ -57,16 +57,39 @@ export function TodayTab({ settings, daily, totals, streaks, meals, workout, che
         <>
           <StatusBar daily={daily} onBusy={onBusy} onBack={onBack} onSwitch={onSwitch} nowMins={nowMins} now={now} sleepTime={settings.sleepTime} />
           {daily.focus && <FocusTimerCard focus={daily.focus} subject={settings.subjects[daily.focus.subject]} onStop={onFocusStop} />}
-          <Schedule settings={settings} daily={daily} totals={totals} onLog={onLogTime} subjectKeys={subjectKeys} nowMins={nowMins} checkins={checkins} />
-          <CatchUpBanner settings={settings} totals={totals} daily={daily} subjectKeys={subjectKeys} />
-          <Progress settings={settings} totals={totals} daily={daily} streaks={streaks} subjectKeys={subjectKeys} onLogExtra={onLogTime} checkins={checkins} onMarkDone={onMarkDone} onFocusStart={onFocusStart} focus={daily.focus} onSkipToday={onSkipToday} />
-          <ChallengeCard settings={settings} workout={workout} />
-          <CustomChallengesCard challenges={customChallenges} settings={settings} onRestDay={onRestDay} onManage={onManageChallenges} />
-          <MacrosCard targets={settings.macroTargets} totals={todayMacros} onLog={onLogMeal} onReset={onResetMacros} onCoach={onCoach} />
-          {settings.microsEnabled !== false && (
-            <MicrosCard targets={settings.microTargets} totals={todayMacros} />
-          )}
-          <WeeklySummary settings={settings} totals={totals} daily={daily} meals={meals} workout={workout} />
+          {(() => {
+            const blocks: Record<string, any> = {
+              schedule: (
+                <>
+                  <Schedule settings={settings} daily={daily} totals={totals} onLog={onLogTime} subjectKeys={subjectKeys} nowMins={nowMins} checkins={checkins} />
+                  <CatchUpBanner settings={settings} totals={totals} daily={daily} subjectKeys={subjectKeys} />
+                </>
+              ),
+              progress: (
+                <Progress settings={settings} totals={totals} daily={daily} streaks={streaks} subjectKeys={subjectKeys} onLogExtra={onLogTime} checkins={checkins} onMarkDone={onMarkDone} onFocusStart={onFocusStart} focus={daily.focus} onSkipToday={onSkipToday} />
+              ),
+              challenges: (
+                <>
+                  <ChallengeCard settings={settings} workout={workout} />
+                  <CustomChallengesCard challenges={customChallenges} settings={settings} onRestDay={onRestDay} onManage={onManageChallenges} />
+                </>
+              ),
+              nutrition: (
+                <>
+                  <MacrosCard targets={settings.macroTargets} totals={todayMacros} onLog={onLogMeal} onReset={onResetMacros} onCoach={onCoach} />
+                  {settings.microsEnabled !== false && <MicrosCard targets={settings.microTargets} totals={todayMacros} />}
+                </>
+              ),
+              weekly: (
+                <WeeklySummary settings={settings} totals={totals} daily={daily} meals={meals} workout={workout} />
+              ),
+            };
+            const fallback = ['schedule', 'progress', 'challenges', 'nutrition', 'weekly'];
+            const saved: string[] = (settings.todayLayout && settings.todayLayout.length) ? settings.todayLayout : fallback;
+            const order = [...saved.filter((k: string) => blocks[k]), ...Object.keys(blocks).filter((k) => !saved.includes(k))];
+            const hidden: string[] = settings.todayHidden || [];
+            return order.filter((k) => !hidden.includes(k)).map((k) => <Fragment key={k}>{blocks[k]}</Fragment>);
+          })()}
         </>
       )}
     </>
