@@ -3842,6 +3842,15 @@ function VoiceButton({ onResult, style }: any) {
   );
 }
 
+// Food serving units + a human label for a serving definition (e.g. "100 g", "2 servings").
+const FOOD_UNITS = ['serving', 'g', 'oz', 'lb', 'ml', 'fl oz', 'cup', 'tbsp', 'tsp', 'piece', 'slice'];
+const fmtNum = (n: any) => String(Math.round((Number(n) || 0) * 100) / 100);
+function servingLabelOf(size: any, unit: any): string {
+  const s = Number(size) || 1;
+  const u = unit || 'serving';
+  if (u !== 'serving') return `${fmtNum(s)} ${u}`;
+  return s === 1 ? '1 serving' : `${fmtNum(s)} servings`;
+}
 function QtyStepper({ qty, setQty }: any) {
   return (
     <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 10 }}>
@@ -3857,8 +3866,8 @@ function LogMealModal({ meals, settings, onSave, onClose, targetDate, mealType }
   const target = targetDate || todayStr();
   const isToday = target === todayStr();
   const [mode, setMode] = useState('preset');
-  const [newPreset, setNewPreset] = useState({ name: '', protein: '', carbs: '', fat: '', calories: '', source: '' });
-  const [manual, setManual] = useState<any>({ name: '', protein: '', carbs: '', fat: '', calories: '' });
+  const [newPreset, setNewPreset] = useState({ name: '', protein: '', carbs: '', fat: '', calories: '', source: '', servingSize: '1', servingUnit: 'serving' });
+  const [manual, setManual] = useState<any>({ name: '', protein: '', carbs: '', fat: '', calories: '', servingSize: '1', servingUnit: 'serving' });
   const [manualMicros, setManualMicros] = useState<any>({});
   const [showManualMicros, setShowManualMicros] = useState(false);
   const [parts, setParts] = useState<any[]>([{ id: 'c0', name: '', servingLabel: '1 serving', protein: '', carbs: '', fat: '', calories: '', servings: '1' }]);
@@ -3889,8 +3898,12 @@ function LogMealModal({ meals, settings, onSave, onClose, targetDate, mealType }
 
   const logItem = async (item: any, q = 1) => {
     const s = scaled(item, q);
-    const name = q !== 1 ? `${item.name} ×${q}` : item.name;
-    await onSave(addMealEntry(meals, target, { name, source: item.source || '', qty: q, ...s, ...(mealType ? { meal: mealType } : {}) }));
+    const size = Number(item.servingSize) || 1;
+    const u = item.servingUnit || 'serving';
+    const realUnit = u !== 'serving';
+    const amount = realUnit ? Math.round(q * size * 100) / 100 : q;
+    const name = realUnit ? `${item.name} · ${fmtNum(amount)} ${u}` : (q !== 1 ? `${item.name} ×${fmtNum(q)}` : item.name);
+    await onSave(addMealEntry(meals, target, { name, source: item.source || '', qty: q, amount, unit: u, servingSize: size, ...s, ...(mealType ? { meal: mealType } : {}) }));
     onClose();
   };
 
@@ -3962,7 +3975,7 @@ function LogMealModal({ meals, settings, onSave, onClose, targetDate, mealType }
   const logManual = async () => {
     const micros: any = {};
     for (const k of MICRO_KEYS) micros[k] = parseFloat(manualMicros[k]) || 0;
-    await logItem({ name: manual.name || 'Manual entry', source: 'Manual', protein: parseFloat(manual.protein) || 0, carbs: parseFloat(manual.carbs) || 0, fat: parseFloat(manual.fat) || 0, calories: parseFloat(manual.calories) || 0, ...micros }, qty);
+    await logItem({ name: manual.name || 'Manual entry', source: 'Manual', protein: parseFloat(manual.protein) || 0, carbs: parseFloat(manual.carbs) || 0, fat: parseFloat(manual.fat) || 0, calories: parseFloat(manual.calories) || 0, servingSize: parseFloat(manual.servingSize) || 1, servingUnit: manual.servingUnit || 'serving', ...micros }, qty);
   };
 
   const partSum = (p: any) => {
@@ -4013,10 +4026,10 @@ function LogMealModal({ meals, settings, onSave, onClose, targetDate, mealType }
     setComboScanIdx(null); setReview(null); setScanState('idle');
   };
   const addPreset = async () => {
-    const p = { id: 'p' + Date.now(), name: newPreset.name, protein: parseFloat(newPreset.protein) || 0, carbs: parseFloat(newPreset.carbs) || 0, fat: parseFloat(newPreset.fat) || 0, calories: parseFloat(newPreset.calories) || 0, source: newPreset.source };
+    const p = { id: 'p' + Date.now(), name: newPreset.name, protein: parseFloat(newPreset.protein) || 0, carbs: parseFloat(newPreset.carbs) || 0, fat: parseFloat(newPreset.fat) || 0, calories: parseFloat(newPreset.calories) || 0, source: newPreset.source, servingSize: parseFloat(newPreset.servingSize) || 1, servingUnit: newPreset.servingUnit || 'serving' };
     await onSave({ ...meals, presets: [...meals.presets, p] });
     setMode('preset');
-    setNewPreset({ name: '', protein: '', carbs: '', fat: '', calories: '', source: '' });
+    setNewPreset({ name: '', protein: '', carbs: '', fat: '', calories: '', source: '', servingSize: '1', servingUnit: 'serving' });
   };
   const removePreset = async (id: string) => { await onSave({ ...meals, presets: meals.presets.filter((p: any) => p.id !== id) }); };
 
@@ -4133,7 +4146,10 @@ function LogMealModal({ meals, settings, onSave, onClose, targetDate, mealType }
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div className="small" style={{ fontWeight: 600 }}>{p.name}</div>
                   {p.source && <div className="muted tiny">{p.source}</div>}
-                  <div className="mono tiny muted" style={{ marginTop: 4 }}>{p.protein}p · {p.carbs}c · {p.fat}f · {p.calories}cal{qty !== 1 ? ` (×${qty})` : ''}</div>
+                  {((p.servingUnit && p.servingUnit !== 'serving') || (Number(p.servingSize) || 1) !== 1) && (
+                    <div className="mono tiny muted" style={{ marginTop: 3 }}>per {servingLabelOf(p.servingSize, p.servingUnit)}</div>
+                  )}
+                  <div className="mono tiny muted" style={{ marginTop: 3 }}>{p.protein}p · {p.carbs}c · {p.fat}f · {p.calories}cal{qty !== 1 ? ` (×${qty})` : ''}</div>
                 </div>
                 <button onClick={(e) => { e.stopPropagation(); removePreset(p.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 4 }}>
                   <Trash2 size={14} />
@@ -4148,6 +4164,11 @@ function LogMealModal({ meals, settings, onSave, onClose, targetDate, mealType }
         <>
           <label>Name (optional)</label>
           <input type="text" value={manual.name} onChange={(e) => setManual({ ...manual, name: e.target.value })} placeholder="e.g. Lunch" style={{ marginBottom: 10 }} />
+          <div className="row" style={{ gap: 8, marginBottom: 4 }}>
+            <div style={{ flex: 1 }}><label>Serving size</label><input type="number" inputMode="decimal" value={manual.servingSize} onChange={(e) => setManual({ ...manual, servingSize: e.target.value })} /></div>
+            <div style={{ flex: 1 }}><label>Unit</label><select value={manual.servingUnit} onChange={(e) => setManual({ ...manual, servingUnit: e.target.value })}>{FOOD_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}</select></div>
+          </div>
+          <p className="muted tiny" style={{ marginBottom: 10, lineHeight: 1.4 }}>Macros below are for {servingLabelOf(manual.servingSize, manual.servingUnit)}; set servings to log a multiple.</p>
           <div className="row" style={{ gap: 8 }}>
             <div style={{ flex: 1 }}><label>Protein (g)</label><input type="number" value={manual.protein} onChange={(e) => setManual({ ...manual, protein: e.target.value })} /></div>
             <div style={{ flex: 1 }}><label>Carbs (g)</label><input type="number" value={manual.carbs} onChange={(e) => setManual({ ...manual, carbs: e.target.value })} /></div>
@@ -4278,6 +4299,11 @@ function LogMealModal({ meals, settings, onSave, onClose, targetDate, mealType }
           <input type="text" value={newPreset.name} onChange={(e) => setNewPreset({ ...newPreset, name: e.target.value })} placeholder="e.g. Skinnytaste turkey chili" style={{ marginBottom: 10 }} />
           <label>Source (optional)</label>
           <input type="text" value={newPreset.source} onChange={(e) => setNewPreset({ ...newPreset, source: e.target.value })} placeholder="e.g. Skinnytaste Meal Prep" style={{ marginBottom: 10 }} />
+          <div className="row" style={{ gap: 8, marginBottom: 4 }}>
+            <div style={{ flex: 1 }}><label>Serving size</label><input type="number" inputMode="decimal" value={newPreset.servingSize} onChange={(e) => setNewPreset({ ...newPreset, servingSize: e.target.value })} /></div>
+            <div style={{ flex: 1 }}><label>Unit</label><select value={newPreset.servingUnit} onChange={(e) => setNewPreset({ ...newPreset, servingUnit: e.target.value })}>{FOOD_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}</select></div>
+          </div>
+          <p className="muted tiny" style={{ marginBottom: 10, lineHeight: 1.4 }}>Macros below are per {servingLabelOf(newPreset.servingSize, newPreset.servingUnit)}.</p>
           <div className="row" style={{ gap: 8 }}>
             <div style={{ flex: 1 }}><label>Protein</label><input type="number" value={newPreset.protein} onChange={(e) => setNewPreset({ ...newPreset, protein: e.target.value })} /></div>
             <div style={{ flex: 1 }}><label>Carbs</label><input type="number" value={newPreset.carbs} onChange={(e) => setNewPreset({ ...newPreset, carbs: e.target.value })} /></div>
@@ -8108,7 +8134,7 @@ function FoodTab({ settings, meals, water, exercise, body, onOpenLogger, onSaveM
                       <div className="between" style={{ flex: 1, alignItems: 'center', minWidth: 0 }}>
                         <div style={{ minWidth: 0 }}>
                           <div className="small" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.name}</div>
-                          {(e.source || (e.qty && e.qty !== 1)) && <div className="tiny muted">{[e.source, e.qty && e.qty !== 1 ? `×${e.qty}` : ''].filter(Boolean).join(' · ')}</div>}
+                          {e.source && <div className="tiny muted">{e.source}</div>}
                         </div>
                         <div className="row" style={{ gap: 10, alignItems: 'center' }}>
                           <span className="mono tiny">{Math.round(Number(e.calories) || 0)}</span>
