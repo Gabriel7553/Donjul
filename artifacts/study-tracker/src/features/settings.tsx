@@ -424,7 +424,7 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
               const meta = s.trackingMode === 'checkoff' ? `Check-off · ${s.weeklyDays}x/wk` : `${s.target}min/day · ${s.weeklyDays}x/wk`;
               return (
                 <SortableRow key={k} id={k}>
-                  <div className="between" style={{ padding: '10px 0', paddingLeft: 22, borderBottom: '1px solid #E4DCC8' }}>
+                  <div className="between" style={{ padding: '10px 0', paddingLeft: 22, borderBottom: '1px solid var(--border)' }}>
                     <div className="row" style={{ gap: 10, flex: 1, minWidth: 0 }}>
                       <div className="icon-wrap" style={{ background: s.accent, width: 28, height: 28 }}><Icon size={14} /></div>
                       <div style={{ minWidth: 0 }}>
@@ -449,7 +449,7 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
         const meta = s.trackingMode === 'checkoff' ? `Check-off · ${s.weeklyDays}x/wk` : `${s.target}min/day · ${s.weeklyDays}x/wk`;
         const daysLeft = s.deletedAt ? Math.max(0, 15 - diffDays(todayStr(), s.deletedAt)) : 0;
         return (
-          <div key={k} className="between" style={{ padding: '10px 0', borderBottom: '1px solid #E4DCC8' }}>
+          <div key={k} className="between" style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
             <div className="row" style={{ gap: 10, flex: 1, minWidth: 0 }}>
               <div className="icon-wrap" style={{ background: s.accent, width: 28, height: 28 }}><Icon size={14} /></div>
               <div style={{ minWidth: 0 }}>
@@ -489,7 +489,7 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
             const hidden = key !== 'today' && navHidden.includes(key);
             return (
               <SortableRow key={key} id={key}>
-                <div className="between" style={{ padding: '10px 0', paddingLeft: 22, borderBottom: '1px solid #E4DCC8', opacity: hidden ? 0.5 : 1 }}>
+                <div className="between" style={{ padding: '10px 0', paddingLeft: 22, borderBottom: '1px solid var(--border)', opacity: hidden ? 0.5 : 1 }}>
                   <div className="row" style={{ gap: 10 }}>
                     <Icon size={16} />
                     <span className="small" style={{ fontWeight: 600 }}>{t.label}</span>
@@ -514,7 +514,7 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
             const hidden = todayHidden.includes(key);
             return (
               <SortableRow key={key} id={key}>
-                <div className="between" style={{ padding: '10px 0', paddingLeft: 22, borderBottom: '1px solid #E4DCC8', opacity: hidden ? 0.5 : 1 }}>
+                <div className="between" style={{ padding: '10px 0', paddingLeft: 22, borderBottom: '1px solid var(--border)', opacity: hidden ? 0.5 : 1 }}>
                   <div className="row" style={{ gap: 10 }}>
                     <Icon size={16} />
                     <span className="small" style={{ fontWeight: 600 }}>{t.label}</span>
@@ -676,7 +676,7 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
         </div>
       </div>
 
-      <div style={{ padding: '8px 0', borderBottom: '1px solid #E4DCC8' }}>
+      <div style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
         <div className="between">
           <span className="small"><Bell size={13} style={{ verticalAlign: 'middle', marginRight: 5 }} />Reminders</span>
           <button
@@ -700,7 +700,7 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
                 <input type="time" value={r.time} onChange={(e) => updateReminder(r.id, { time: e.target.value })} disabled={!r.enabled} style={{ width: 116 }} />
               </div>
             ))}
-            <div style={{ borderTop: '1px solid #E4DCC8', marginTop: 8, paddingTop: 10 }}>
+            <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 10 }}>
               <div className="row" style={{ gap: 8 }}>
                 <Checkbox checked={!!draft.billReminders} onChange={() => update({ billReminders: !draft.billReminders })} accent="#6E5C8E" />
                 <span className="small" onClick={() => update({ billReminders: !draft.billReminders })} style={{ cursor: 'pointer', color: draft.billReminders ? undefined : '#6B6457' }}>Bill &amp; subscription due dates</span>
@@ -722,7 +722,7 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
         )}
       </div>
 
-      <div className="between" style={{ padding: '8px 0', marginBottom: 8, borderBottom: '1px solid #E4DCC8' }}>
+      <div className="between" style={{ padding: '8px 0', marginBottom: 8, borderBottom: '1px solid var(--border)' }}>
         <span className="small">Appearance</span>
         <div className="row" style={{ gap: 6 }}>
           <button
@@ -969,7 +969,7 @@ export function EditSubjectModal({ subjectKey, settings, onSave, onClose }: any)
       <label>Color</label>
       <div className="row" style={{ gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
         {COLORS.map(c => (
-          <button key={c} onClick={() => set({ accent: c })} style={{ width: 32, height: 32, borderRadius: 8, background: c, border: draft.accent === c ? '3px solid #1A1A2E' : '1px solid #D4CCB8', cursor: 'pointer' }} />
+          <button key={c} onClick={() => set({ accent: c })} style={{ width: 32, height: 32, borderRadius: 8, background: c, border: draft.accent === c ? '3px solid #1A1A2E' : '1px solid var(--border-muted)', cursor: 'pointer' }} />
         ))}
       </div>
 
@@ -1088,7 +1088,7 @@ export function WeeklyReviewModal({ settings, totals, body, workout, meals, stre
         const Icon = ICON_MAP[s.icon] || Languages;
         const streak = streaks[k]?.current || 0;
         return (
-          <div key={k} style={{ marginBottom: 12, padding: 12, background: '#FBF7EE', border: '1px solid #E4DCC8', borderRadius: 10 }}>
+          <div key={k} style={{ marginBottom: 12, padding: 12, background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10 }}>
             <div className="row" style={{ gap: 8, marginBottom: 6 }}>
               <Icon size={14} color={s.accent} />
               <span className="small" style={{ fontWeight: 600 }}>{s.name}</span>
@@ -1192,7 +1192,7 @@ export function ChallengeModal({ settings, challengeHistory, onSave, onSaveHisto
                 Day {daysDone} {isInfinite ? '· open-ended' : `of ${ch.days} · ${ch.days - daysDone} to go`}
               </div>
               {!isInfinite && (
-                <div style={{ height: 4, background: '#E4DCC8', borderRadius: 2, overflow: 'hidden', marginBottom: 10 }}>
+                <div style={{ height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden', marginBottom: 10 }}>
                   <div style={{ height: '100%', width: `${pct}%`, background: '#8E4585', borderRadius: 2, transition: 'width 0.5s' }} />
                 </div>
               )}
@@ -1287,14 +1287,14 @@ export function ResetDayModal({ onReset, onFullReset, onClose }: any) {
         <button
           className="tap"
           onClick={() => { setView('today'); setConfirmDay(false); setConfirmFull(false); }}
-          style={{ flex: 1, background: view === 'today' ? '#B8460E22' : 'transparent', borderColor: view === 'today' ? '#B8460E' : '#E4DCC8' }}
+          style={{ flex: 1, background: view === 'today' ? '#B8460E22' : 'transparent', borderColor: view === 'today' ? '#B8460E' : 'var(--border)' }}
         >
           Reset today
         </button>
         <button
           className="tap"
           onClick={() => { setView('full'); setConfirmDay(false); setConfirmFull(false); }}
-          style={{ flex: 1, background: view === 'full' ? '#1A1A2E22' : 'transparent', borderColor: view === 'full' ? '#1A1A2E' : '#E4DCC8' }}
+          style={{ flex: 1, background: view === 'full' ? '#1A1A2E22' : 'transparent', borderColor: view === 'full' ? '#1A1A2E' : 'var(--border)' }}
         >
           Full reset
         </button>
@@ -1309,7 +1309,7 @@ export function ResetDayModal({ onReset, onFullReset, onClose }: any) {
           <div className="row" style={{ gap: 8, marginBottom: 10 }}>
             <button
               className="tap"
-              style={{ flex: 1, fontSize: 11, background: allDay ? '#B8460E22' : 'transparent', borderColor: allDay ? '#B8460E' : '#E4DCC8' }}
+              style={{ flex: 1, fontSize: 11, background: allDay ? '#B8460E22' : 'transparent', borderColor: allDay ? '#B8460E' : 'var(--border)' }}
               onClick={() => { setOpts(ALL_DAY); setConfirmDay(false); }}
             >
               Select all
@@ -1326,7 +1326,7 @@ export function ResetDayModal({ onReset, onFullReset, onClose }: any) {
             <div
               key={r.key}
               className="between"
-              style={{ padding: '10px 0', borderBottom: '1px solid #E4DCC8', cursor: 'pointer' }}
+              style={{ padding: '10px 0', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
               onClick={() => toggleDay(r.key)}
             >
               <div style={{ flex: 1, paddingRight: 10 }}>
@@ -1372,7 +1372,7 @@ export function ResetDayModal({ onReset, onFullReset, onClose }: any) {
             <div
               key={r.key}
               className="between"
-              style={{ padding: '10px 0', borderBottom: '1px solid #E4DCC8', cursor: 'pointer' }}
+              style={{ padding: '10px 0', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
               onClick={() => toggleFull(r.key)}
             >
               <div style={{ flex: 1, paddingRight: 10 }}>
@@ -1477,7 +1477,7 @@ export function ExportImportModal({ data, onImport, onClose }: any) {
           </p>
           {backups.length === 0 && <p className="muted small">No backups yet — they're created automatically as you use the app.</p>}
           {backups.map((b: any) => (
-            <div key={b.ts} className="between" style={{ padding: '10px 0', borderBottom: '1px solid #E4DCC8' }}>
+            <div key={b.ts} className="between" style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
               <span className="small">{new Date(b.ts).toLocaleString()}</span>
               <button className="tap" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => { if (confirm('Restore this backup? Current data will be replaced.')) onImport(b.data); }}>Restore</button>
             </div>
@@ -1630,11 +1630,11 @@ export function Setup({ onComplete, onImport }: any) {
     <div className="app">
       <GlobalStyles />
       <div className="content" style={{ paddingTop: 40 }}>
-        <div className="mono tiny" style={{ letterSpacing: '0.2em', color: '#6B6457', marginBottom: 24, textTransform: 'uppercase' }}>
+        <div className="mono tiny" style={{ letterSpacing: '0.2em', color: 'var(--text-muted)', marginBottom: 24, textTransform: 'uppercase' }}>
           Step {step + 1} of {steps.length}
         </div>
         <h1 style={{ fontSize: 36, fontWeight: 600, letterSpacing: '-0.02em', lineHeight: 1.05, marginBottom: 12, fontFamily: 'Fraunces, serif' }}>{current.title}</h1>
-        {current.body && <p style={{ fontSize: 16, color: '#6B6457', marginBottom: 28, lineHeight: 1.5, fontFamily: 'Fraunces, serif' }}>{current.body}</p>}
+        {current.body && <p style={{ fontSize: 16, color: 'var(--text-muted)', marginBottom: 28, lineHeight: 1.5, fontFamily: 'Fraunces, serif' }}>{current.body}</p>}
         {current.content && <div style={{ marginBottom: 28 }}>{current.content}</div>}
         <div className="row" style={{ gap: 10 }}>
           {step > 0 && <button className="btn btn-ghost" onClick={() => setStep(step - 1)}>Back</button>}
@@ -1644,9 +1644,9 @@ export function Setup({ onComplete, onImport }: any) {
         {step === 0 && (
           <>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '36px 0 18px' }}>
-              <div style={{ flex: 1, height: 1, background: '#E4DCC8' }} />
+              <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
               <span className="mono tiny muted" style={{ letterSpacing: '0.15em', textTransform: 'uppercase' }}>Returning?</span>
-              <div style={{ flex: 1, height: 1, background: '#E4DCC8' }} />
+              <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
             </div>
             {!showImport && !showRecover && (
               <div className="row" style={{ gap: 8 }}>
@@ -1666,7 +1666,7 @@ export function Setup({ onComplete, onImport }: any) {
                     <RotateCcw size={16} color="#8E4585" />
                     <span className="h3">Recover account</span>
                   </div>
-                  <button onClick={() => { setShowRecover(false); setRecoverId(''); setRecoverError(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6457' }}>
+                  <button onClick={() => { setShowRecover(false); setRecoverId(''); setRecoverError(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
                     <X size={18} />
                   </button>
                 </div>
@@ -1698,7 +1698,7 @@ export function Setup({ onComplete, onImport }: any) {
                     <Upload size={16} color="#3B5C6B" />
                     <span className="h3">Restore data</span>
                   </div>
-                  <button onClick={() => { setShowImport(false); setImportText(''); setImportError(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6457' }}>
+                  <button onClick={() => { setShowImport(false); setImportText(''); setImportError(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
                     <X size={18} />
                   </button>
                 </div>

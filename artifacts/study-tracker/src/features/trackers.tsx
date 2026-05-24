@@ -109,7 +109,7 @@ export function BodyTab({ settings, body, workout, onAddEntry, onEditGoals }: an
           <div className="card">
             <div className="between" style={{ marginBottom: 14 }}>
               <div className="h2">Measurement detail</div>
-              <button onClick={onEditGoals} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6457' }}>
+              <button onClick={onEditGoals} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
                 <Target size={16} />
               </button>
             </div>
@@ -133,7 +133,7 @@ export function BodyTab({ settings, body, workout, onAddEntry, onEditGoals }: an
               }
 
               return (
-                <div key={f.key} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: '1px solid #E4DCC8' }}>
+                <div key={f.key} style={{ marginBottom: 14, paddingBottom: 14, borderBottom: '1px solid var(--border)' }}>
                   <div className="between" style={{ marginBottom: 4 }}>
                     <span className="small" style={{ fontWeight: 600 }}>{f.label}</span>
                     <div className="row" style={{ gap: 6 }}>
@@ -256,7 +256,7 @@ export function JournalTab({ journal, onSave, settings }: any) {
                     onClick={() => selectMood(m.value)}
                     title={m.label}
                     style={{
-                      flex: 1, padding: '6px 4px', border: `1px solid ${mood === m.value ? '#8E4585' : '#E4DCC8'}`,
+                      flex: 1, padding: '6px 4px', border: `1px solid ${mood === m.value ? '#8E4585' : 'var(--border)'}`,
                       borderRadius: 8, background: mood === m.value ? '#F3EEF6' : 'transparent',
                       cursor: 'pointer', textAlign: 'center', fontSize: 20, lineHeight: 1.3,
                     }}
@@ -271,7 +271,7 @@ export function JournalTab({ journal, onSave, settings }: any) {
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder={cfg.notesPlaceholder || "What's on your mind? Progress, setbacks, ideas, reflections…"}
-              style={{ width: '100%', minHeight: 120, fontFamily: 'Fraunces, serif', fontSize: 15, padding: 10, border: '1px solid #E4DCC8', borderRadius: 8, background: '#FBF7EE', color: '#1A1A2E', resize: 'vertical', lineHeight: 1.6 }}
+              style={{ width: '100%', minHeight: 120, fontFamily: 'Fraunces, serif', fontSize: 15, padding: 10, border: '1px solid var(--border)', borderRadius: 8, background: 'var(--bg-card)', color: 'var(--text)', resize: 'vertical', lineHeight: 1.6 }}
             />
             <button className="btn" style={{ width: '100%', marginTop: 10 }} onClick={saveNote}>
               {saved ? <><Check size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Saved</> : <><Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />Save note</>}
@@ -288,7 +288,7 @@ export function JournalTab({ journal, onSave, settings }: any) {
             </div>
 
             {showTradeForm && (
-              <div style={{ padding: 12, background: '#FBF7EE', borderRadius: 8, border: '1px solid #E4DCC8', marginBottom: 12 }}>
+              <div style={{ padding: 12, background: 'var(--bg-card)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 12 }}>
                 <div className="row" style={{ gap: 8, marginBottom: 8 }}>
                   <div style={{ flex: 2 }}><label>Symbol</label><input type="text" value={tradeForm.symbol} onChange={e => setTradeForm({ ...tradeForm, symbol: e.target.value.toUpperCase() })} placeholder="AAPL" /></div>
                   <div style={{ flex: 1 }}>
@@ -346,7 +346,7 @@ export function JournalTab({ journal, onSave, settings }: any) {
                 <div><div className="mono tiny muted">Total P&L</div><div className="mono small" style={{ fontWeight: 700, color: totalPnl >= 0 ? '#4A6741' : '#B8460E' }}>{totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(2)}</div></div>
                 <div><div className="mono tiny muted">Win rate</div><div className="mono small" style={{ fontWeight: 700 }}>{winRate}%</div></div>
                 <div><div className="mono tiny muted">Trades</div><div className="mono small" style={{ fontWeight: 700 }}>{allTrades.length}</div></div>
-                <div><div className="mono tiny muted">W / L</div><div className="mono small" style={{ fontWeight: 700, color: '#4A6741' }}>{winTrades.length}<span style={{ color: '#6B6457' }}>/</span><span style={{ color: '#B8460E' }}>{allTrades.length - winTrades.length}</span></div></div>
+                <div><div className="mono tiny muted">W / L</div><div className="mono small" style={{ fontWeight: 700, color: '#4A6741' }}>{winTrades.length}<span style={{ color: 'var(--text-muted)' }}>/</span><span style={{ color: '#B8460E' }}>{allTrades.length - winTrades.length}</span></div></div>
               </div>
             </div>
           )}
@@ -511,13 +511,13 @@ export function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, 
             const logged = todayLog?.exercises?.[i];
             const lastW = lastWeights[ex.name];
             return (
-              <div key={i} onClick={() => setDetailEx(ex.name)} style={{ padding: '10px 0', borderBottom: i < todayWorkout.exercises.length - 1 ? '1px solid #E4DCC8' : 'none', cursor: 'pointer' }}>
+              <div key={i} onClick={() => setDetailEx(ex.name)} style={{ padding: '10px 0', borderBottom: i < todayWorkout.exercises.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}>
                 <div className="between">
                   <span className="small" style={{ fontWeight: 600 }}>{ex.name}</span>
                   <span className="mono tiny muted">{ex.sets} × {ex.reps}</span>
                 </div>
                 {lastW && !logged && (
-                  <div className="mono tiny" style={{ marginTop: 4, color: '#6B6457' }}>
+                  <div className="mono tiny" style={{ marginTop: 4, color: 'var(--text-muted)' }}>
                     Last: {lastW.weight}×{lastW.reps} ({fmtShortDate(lastW.date)})
                   </div>
                 )}
@@ -544,7 +544,7 @@ export function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, 
         <div className="card">
           <div className="h2" style={{ marginBottom: 10 }}>Recent sessions</div>
           {recentLogs.map(([date, log]: [string, any]) => (
-            <div key={date} className="between" style={{ padding: '8px 0', borderBottom: '1px solid #E4DCC8' }}>
+            <div key={date} className="between" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
               <div>
                 <div className="small" style={{ fontWeight: 600 }}>{log.name || 'Session'}</div>
                 <div className="mono tiny muted">{fmtShortDate(date)}</div>
@@ -559,7 +559,7 @@ export function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, 
         <div className="card">
           <div className="h2" style={{ marginBottom: 10 }}>Personal records</div>
           {prs.slice(0, 6).map((p) => (
-            <div key={p.name} onClick={() => setDetailEx(p.name)} className="between" style={{ padding: '8px 0', borderBottom: '1px solid #E4DCC8', cursor: 'pointer' }}>
+            <div key={p.name} onClick={() => setDetailEx(p.name)} className="between" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)', cursor: 'pointer' }}>
               <div style={{ minWidth: 0, flex: 1, paddingRight: 10 }}>
                 <div className="small" style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
                 <div className="mono tiny muted">{fmtShortDate(p.date)}</div>
@@ -591,12 +591,12 @@ export function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, 
       <div className="card">
         <div className="between" style={{ marginBottom: 8 }}>
           <div className="h2">Weekly split</div>
-          <button onClick={() => onEditSplit(location)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6457' }}>
+          <button onClick={() => onEditSplit(location)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
             <Edit3 size={16} />
           </button>
         </div>
         {activeSplit.map((day: any, i: number) => (
-          <div key={i} className="between" style={{ padding: '8px 0', borderBottom: i < activeSplit.length - 1 ? '1px solid #E4DCC8' : 'none', opacity: (mode === 'calendar' && day.day === today) || (mode === 'sequence' && day === todayWorkout) ? 1 : 0.7 }}>
+          <div key={i} className="between" style={{ padding: '8px 0', borderBottom: i < activeSplit.length - 1 ? '1px solid var(--border)' : 'none', opacity: (mode === 'calendar' && day.day === today) || (mode === 'sequence' && day === todayWorkout) ? 1 : 0.7 }}>
             <div className="row" style={{ gap: 10 }}>
               <span className="mono tiny muted">
                 {mode === 'calendar' ? ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][day.day] : day.rest ? 'REST' : `D${activeSplit.filter((d: any) => !d.rest).indexOf(day) + 1}`}
@@ -644,7 +644,7 @@ function ExerciseDetailModal({ name, logs, unit, onClose }: any) {
           )}
           <div className="h3" style={{ marginBottom: 8 }}>History · {hist.length} session{hist.length === 1 ? '' : 's'}</div>
           {[...hist].reverse().map((h) => (
-            <div key={h.date} className="between" style={{ padding: '7px 0', borderBottom: '1px solid #E4DCC8' }}>
+            <div key={h.date} className="between" style={{ padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
               <span className="mono tiny muted">{fmtShortDate(h.date)}</span>
               <span className="mono tiny">{h.sets.filter((s: any) => s.weight).map((s: any) => `${s.weight}×${s.reps || '—'}`).join('  ') || '—'}</span>
             </div>
@@ -693,7 +693,7 @@ function PlanRow({ date, plans, onClick, highlight }: any) {
   const day = dn.getDate();
 
   return (
-    <div onClick={onClick} style={{ padding: '12px 4px', borderBottom: '1px solid #E4DCC8', cursor: 'pointer', display: 'flex', gap: 14, alignItems: 'center' }}>
+    <div onClick={onClick} style={{ padding: '12px 4px', borderBottom: '1px solid var(--border)', cursor: 'pointer', display: 'flex', gap: 14, alignItems: 'center' }}>
       <div style={{ width: 40, textAlign: 'center' }}>
         <div className="mono tiny muted" style={{ textTransform: 'uppercase' }}>{dow}</div>
         <div className="h3">{day}</div>
@@ -741,7 +741,7 @@ export function PlanDayModal({ date, plans, onSave, onClose }: any) {
 
       <div className="h2" style={{ marginBottom: 8 }}>Commitments</div>
       {commitments.map((c: any, i: number) => (
-        <div key={i} className="between" style={{ padding: '8px 10px', background: '#FBF7EE', border: '1px solid #E4DCC8', borderRadius: 8, marginBottom: 6 }}>
+        <div key={i} className="between" style={{ padding: '8px 10px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 6 }}>
           <div className="row" style={{ gap: 8 }}>
             {c.time && <span className="mono tiny muted">{fmtTime(c.time)}</span>}
             <span className="small">{c.title}</span>
@@ -759,7 +759,7 @@ export function PlanDayModal({ date, plans, onSave, onClose }: any) {
 
       <div className="h2" style={{ marginBottom: 8 }}>Tasks</div>
       {tasks.map((t: any, i: number) => (
-        <div key={i} className="between" style={{ padding: '8px 10px', background: '#FBF7EE', border: '1px solid #E4DCC8', borderRadius: 8, marginBottom: 6 }}>
+        <div key={i} className="between" style={{ padding: '8px 10px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 6 }}>
           <span className="small">{t.title}</span>
           <button onClick={() => setTasks(tasks.filter((_: any, j: number) => j !== i))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E' }}>
             <X size={14} />

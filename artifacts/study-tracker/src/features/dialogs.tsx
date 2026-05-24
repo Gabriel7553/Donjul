@@ -32,7 +32,7 @@ export function LogTimeModal({ subject, settings, daily, onLog, onSet, onClose, 
       <div className="muted small" style={{ marginBottom: 12 }}>
         {s.tools}
       </div>
-      <div className="card" style={{ padding: '10px 14px', marginBottom: 14, background: '#F5F0E6' }}>
+      <div className="card" style={{ padding: '10px 14px', marginBottom: 14, background: 'var(--bg)' }}>
         <div className="between">
           <span className="small muted">Today logged</span>
           <span className="mono small" style={{ fontWeight: 600 }}>{done} / {s.target} min</span>
@@ -307,7 +307,7 @@ export function LogWorkoutModal({ dayIdx, workout, onSave, onClose }: any) {
       {data.exercises.map((ex: any, i: number) => {
         const target = day.exercises[i];
         return (
-          <div key={i} style={{ marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid #E4DCC8' }}>
+          <div key={i} style={{ marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid var(--border)' }}>
             <div className="between" style={{ marginBottom: 8 }}>
               <span className="small" style={{ fontWeight: 600 }}>{ex.name}</span>
               <span className="mono tiny muted">target {target?.sets}×{target?.reps}</span>

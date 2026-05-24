@@ -89,12 +89,12 @@ export function HistoryTab({ settings, totals, workout, meals, body, activity, s
                 disabled={isFuture}
                 style={{
                   padding: '6px 0',
-                  background: isToday ? '#1A1A2E' : (hasWorkout || hasMeal || hasMeasurement || hasActivity) ? '#FBF7EE' : 'transparent',
-                  border: '1px solid #E4DCC8',
+                  background: isToday ? '#1A1A2E' : (hasWorkout || hasMeal || hasMeasurement || hasActivity) ? 'var(--bg-card)' : 'transparent',
+                  border: '1px solid var(--border)',
                   borderRadius: 6,
                   cursor: isFuture ? 'default' : 'pointer',
                   fontFamily: 'JetBrains Mono', fontSize: 12,
-                  color: isToday ? '#F5F0E6' : isFuture ? '#D4CCB8' : '#1A1A2E',
+                  color: isToday ? '#F5F0E6' : isFuture ? 'var(--border-muted)' : '#1A1A2E',
                   opacity: isFuture ? 0.4 : 1,
                 }}
               >
@@ -145,16 +145,16 @@ export function HistoryTab({ settings, totals, workout, meals, body, activity, s
       <div className="card">
         <div className="h2" style={{ marginBottom: 12 }}>This month</div>
         {studyDaysLogged > 0 && (
-          <div className="between" style={{ padding: '6px 0', borderBottom: '1px solid #E4DCC8' }}>
+          <div className="between" style={{ padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
             <span className="small">Study days</span>
             <span className="mono small" style={{ color: '#8E4585' }}>{studyDaysLogged}</span>
           </div>
         )}
-        <div className="between" style={{ padding: '6px 0', borderBottom: '1px solid #E4DCC8' }}>
+        <div className="between" style={{ padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
           <span className="small">Workouts logged</span>
           <span className="mono small">{workoutsLogged}</span>
         </div>
-        <div className="between" style={{ padding: '6px 0', borderBottom: '1px solid #E4DCC8' }}>
+        <div className="between" style={{ padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
           <span className="small">Days with meals tracked</span>
           <span className="mono small">{mealsLogged}</span>
         </div>
@@ -175,7 +175,7 @@ export function HistoryTab({ settings, totals, workout, meals, body, activity, s
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
               {badges.map((b) => (
-                <div key={b.id} title={b.desc} style={{ textAlign: 'center', padding: '10px 4px', borderRadius: 10, background: b.earned ? '#FBF7EE' : '#F2EEE4', border: `1px solid ${b.earned ? '#C8932E' : '#E4DCC8'}`, opacity: b.earned ? 1 : 0.5 }}>
+                <div key={b.id} title={b.desc} style={{ textAlign: 'center', padding: '10px 4px', borderRadius: 10, background: b.earned ? 'var(--bg-card)' : '#F2EEE4', border: `1px solid ${b.earned ? '#C8932E' : 'var(--border)'}`, opacity: b.earned ? 1 : 0.5 }}>
                   <Trophy size={18} color={b.earned ? '#C8932E' : '#A0A898'} />
                   <div className="tiny" style={{ fontWeight: 600, marginTop: 4 }}>{b.label}</div>
                   <div className="tiny muted" style={{ lineHeight: 1.3 }}>{b.desc}</div>
@@ -256,7 +256,7 @@ export function DayDetailModal({ date, settings, totals, workout, meals, body, a
         </div>
         <p className="muted small" style={{ marginBottom: 14 }}>Log weight × reps. Leave blank to skip a set.</p>
         {wData.exercises?.map((ex: any, i: number) => (
-          <div key={i} style={{ marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid #E4DCC8' }}>
+          <div key={i} style={{ marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid var(--border)' }}>
             <div className="small" style={{ fontWeight: 600, marginBottom: 8 }}>{ex.name}</div>
             {ex.sets.map((s: any, j: number) => (
               <div key={j} className="row" style={{ gap: 6, marginBottom: 6 }}>
@@ -302,7 +302,7 @@ export function DayDetailModal({ date, settings, totals, workout, meals, body, a
           <div style={{ marginBottom: 16 }}>
             <div className="h2" style={{ marginBottom: 8 }}>Logged items</div>
             {dayEntries.map((e: any) => (
-              <div key={e.id} className="between" style={{ padding: '6px 0', borderBottom: '1px solid #F0EAD8' }}>
+              <div key={e.id} className="between" style={{ padding: '6px 0', borderBottom: '1px solid var(--bg-inset)' }}>
                 <div>
                   <div className="small">{e.name}</div>
                   <div className="mono tiny muted">{e.protein}p · {e.carbs}c · {e.fat}f · {e.calories}cal</div>
@@ -368,7 +368,7 @@ export function DayDetailModal({ date, settings, totals, workout, meals, body, a
           const isCheckoff = s.trackingMode === 'checkoff';
           const alreadyChecked = (checkins?.[k] || []).includes(date);
           return (
-            <div key={k} style={{ marginBottom: 12, padding: '12px 14px', background: '#F9F5EC', borderRadius: 10, border: '1px solid #E4DCC8' }}>
+            <div key={k} style={{ marginBottom: 12, padding: '12px 14px', background: 'var(--bg-inset2)', borderRadius: 10, border: '1px solid var(--border)' }}>
               <div className="row" style={{ gap: 8, marginBottom: 8 }}>
                 <div className="icon-wrap" style={{ background: s.accent, width: 28, height: 28 }}><Icon size={14} /></div>
                 <span className="small" style={{ fontWeight: 600, flex: 1 }}>{s.name}</span>
@@ -469,7 +469,7 @@ export function DayDetailModal({ date, settings, totals, workout, meals, body, a
             <div><div className="mono tiny muted">FAT</div><div className="h3">{Math.round(dayMeals.fat || 0)}g</div></div>
           </div>
           {MICRO_DEFS.some(d => (dayMeals[d.key] || 0) > 0) && (
-            <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid #E4DCC8' }}>
+            <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
               <div className="mono tiny muted" style={{ marginBottom: 5 }}>MICROS</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px' }}>
                 {MICRO_DEFS.filter(d => (dayMeals[d.key] || 0) > 0).map(d => {
@@ -488,11 +488,11 @@ export function DayDetailModal({ date, settings, totals, workout, meals, body, a
             </div>
           )}
           {dayEntries.length > 0 && (
-            <div style={{ marginTop: 10, borderTop: '1px solid #E4DCC8', paddingTop: 8 }}>
+            <div style={{ marginTop: 10, borderTop: '1px solid var(--border)', paddingTop: 8 }}>
               {dayEntries.map((e: any) => {
                 const eMicros = MICRO_DEFS.filter(d => (e[d.key] || 0) > 0);
                 return (
-                  <div key={e.id} style={{ padding: '4px 0', borderBottom: '1px solid #F0EAD8' }}>
+                  <div key={e.id} style={{ padding: '4px 0', borderBottom: '1px solid var(--bg-inset)' }}>
                     <div className="between">
                       <span className="small">{e.name}</span>
                       <span className="mono tiny muted">{e.protein}p · {e.carbs}c · {e.fat}f · {e.calories}cal</span>
@@ -528,7 +528,7 @@ export function DayDetailModal({ date, settings, totals, workout, meals, body, a
         <div className="card" style={{ padding: 12, marginBottom: 14 }}>
           <div className="h3" style={{ marginBottom: 8 }}>{dayWorkout.name}</div>
           {dayWorkout.exercises?.map((ex: any, i: number) => (
-            <div key={i} style={{ padding: '6px 0', borderBottom: i < dayWorkout.exercises.length - 1 ? '1px solid #E4DCC8' : 'none' }}>
+            <div key={i} style={{ padding: '6px 0', borderBottom: i < dayWorkout.exercises.length - 1 ? '1px solid var(--border)' : 'none' }}>
               <div className="small" style={{ fontWeight: 500, marginBottom: 2 }}>{ex.name}</div>
               {ex.sets?.length > 0 && (
                 <div className="mono tiny muted">
@@ -570,7 +570,7 @@ export function DayDetailModal({ date, settings, totals, workout, meals, body, a
               const cat = (spending?.categories || []).find((c: any) => c.id === e.categoryId);
               const isIn = e.type === 'in';
               return (
-                <div key={e.id} className="between" style={{ padding: '5px 0', borderBottom: '1px solid #F0EAD8' }}>
+                <div key={e.id} className="between" style={{ padding: '5px 0', borderBottom: '1px solid var(--bg-inset)' }}>
                   <div>
                     <div className="small" style={{ fontWeight: 500 }}>{e.name || (isIn ? 'Income' : 'Expense')}</div>
                     {cat && <div className="tiny muted">{cat.name}</div>}
@@ -581,7 +581,7 @@ export function DayDetailModal({ date, settings, totals, workout, meals, body, a
                 </div>
               );
             })}
-            <div className="between" style={{ paddingTop: 8, marginTop: 4, borderTop: '1px solid #E4DCC8' }}>
+            <div className="between" style={{ paddingTop: 8, marginTop: 4, borderTop: '1px solid var(--border)' }}>
               <span className="small muted">Net</span>
               <span className="mono small" style={{ fontWeight: 700 }}>
                 {fmtMoney(daySpending.filter((e: any) => e.type === 'in').reduce((s: number, e: any) => s + e.amount, 0)
@@ -610,7 +610,7 @@ export function DayDetailModal({ date, settings, totals, workout, meals, body, a
                 const dayNum = diffDays(date, ch.startDate) + 1;
                 const isOpen = !ch.days || ch.days === 0;
                 return (
-                  <div key={ch.id} className="between" style={{ padding: '6px 0', borderBottom: '1px solid #F0EAD8' }}>
+                  <div key={ch.id} className="between" style={{ padding: '6px 0', borderBottom: '1px solid var(--bg-inset)' }}>
                     <div>
                       <div className="small" style={{ fontWeight: 500 }}>{ch.name}</div>
                       <div className="mono tiny muted">{isOpen ? `Day ${dayNum}` : `Day ${dayNum}/${ch.days}`} · {sub?.name || ch.subjectKey}</div>

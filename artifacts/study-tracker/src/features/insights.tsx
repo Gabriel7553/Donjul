@@ -9,7 +9,7 @@ import type { Settings, BodyState, MealsState, SpendingState, StudyTotals, Check
 const RANGES = [{ k: 30, label: '30d' }, { k: 90, label: '90d' }];
 const AXIS = { fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#6B6457' } as const;
 const TIP = { fontFamily: 'JetBrains Mono', fontSize: 12, borderRadius: 8 } as const;
-const HEAT = ['#EAE3D2', '#C9DDBB', '#9DC086', '#6E9E5A', '#4A6741'];
+const HEAT = ['var(--bg-inset)', '#C9DDBB', '#9DC086', '#6E9E5A', '#4A6741'];
 const HEAT_WEEKS = 16;
 const MEASURES = [
   { key: 'waist', label: 'Waist', color: '#B8460E' },

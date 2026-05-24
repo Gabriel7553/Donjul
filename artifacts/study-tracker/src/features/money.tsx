@@ -517,10 +517,10 @@ export function CustomChallengesModal({ challenges, settings, onSave, onClose }:
   return (
     <ModalShell title="Custom challenges" onClose={onClose} icon={<Trophy size={18} color="#C8932E" />}>
       <div className="row" style={{ gap: 6, marginBottom: 14 }}>
-        <button className="tap" onClick={() => setView('list')} style={{ flex: 1, background: view === 'list' ? '#1A1A2E' : 'transparent', color: view === 'list' ? '#F5F0E6' : '#1A1A2E' }}>
+        <button className="tap" onClick={() => setView('list')} style={{ flex: 1, background: view === 'list' ? '#1A1A2E' : 'transparent', color: view === 'list' ? '#F5F0E6' : 'var(--text)' }}>
           Active ({activeChallenges.length})
         </button>
-        <button className="tap" onClick={() => setView('add')} style={{ flex: 1, background: view === 'add' ? '#1A1A2E' : 'transparent', color: view === 'add' ? '#F5F0E6' : '#1A1A2E', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+        <button className="tap" onClick={() => setView('add')} style={{ flex: 1, background: view === 'add' ? '#1A1A2E' : 'transparent', color: view === 'add' ? '#F5F0E6' : 'var(--text)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
           <Plus size={12} /> New challenge
         </button>
       </div>
@@ -542,7 +542,7 @@ export function CustomChallengesModal({ challenges, settings, onSave, onClose }:
             const isRest = doneToday && (ch.restDates || []).includes(today);
             const isLogged = doneToday && !isRest;
             return (
-              <div key={ch.id} style={{ padding: '12px 0', borderBottom: '1px solid #F0EAD8' }}>
+              <div key={ch.id} style={{ padding: '12px 0', borderBottom: '1px solid var(--bg-inset)' }}>
                 <div className="between" style={{ marginBottom: 6 }}>
                   <div>
                     <div className="small" style={{ fontWeight: 600 }}>{ch.name}</div>
@@ -552,7 +552,7 @@ export function CustomChallengesModal({ challenges, settings, onSave, onClose }:
                   {!isOpen && <span className="mono tiny muted">{pct}%</span>}
                 </div>
                 {!isOpen && (
-                  <div style={{ height: 4, background: '#F0EAD8', borderRadius: 2, overflow: 'hidden', marginBottom: 8 }}>
+                  <div style={{ height: 4, background: 'var(--bg-inset)', borderRadius: 2, overflow: 'hidden', marginBottom: 8 }}>
                     <div style={{ height: '100%', width: `${pct}%`, background: '#8E4585', borderRadius: 2 }} />
                   </div>
                 )}
@@ -561,8 +561,8 @@ export function CustomChallengesModal({ challenges, settings, onSave, onClose }:
                     <span className="tiny" style={{ color: '#3F7A4F', fontWeight: 600 }}>✓ Counted today — keep logging {sub?.name}</span>
                   </div>
                 ) : isRest ? (
-                  <div style={{ background: '#F0EAD8', border: '1px solid #D4CCB8', borderRadius: 8, padding: '6px 12px', textAlign: 'center', marginBottom: 6 }}>
-                    <span className="tiny" style={{ color: '#6B6457', fontWeight: 600 }}>😴 Rest day — streak protected</span>
+                  <div style={{ background: 'var(--bg-inset)', border: '1px solid var(--border-muted)', borderRadius: 8, padding: '6px 12px', textAlign: 'center', marginBottom: 6 }}>
+                    <span className="tiny" style={{ color: 'var(--text-muted)', fontWeight: 600 }}>😴 Rest day — streak protected</span>
                   </div>
                 ) : (
                   <div className="tiny muted" style={{ fontStyle: 'italic', marginBottom: 6 }}>
@@ -594,7 +594,7 @@ export function CustomChallengesModal({ challenges, settings, onSave, onClose }:
                         <div className="tiny muted">{sub?.name || ch.subjectKey} · Best streak: {ch.longestStreak || 0} days</div>
                         {ch.startDate && <div className="tiny muted mono">{fmtShortDate(ch.startDate)} → {fmtShortDate(ch.completedDate || today)}</div>}
                       </div>
-                      <button className="tap" onClick={() => deleteChallenge(ch.id)} style={{ padding: '3px 6px', color: '#6B6457' }}><Trash2 size={10} /></button>
+                      <button className="tap" onClick={() => deleteChallenge(ch.id)} style={{ padding: '3px 6px', color: 'var(--text-muted)' }}><Trash2 size={10} /></button>
                     </div>
                   </div>
                 );
@@ -620,7 +620,7 @@ export function CustomChallengesModal({ challenges, settings, onSave, onClose }:
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
               {subjects.map((s: any) => (
                 <button key={s.key} className="tap" onClick={() => setForm({ ...form, subjectKey: s.key })}
-                  style={{ fontSize: 12, padding: '6px 12px', background: form.subjectKey === s.key ? (s.accent || '#1A1A2E') : 'transparent', color: form.subjectKey === s.key ? '#F5F0E6' : '#1A1A2E', borderColor: form.subjectKey === s.key ? (s.accent || '#1A1A2E') : '#E4DCC8' }}>
+                  style={{ fontSize: 12, padding: '6px 12px', background: form.subjectKey === s.key ? (s.accent || '#1A1A2E') : 'transparent', color: form.subjectKey === s.key ? '#F5F0E6' : 'var(--text)', borderColor: form.subjectKey === s.key ? (s.accent || '#1A1A2E') : 'var(--border)' }}>
                   {s.name}
                 </button>
               ))}
@@ -631,7 +631,7 @@ export function CustomChallengesModal({ challenges, settings, onSave, onClose }:
           <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
             {['21','30','60','75','90','0'].map((d) => (
               <button key={d} className="tap" onClick={() => setForm({ ...form, days: d })}
-                style={{ fontSize: 11, padding: '5px 10px', background: form.days === d ? '#1A1A2E' : 'transparent', color: form.days === d ? '#F5F0E6' : '#1A1A2E' }}>
+                style={{ fontSize: 11, padding: '5px 10px', background: form.days === d ? '#1A1A2E' : 'transparent', color: form.days === d ? '#F5F0E6' : 'var(--text)' }}>
                 {d === '0' ? '∞ Open' : `${d} days`}
               </button>
             ))}
@@ -794,14 +794,14 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
             </div>
             <div className="row" style={{ gap: 8 }}>
               {w2YTD > 0 && (
-                <div style={{ flex: 1, background: '#F9F5EC', borderRadius: 8, padding: '10px 12px' }}>
+                <div style={{ flex: 1, background: 'var(--bg-inset2)', borderRadius: 8, padding: '10px 12px' }}>
                   <div className="tiny muted" style={{ marginBottom: 2 }}>W-2 Gross YTD</div>
-                  <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: '#1A1A2E' }}>{fmtMoney(w2YTD)}</div>
+                  <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{fmtMoney(w2YTD)}</div>
                   {spending.income?.w2Employer && <div className="tiny muted">{spending.income.w2Employer}</div>}
                 </div>
               )}
               {income1099YTD > 0 && (
-                <div style={{ flex: 1, background: '#F9F5EC', borderRadius: 8, padding: '10px 12px' }}>
+                <div style={{ flex: 1, background: 'var(--bg-inset2)', borderRadius: 8, padding: '10px 12px' }}>
                   <div className="tiny muted" style={{ marginBottom: 2 }}>1099 YTD</div>
                   <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: '#3B5C6B' }}>{fmtMoney(income1099YTD)}</div>
                   <div className="tiny muted">prop firm / trading</div>
@@ -809,7 +809,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
               )}
             </div>
             {w2YTD > 0 && income1099YTD > 0 && (
-              <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #E4DCC8', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                 <span className="small muted">Total combined YTD</span>
                 <span className="mono" style={{ fontSize: 18, fontWeight: 700, color: '#3F7A4F' }}>{fmtMoney(totalYTD)}</span>
               </div>
@@ -821,7 +821,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
         return (
           <div style={{ marginBottom: 14 }}>
             <div className="between" style={{ marginBottom: 10 }}>
-              <div className="row" style={{ gap: 6 }}><Wallet size={14} color="#1A1A2E" /><span className="h2">Accounts</span></div>
+              <div className="row" style={{ gap: 6 }}><Wallet size={14} color="currentColor" /><span className="h2">Accounts</span></div>
               <button className="tap" onClick={onAddAccount} style={{ padding: '4px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Plus size={11} /> Add</button>
             </div>
             {accounts.length === 0 ? (
@@ -837,16 +837,16 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
                   const utilPct = isCredit && limit > 0 ? Math.min(100, (bal / limit) * 100) : 0;
                   const available = limit - bal;
                   return (
-                    <button key={acc.id} onClick={() => onEditAccount(acc)} style={{ flexShrink: 0, width: 172, padding: 16, borderRadius: 14, border: 'none', cursor: 'pointer', textAlign: 'left', background: isCredit ? '#F5F0E6' : (acc.color || '#1A1A2E'), boxShadow: '0 2px 10px rgba(0,0,0,0.13)' }}>
+                    <button key={acc.id} onClick={() => onEditAccount(acc)} style={{ flexShrink: 0, width: 172, padding: 16, borderRadius: 14, border: 'none', cursor: 'pointer', textAlign: 'left', background: isCredit ? 'var(--bg-inset2)' : (acc.color || '#1A1A2E'), boxShadow: '0 2px 10px rgba(0,0,0,0.13)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: isCredit ? '#6B6457' : 'rgba(245,240,230,0.65)' }}>{isCredit ? 'Credit' : acc.type === 'savings' ? 'Savings' : 'Checking'}</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: isCredit ? 'var(--text-muted)' : 'rgba(245,240,230,0.65)' }}>{isCredit ? 'Credit' : acc.type === 'savings' ? 'Savings' : 'Checking'}</span>
                         {isCredit ? <CreditCard size={13} color="#6B6457" /> : <Wallet size={13} color="rgba(245,240,230,0.6)" />}
                       </div>
-                      <div style={{ fontSize: 11, color: isCredit ? '#6B6457' : 'rgba(245,240,230,0.7)', marginBottom: 3 }}>{acc.bank || acc.name}</div>
+                      <div style={{ fontSize: 11, color: isCredit ? 'var(--text-muted)' : 'rgba(245,240,230,0.7)', marginBottom: 3 }}>{acc.bank || acc.name}</div>
                       {!isCredit && <div style={{ fontSize: 10, color: 'rgba(245,240,230,0.55)', marginBottom: 4 }}>{acc.name}</div>}
                       <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: isCredit ? '#B8460E' : '#F5F0E6', lineHeight: 1.1, marginBottom: isCredit ? 10 : 0 }}>{fmtMoney(bal)}</div>
-                      {isCredit && limit > 0 && (<><div style={{ height: 4, background: '#E4DCC8', borderRadius: 2, overflow: 'hidden', marginBottom: 5 }}><div style={{ width: `${utilPct}%`, height: '100%', background: utilPct > 80 ? '#B8460E' : utilPct > 50 ? '#C8932E' : '#3F7A4F', borderRadius: 2 }} /></div><div style={{ fontSize: 10, color: '#6B6457' }}>{fmtMoney(available)} avail · {Math.round(utilPct)}%</div>{acc.dueDay && <div style={{ fontSize: 10, color: '#8E4585', marginTop: 3 }}>Due day {acc.dueDay}</div>}</>)}
-                      {isCredit && !acc.name.includes(acc.bank || '') && <div style={{ fontSize: 10, color: '#6B6457', marginTop: 4, opacity: 0.75 }}>{acc.name}</div>}
+                      {isCredit && limit > 0 && (<><div style={{ height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden', marginBottom: 5 }}><div style={{ width: `${utilPct}%`, height: '100%', background: utilPct > 80 ? '#B8460E' : utilPct > 50 ? '#C8932E' : '#3F7A4F', borderRadius: 2 }} /></div><div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{fmtMoney(available)} avail · {Math.round(utilPct)}%</div>{acc.dueDay && <div style={{ fontSize: 10, color: '#8E4585', marginTop: 3 }}>Due day {acc.dueDay}</div>}</>)}
+                      {isCredit && !acc.name.includes(acc.bank || '') && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, opacity: 0.75 }}>{acc.name}</div>}
                     </button>
                   );
                 })}
@@ -862,7 +862,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
               <div className="row" style={{ gap: 6 }}><PieChart size={14} color="#8E4585" /><span className="h2">Monthly budget</span></div>
               <span className="mono small">{fmtMoney(cur.spent)} / {fmtMoney(budget)}</span>
             </div>
-            <div style={{ height: 10, background: '#F5F0E6', borderRadius: 6, overflow: 'hidden', marginBottom: 6 }}>
+            <div style={{ height: 10, background: 'var(--bg)', borderRadius: 6, overflow: 'hidden', marginBottom: 6 }}>
               <div style={{ width: `${spentPct}%`, height: '100%', background: spentPct >= 100 ? '#B8460E' : spentPct >= 80 ? '#C8932E' : '#3F7A4F', transition: 'width 0.3s' }} />
             </div>
             <div className="between tiny muted">
@@ -907,14 +907,14 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
                     <span className="small"><span className="swatch" style={{ background: cat.color }} />{cat.name}</span>
                     <span className="mono small" style={{ color: over ? '#B8460E' : undefined }}>{fmtMoney(spent)} / {fmtMoney(limit)}</span>
                   </div>
-                  <div style={{ height: 6, background: '#F5F0E6', borderRadius: 4, overflow: 'hidden' }}>
+                  <div style={{ height: 6, background: 'var(--bg)', borderRadius: 4, overflow: 'hidden' }}>
                     <div style={{ width: `${Math.min(100, pct)}%`, height: '100%', background: barColor, transition: 'width 0.3s' }} />
                   </div>
                   <div className="tiny muted" style={{ marginTop: 2 }}>{over ? `Over by ${fmtMoney(spent - limit)}` : `${fmtMoney(limit - spent)} left`}</div>
                 </div>
               );
             })}
-            <div className="between" style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #E4DCC8' }}>
+            <div className="between" style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
               <span className="small" style={{ fontWeight: 600 }}>Total budgeted</span>
               <span className="mono small" style={{ color: totSpent > totLimit ? '#B8460E' : undefined, fontWeight: 600 }}>{fmtMoney(totSpent)} / {fmtMoney(totLimit)}</span>
             </div>
@@ -929,7 +929,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
               <div className="row" style={{ gap: 6 }}><PiggyBank size={14} color="#3F7A4F" /><span className="h2">Savings goal</span></div>
               <span className="mono small">{fmtMoney(savedThisMonth)} / {fmtMoney(goal)}</span>
             </div>
-            <div style={{ height: 10, background: '#F5F0E6', borderRadius: 6, overflow: 'hidden', marginBottom: 6 }}>
+            <div style={{ height: 10, background: 'var(--bg)', borderRadius: 6, overflow: 'hidden', marginBottom: 6 }}>
               <div style={{ width: `${savedPct}%`, height: '100%', background: '#3F7A4F', transition: 'width 0.3s' }} />
             </div>
             <div className="tiny muted">{savedPct >= 100 ? `Goal hit — ${fmtMoney(savedThisMonth - goal)} over` : `${fmtMoney(goal - savedThisMonth)} to go`}</div>
@@ -1008,10 +1008,10 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
             {totalDailyInterest > 0 && (
               <div style={{ background: '#B8460E10', border: '1px solid #B8460E30', borderRadius: 8, padding: '8px 12px', marginBottom: 12 }}>
                 <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-                  <div style={{ flex: 1, minWidth: 120 }}><div className="tiny muted" style={{ marginBottom: 1 }}>Costing you today</div><div className="mono" style={{ fontSize: 17, fontWeight: 700, color: '#B8460E' }}>{fmtMoney(totalDailyInterest)}<span style={{ fontSize: 11, fontWeight: 400, color: '#6B6457' }}>/day</span></div></div>
+                  <div style={{ flex: 1, minWidth: 120 }}><div className="tiny muted" style={{ marginBottom: 1 }}>Costing you today</div><div className="mono" style={{ fontSize: 17, fontWeight: 700, color: '#B8460E' }}>{fmtMoney(totalDailyInterest)}<span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}>/day</span></div></div>
                   <div style={{ width: 1, background: '#B8460E25' }} />
-                  <div style={{ flex: 1, minWidth: 100 }}><div className="tiny muted" style={{ marginBottom: 1 }}>Monthly interest</div><div className="mono" style={{ fontSize: 14, fontWeight: 600, color: '#B8460E' }}>~{fmtMoney(totalMonthlyInterest)}<span style={{ fontSize: 11, fontWeight: 400, color: '#6B6457' }}>/mo</span></div></div>
-                  {totalAccrued > 0 && (<><div style={{ width: 1, background: '#B8460E25' }} /><div style={{ flex: 1, minWidth: 100 }}><div className="tiny muted" style={{ marginBottom: 1 }}>Accrued</div><div className="mono" style={{ fontSize: 14, fontWeight: 600, color: '#6B6457' }}>{fmtMoney(totalAccrued)}</div></div></>)}
+                  <div style={{ flex: 1, minWidth: 100 }}><div className="tiny muted" style={{ marginBottom: 1 }}>Monthly interest</div><div className="mono" style={{ fontSize: 14, fontWeight: 600, color: '#B8460E' }}>~{fmtMoney(totalMonthlyInterest)}<span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}>/mo</span></div></div>
+                  {totalAccrued > 0 && (<><div style={{ width: 1, background: '#B8460E25' }} /><div style={{ flex: 1, minWidth: 100 }}><div className="tiny muted" style={{ marginBottom: 1 }}>Accrued</div><div className="mono" style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-muted)' }}>{fmtMoney(totalAccrued)}</div></div></>)}
                 </div>
               </div>
             )}
@@ -1032,13 +1032,13 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
                   const accrued = Number(acc.accruedInterest) || 0;
                   const utilPct = limit > 0 ? Math.min(100, (bal / limit) * 100) : 0;
                   return (
-                    <div key={acc.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid #F0EAD8' }}>
+                    <div key={acc.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--bg-inset)' }}>
                       <div className="between" style={{ marginBottom: 6 }}>
                         <div><div className="small" style={{ fontWeight: 600 }}>{acc.name}{acc.bank ? ` · ${acc.bank}` : ''}</div><div className="tiny muted">Credit Card{apr > 0 ? ` · ${apr}% APR` : ''}{acc.dueDay ? ` · due day ${acc.dueDay}` : ''}</div></div>
                         <div style={{ textAlign: 'right' }}><div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(bal)}</div>{limit > 0 && <div className="tiny muted">of {fmtMoney(limit)} limit</div>}</div>
                       </div>
-                      {limit > 0 && <div style={{ height: 5, background: '#F0EAD8', borderRadius: 3, overflow: 'hidden', marginBottom: 6 }}><div style={{ width: `${utilPct}%`, height: '100%', background: utilPct > 80 ? '#B8460E' : utilPct > 50 ? '#C8932E' : '#3F7A4F', borderRadius: 3 }} /></div>}
-                      {apr > 0 && bal > 0 && (<div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 4 }}><span style={{ background: '#B8460E15', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11, fontWeight: 600 }} className="mono">{fmtMoney(daily)}/day</span><span style={{ background: '#B8460E10', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11 }} className="mono">~{fmtMoney(monthly)}/mo</span>{payoffMo > 0 && <span style={{ background: '#F0EAD8', color: '#6B6457', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>payoff {fmtPayoff(payoffMo)}</span>}{isFinite(totalInterest) && totalInterest > 0 && <span style={{ background: '#F0EAD8', color: '#8E4585', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>+{fmtMoney(totalInterest)} total</span>}</div>)}
+                      {limit > 0 && <div style={{ height: 5, background: 'var(--bg-inset)', borderRadius: 3, overflow: 'hidden', marginBottom: 6 }}><div style={{ width: `${utilPct}%`, height: '100%', background: utilPct > 80 ? '#B8460E' : utilPct > 50 ? '#C8932E' : '#3F7A4F', borderRadius: 3 }} /></div>}
+                      {apr > 0 && bal > 0 && (<div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 4 }}><span style={{ background: '#B8460E15', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11, fontWeight: 600 }} className="mono">{fmtMoney(daily)}/day</span><span style={{ background: '#B8460E10', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11 }} className="mono">~{fmtMoney(monthly)}/mo</span>{payoffMo > 0 && <span style={{ background: 'var(--bg-inset)', color: 'var(--text-muted)', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>payoff {fmtPayoff(payoffMo)}</span>}{isFinite(totalInterest) && totalInterest > 0 && <span style={{ background: 'var(--bg-inset)', color: '#8E4585', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>+{fmtMoney(totalInterest)} total</span>}</div>)}
                       {accrued > 0 && <div className="tiny" style={{ color: '#B8460E', opacity: 0.7 }}>~{fmtMoney(accrued)} accrued</div>}
                       {limit > 0 && <div className="tiny muted">{fmtMoney(limit - bal)} available</div>}
                     </div>
@@ -1056,13 +1056,13 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
                   const totalInterest = calcTotalInterestAtMin(bal, apr, Number(debt.minPayment) || 0);
                   const accrued = Number(debt.accruedInterest) || 0;
                   return (
-                    <div key={debt.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid #F0EAD8' }}>
+                    <div key={debt.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--bg-inset)' }}>
                       <div className="between" style={{ marginBottom: 6 }}>
                         <div><div className="small" style={{ fontWeight: 600 }}>{debt.name}</div><div className="tiny muted">{DEBT_TYPES.find(t => t.id === debt.type)?.label || 'Loan'}{apr > 0 ? ` · ${apr}% APR` : ''}</div></div>
                         <div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(bal)}</div>
                       </div>
-                      {original > bal && <><div style={{ height: 4, background: '#F0EAD8', borderRadius: 2, overflow: 'hidden', marginBottom: 4 }}><div style={{ width: `${paidPct}%`, height: '100%', background: '#3F7A4F', borderRadius: 2 }} /></div><div className="tiny muted" style={{ marginBottom: 4 }}>{Math.round(paidPct)}% paid off</div></>}
-                      {apr > 0 && <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 4 }}><span style={{ background: '#B8460E15', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11 }} className="mono">{fmtMoney(daily)}/day</span><span style={{ background: '#B8460E10', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11 }} className="mono">~{fmtMoney(monthly)}/mo</span>{payoffMo > 0 && <span style={{ background: '#F0EAD8', color: '#6B6457', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>payoff {fmtPayoff(payoffMo)}</span>}{isFinite(totalInterest) && totalInterest > 0 && <span style={{ background: '#F0EAD8', color: '#8E4585', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>+{fmtMoney(totalInterest)} total</span>}</div>}
+                      {original > bal && <><div style={{ height: 4, background: 'var(--bg-inset)', borderRadius: 2, overflow: 'hidden', marginBottom: 4 }}><div style={{ width: `${paidPct}%`, height: '100%', background: '#3F7A4F', borderRadius: 2 }} /></div><div className="tiny muted" style={{ marginBottom: 4 }}>{Math.round(paidPct)}% paid off</div></>}
+                      {apr > 0 && <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 4 }}><span style={{ background: '#B8460E15', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11 }} className="mono">{fmtMoney(daily)}/day</span><span style={{ background: '#B8460E10', color: '#B8460E', borderRadius: 5, padding: '2px 7px', fontSize: 11 }} className="mono">~{fmtMoney(monthly)}/mo</span>{payoffMo > 0 && <span style={{ background: 'var(--bg-inset)', color: 'var(--text-muted)', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>payoff {fmtPayoff(payoffMo)}</span>}{isFinite(totalInterest) && totalInterest > 0 && <span style={{ background: 'var(--bg-inset)', color: '#8E4585', borderRadius: 5, padding: '2px 7px', fontSize: 11 }}>+{fmtMoney(totalInterest)} total</span>}</div>}
                       {accrued > 0 && <div className="tiny" style={{ color: '#B8460E', opacity: 0.7 }}>~{fmtMoney(accrued)} accrued</div>}
                     </div>
                   );
@@ -1073,7 +1073,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
                     <div className="tiny muted">Pay extra on <strong>{avalancheTarget.name}</strong> first ({avalancheTarget.rate}% APR) to save the most in interest.</div>
                   </div>
                 )}
-                <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #F0EAD8', display: 'flex', gap: 12 }}>
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--bg-inset)', display: 'flex', gap: 12 }}>
                   <div style={{ flex: 1 }}><div className="tiny muted">Total debt</div><div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(totalLiabilities)}</div></div>
                   {totalDailyInterest > 0 && <><div style={{ flex: 1 }}><div className="tiny muted">Daily cost</div><div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>{fmtMoney(totalDailyInterest)}</div></div><div style={{ flex: 1 }}><div className="tiny muted">Monthly cost</div><div className="mono small" style={{ fontWeight: 700, color: '#B8460E' }}>~{fmtMoney(totalMonthlyInterest)}</div></div></>}
                 </div>
@@ -1107,10 +1107,10 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
             ) : (
               <>
                 <div className="row" style={{ gap: 8, marginBottom: 10 }}>
-                  <div style={{ flex: 1, background: '#F9F5EC', borderRadius: 8, padding: '10px 12px' }}><div className="tiny muted" style={{ marginBottom: 2 }}>Expected/mo</div><div className="mono" style={{ fontSize: 15, fontWeight: 700, color: '#3F7A4F' }}>{fmtMoney(totalExpected)}</div>{w2Monthly > 0 && expTrading > 0 && <div className="tiny muted">{fmtMoney(w2Monthly)} W2 + {fmtMoney(expTrading)} trading</div>}</div>
-                  <div style={{ flex: 1, background: '#F9F5EC', borderRadius: 8, padding: '10px 12px' }}><div className="tiny muted" style={{ marginBottom: 2 }}>Realized this month</div><div className="mono" style={{ fontSize: 15, fontWeight: 700, color: cur.income >= totalExpected * 0.8 ? '#3F7A4F' : '#C8932E' }}>{fmtMoney(cur.income)}</div></div>
+                  <div style={{ flex: 1, background: 'var(--bg-inset2)', borderRadius: 8, padding: '10px 12px' }}><div className="tiny muted" style={{ marginBottom: 2 }}>Expected/mo</div><div className="mono" style={{ fontSize: 15, fontWeight: 700, color: '#3F7A4F' }}>{fmtMoney(totalExpected)}</div>{w2Monthly > 0 && expTrading > 0 && <div className="tiny muted">{fmtMoney(w2Monthly)} W2 + {fmtMoney(expTrading)} trading</div>}</div>
+                  <div style={{ flex: 1, background: 'var(--bg-inset2)', borderRadius: 8, padding: '10px 12px' }}><div className="tiny muted" style={{ marginBottom: 2 }}>Realized this month</div><div className="mono" style={{ fontSize: 15, fontWeight: 700, color: cur.income >= totalExpected * 0.8 ? '#3F7A4F' : '#C8932E' }}>{fmtMoney(cur.income)}</div></div>
                 </div>
-                {minObligations > 0 && (<div style={{ marginBottom: 10 }}><div className="between" style={{ marginBottom: 4 }}><span className="small muted">Min debt payments/mo</span><span className="mono small" style={{ color: '#B8460E' }}>{fmtMoney(minObligations)}</span></div><div style={{ height: 4, background: '#F0EAD8', borderRadius: 2, overflow: 'hidden', marginBottom: 4 }}><div style={{ height: '100%', width: `${Math.min(100, cur.income > 0 ? (minObligations/cur.income)*100 : 100)}%`, background: canCover ? '#3F7A4F' : '#B8460E', borderRadius: 2 }} /></div><div className="tiny" style={{ color: canCover ? '#3F7A4F' : '#B8460E' }}>{canCover ? `✓ Covered — ${fmtMoney(Math.abs(surplus))} ${surplus >= 0 ? 'surplus' : 'short'} after expenses` : `⚠ Income this month is ${fmtMoney(Math.abs(surplus))} short`}</div></div>)}
+                {minObligations > 0 && (<div style={{ marginBottom: 10 }}><div className="between" style={{ marginBottom: 4 }}><span className="small muted">Min debt payments/mo</span><span className="mono small" style={{ color: '#B8460E' }}>{fmtMoney(minObligations)}</span></div><div style={{ height: 4, background: 'var(--bg-inset)', borderRadius: 2, overflow: 'hidden', marginBottom: 4 }}><div style={{ height: '100%', width: `${Math.min(100, cur.income > 0 ? (minObligations/cur.income)*100 : 100)}%`, background: canCover ? '#3F7A4F' : '#B8460E', borderRadius: 2 }} /></div><div className="tiny" style={{ color: canCover ? '#3F7A4F' : '#B8460E' }}>{canCover ? `✓ Covered — ${fmtMoney(Math.abs(surplus))} ${surplus >= 0 ? 'surplus' : 'short'} after expenses` : `⚠ Income this month is ${fmtMoney(Math.abs(surplus))} short`}</div></div>)}
                 {roughMonths > 0 && totalLiabilities > 0 && (<div style={{ background: '#3F7A4F15', border: '1px solid #3F7A4F33', borderRadius: 8, padding: '8px 12px' }}><div className="tiny muted" style={{ marginBottom: 2 }}>Debt-free estimate at current pace</div><div className="row" style={{ alignItems: 'baseline', gap: 6 }}><span className="mono" style={{ fontSize: 16, fontWeight: 700, color: '#3F7A4F' }}>{fmtPayoff(roughMonths)}</span>{availExtra > 0 && <span className="tiny muted">(incl. {fmtMoney(availExtra)}/mo extra)</span>}</div></div>)}
                 {totalLiabilities === 0 && debts.length + accounts.filter((a: any) => a.type === 'credit').length > 0 && (<div style={{ background: '#3F7A4F15', border: '1px solid #3F7A4F33', borderRadius: 8, padding: '8px 12px', textAlign: 'center' }}><span className="small" style={{ color: '#3F7A4F', fontWeight: 600 }}>🎉 Debt free!</span></div>)}
               </>
@@ -1148,7 +1148,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
                       {avg > 0 && <span className="mono tiny" style={{ marginLeft: 8, color: vsAvg > 15 ? '#B8460E' : vsAvg < -15 ? '#3F7A4F' : '#6B6457' }}>{vsAvg > 0 ? '+' : ''}{Math.round(vsAvg)}% vs avg</span>}
                     </div>
                   </div>
-                  <div style={{ height: 6, background: '#F5F0E6', borderRadius: 4, overflow: 'hidden' }}>
+                  <div style={{ height: 6, background: 'var(--bg)', borderRadius: 4, overflow: 'hidden' }}>
                     <div style={{ width: `${pct}%`, height: '100%', background: c.cat.color, transition: 'width 0.3s' }} />
                   </div>
                   {avg > 0 && <div className="tiny muted" style={{ marginTop: 2 }}>avg {fmtMoney(avg)}/mo</div>}
@@ -1165,7 +1165,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
             {recurring.map((r) => {
               const cat = catMap[r.categoryId];
               return (
-                <div key={r.id} className="between" style={{ padding: '6px 0', borderBottom: '1px solid #F0EAD8' }}>
+                <div key={r.id} className="between" style={{ padding: '6px 0', borderBottom: '1px solid var(--bg-inset)' }}>
                   <div className="row" style={{ gap: 8 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: cat?.color || '#6B6457' }} /><div><div className="small" style={{ fontWeight: 500 }}>{r.name || 'Untitled'}</div><div className="tiny muted">{cat?.name || 'Other'}</div></div></div>
                   <span className="mono small">{fmtMoney(r.amount)}</span>
                 </div>
@@ -1184,7 +1184,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
               <span className="mono tiny muted">{fmtMoney(bills.reduce((s: number, b: any) => s + b.amount, 0))}</span>
             </div>
             {bills.map((b: any, i: number) => (
-              <div key={i} className="between" style={{ padding: '8px 0', borderBottom: i < bills.length - 1 ? '1px solid #F0EAD8' : 'none' }}>
+              <div key={i} className="between" style={{ padding: '8px 0', borderBottom: i < bills.length - 1 ? '1px solid var(--bg-inset)' : 'none' }}>
                 <div style={{ minWidth: 0 }}>
                   <div className="small" style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.label}</div>
                   <div className="tiny muted">{fmtShortDate(b.dueDate)} · {b.daysUntil === 0 ? 'due today' : `in ${b.daysUntil}d`}</div>
@@ -1207,7 +1207,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
               <div className="muted small" style={{ textAlign: 'center', padding: '8px 0' }}>No IOUs tracked — add someone who owes you.</div>
             ) : (
               owed.map((item: any) => (
-                <button key={item.id} className="tap" onClick={() => onEditOwed(item)} style={{ width: '100%', textAlign: 'left', padding: '10px 8px', borderBottom: '1px solid #F0EAD8', background: 'transparent', borderRadius: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button key={item.id} className="tap" onClick={() => onEditOwed(item)} style={{ width: '100%', textAlign: 'left', padding: '10px 8px', borderBottom: '1px solid var(--bg-inset)', background: 'transparent', borderRadius: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div style={{ width: 32, height: 32, borderRadius: 8, background: item.paid ? '#3F7A4F22' : '#C8932E22', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><Users size={14} color={item.paid ? '#3F7A4F' : '#C8932E'} /></div>
                   <div style={{ flex: 1, minWidth: 0 }}><div className="small" style={{ fontWeight: 600, color: item.paid ? '#6B6457' : '#1A1A2E', textDecoration: item.paid ? 'line-through' : 'none' }}>{item.name}</div><div className="tiny muted">{item.note ? `${item.note} · ` : ''}{item.dueDate ? `Due ${item.dueDate}` : item.dateAdded ? `Added ${item.dateAdded}` : ''}</div></div>
                   <span className="mono small" style={{ fontWeight: 700, color: item.paid ? '#6B6457' : '#3F7A4F' }}>{fmtMoney(item.amount)}</span>
@@ -1222,7 +1222,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
         return (
           <div className="card">
             <div className="between" style={{ marginBottom: 10 }}>
-              <div className="row" style={{ gap: 6 }}><Receipt size={14} color="#1A1A2E" /><span className="h2">Transactions</span></div>
+              <div className="row" style={{ gap: 6 }}><Receipt size={14} color="currentColor" /><span className="h2">Transactions</span></div>
               <div className="row" style={{ gap: 8, alignItems: 'center' }}>
                 {spending.entries.length > 0 && <button className="tap" onClick={exportCsv} style={{ padding: '4px 8px', fontSize: 10 }}><Download size={10} style={{ verticalAlign: 'middle', marginRight: 3 }} />CSV</button>}
                 <span className="tiny muted mono">{filteredRecent.length}{hasFilters ? ` / ${recent.length}` : ''} this month</span>
@@ -1230,23 +1230,23 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
             </div>
             <div style={{ position: 'relative', marginBottom: 8 }}>
               <input type="text" value={txFilter} onChange={(e) => setTxFilter(e.target.value)} placeholder="Search by name…" style={{ paddingLeft: 32, fontSize: 13, padding: '8px 10px 8px 32px' }} />
-              <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: '#6B6457', fontSize: 14 }}>🔍</span>
-              {txFilter && <button onClick={() => setTxFilter('')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#6B6457' }}><X size={14} /></button>}
+              <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted)', fontSize: 14 }}>🔍</span>
+              {txFilter && <button onClick={() => setTxFilter('')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={14} /></button>}
             </div>
             <div className="row" style={{ gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
-              <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ flex: 1, minWidth: 90, padding: '6px 8px', fontSize: 12, borderRadius: 8, border: '1px solid #E4DCC8', background: filterType ? '#1A1A2E' : undefined, color: filterType ? '#F5F0E6' : undefined }}>
+              <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ flex: 1, minWidth: 90, padding: '6px 8px', fontSize: 12, borderRadius: 8, border: '1px solid var(--border)', background: filterType ? '#1A1A2E' : undefined, color: filterType ? '#F5F0E6' : undefined }}>
                 <option value="">All types</option>
                 <option value="out">Expenses</option>
                 <option value="in">Income</option>
               </select>
               {spending.categories?.length > 0 && (
-                <select value={filterCatId} onChange={(e) => setFilterCatId(e.target.value)} style={{ flex: 1, minWidth: 110, padding: '6px 8px', fontSize: 12, borderRadius: 8, border: '1px solid #E4DCC8', background: filterCatId ? '#1A1A2E' : undefined, color: filterCatId ? '#F5F0E6' : undefined }}>
+                <select value={filterCatId} onChange={(e) => setFilterCatId(e.target.value)} style={{ flex: 1, minWidth: 110, padding: '6px 8px', fontSize: 12, borderRadius: 8, border: '1px solid var(--border)', background: filterCatId ? '#1A1A2E' : undefined, color: filterCatId ? '#F5F0E6' : undefined }}>
                   <option value="">All categories</option>
                   {spending.categories.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               )}
               {accounts.length > 0 && (
-                <select value={filterAcctId} onChange={(e) => setFilterAcctId(e.target.value)} style={{ flex: 1, minWidth: 110, padding: '6px 8px', fontSize: 12, borderRadius: 8, border: '1px solid #E4DCC8', background: filterAcctId ? '#1A1A2E' : undefined, color: filterAcctId ? '#F5F0E6' : undefined }}>
+                <select value={filterAcctId} onChange={(e) => setFilterAcctId(e.target.value)} style={{ flex: 1, minWidth: 110, padding: '6px 8px', fontSize: 12, borderRadius: 8, border: '1px solid var(--border)', background: filterAcctId ? '#1A1A2E' : undefined, color: filterAcctId ? '#F5F0E6' : undefined }}>
                   <option value="">All accounts</option>
                   {accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
@@ -1269,7 +1269,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
                 const isIn = e.type === 'in';
                 const acct = accounts.find((a: any) => a.id === e.accountId);
                 return (
-                  <button key={e.id} className="tap" onClick={() => onEdit(e)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 8px', textAlign: 'left', borderBottom: '1px solid #F0EAD8', background: 'transparent', borderRadius: 0 }}>
+                  <button key={e.id} className="tap" onClick={() => onEdit(e)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 8px', textAlign: 'left', borderBottom: '1px solid var(--bg-inset)', background: 'transparent', borderRadius: 0 }}>
                     <div style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, background: (cat?.color || '#6B6457') + '22', color: cat?.color || '#6B6457', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{isIn ? <ArrowDownRight size={15} /> : <ArrowUpRight size={15} />}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="small" style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name || (isIn ? 'Income' : 'Expense')}</div>
@@ -1305,12 +1305,12 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
       <div className="between" style={{ marginBottom: 16 }}>
         <button
           onClick={() => setViewMonth(prevMonth(viewMonth))}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: '#6B6457' }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: 'var(--text-muted)' }}
         >
           <ChevronLeft size={16} />
         </button>
         <div style={{ textAlign: 'center' }}>
-          <span className="mono small" style={{ color: '#6B6457' }}>{monthLabel(viewMonth)}</span>
+          <span className="mono small" style={{ color: 'var(--text-muted)' }}>{monthLabel(viewMonth)}</span>
           {viewMonth !== thisMonth && (
             <button
               onClick={() => setViewMonth(thisMonth)}
@@ -1323,7 +1323,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
         <button
           onClick={() => setViewMonth(nextMonth(viewMonth))}
           disabled={viewMonth >= thisMonth}
-          style={{ background: 'none', border: 'none', cursor: viewMonth >= thisMonth ? 'default' : 'pointer', padding: '4px 6px', color: viewMonth >= thisMonth ? '#D4CCB8' : '#6B6457' }}
+          style={{ background: 'none', border: 'none', cursor: viewMonth >= thisMonth ? 'default' : 'pointer', padding: '4px 6px', color: viewMonth >= thisMonth ? 'var(--border-muted)' : '#6B6457' }}
         >
           <ChevronRight size={16} />
         </button>
@@ -1434,7 +1434,7 @@ function MoneyReorderModal({ order, onSave, onClose }: { order: string[]; onSave
         onClick={(e) => e.stopPropagation()}>
         <div className="between" style={{ marginBottom: 6 }}>
           <span className="h2">Reorder sections</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6457', padding: 4 }}><X size={18} /></button>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }}><X size={18} /></button>
         </div>
         <p className="small muted" style={{ marginBottom: 16 }}>Drag ⠿ to reorder. Sections that have nothing to show are hidden automatically.</p>
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={({ active, over }: DragEndEvent) => {
@@ -1445,7 +1445,7 @@ function MoneyReorderModal({ order, onSave, onClose }: { order: string[]; onSave
           <SortableContext items={items} strategy={verticalListSortingStrategy}>
             {items.map((id) => (
               <SortableRow key={id} id={id}>
-                <div style={{ padding: '11px 12px 11px 28px', borderRadius: 8, marginBottom: 6, background: '#F9F5EC', border: '1px solid #E4DCC8', fontSize: 14, color: '#1A1A2E' }}>
+                <div style={{ padding: '11px 12px 11px 28px', borderRadius: 8, marginBottom: 6, background: 'var(--bg-inset2)', border: '1px solid var(--border)', fontSize: 14, color: 'var(--text)' }}>
                   {MONEY_LABELS[id] || id}
                 </div>
               </SortableRow>
@@ -1510,8 +1510,8 @@ export function AddTransactionModal({ entry, defaultType, spending, onSave, onDe
           style={{
             flex: 1, padding: '10px',
             background: type === 'out' ? '#B8460E' : 'transparent',
-            color: type === 'out' ? '#F5F0E6' : '#1A1A2E',
-            borderColor: type === 'out' ? '#B8460E' : '#E4DCC8',
+            color: type === 'out' ? '#F5F0E6' : 'var(--text)',
+            borderColor: type === 'out' ? '#B8460E' : 'var(--border)',
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
           }}
         >
@@ -1523,8 +1523,8 @@ export function AddTransactionModal({ entry, defaultType, spending, onSave, onDe
           style={{
             flex: 1, padding: '10px',
             background: type === 'in' ? '#3F7A4F' : 'transparent',
-            color: type === 'in' ? '#F5F0E6' : '#1A1A2E',
-            borderColor: type === 'in' ? '#3F7A4F' : '#E4DCC8',
+            color: type === 'in' ? '#F5F0E6' : 'var(--text)',
+            borderColor: type === 'in' ? '#3F7A4F' : 'var(--border)',
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
           }}
         >
@@ -1534,7 +1534,7 @@ export function AddTransactionModal({ entry, defaultType, spending, onSave, onDe
 
       <label>Amount</label>
       <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 12 }}>
-        <span className="mono" style={{ fontSize: 20, color: '#6B6457' }}>$</span>
+        <span className="mono" style={{ fontSize: 20, color: 'var(--text-muted)' }}>$</span>
         <input
           type="number" step="0.01" inputMode="decimal" autoFocus={!isEdit}
           value={amount}
@@ -1561,8 +1561,8 @@ export function AddTransactionModal({ entry, defaultType, spending, onSave, onDe
             style={{
               padding: '8px 10px', textAlign: 'left', fontSize: 12,
               background: categoryId === c.id ? c.color + '22' : 'transparent',
-              borderColor: categoryId === c.id ? c.color : '#E4DCC8',
-              color: '#1A1A2E',
+              borderColor: categoryId === c.id ? c.color : 'var(--border)',
+              color: 'var(--text)',
               display: 'inline-flex', alignItems: 'center', gap: 6,
             }}
           >
@@ -1585,8 +1585,8 @@ export function AddTransactionModal({ entry, defaultType, spending, onSave, onDe
             style={{
               width: '100%', padding: '10px',
               background: recurring ? '#6E5C8E' : 'transparent',
-              color: recurring ? '#F5F0E6' : '#1A1A2E',
-              borderColor: recurring ? '#6E5C8E' : '#E4DCC8',
+              color: recurring ? '#F5F0E6' : 'var(--text)',
+              borderColor: recurring ? '#6E5C8E' : 'var(--border)',
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
             }}
           >
@@ -1599,9 +1599,9 @@ export function AddTransactionModal({ entry, defaultType, spending, onSave, onDe
         <>
           <label>{type === 'out' ? 'Paid with' : 'Deposit to'} <span className="muted" style={{ fontWeight: 400 }}>(optional)</span></label>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-            <button className="tap" onClick={() => setAccountId('')} style={{ fontSize: 11, padding: '5px 10px', background: !accountId ? '#1A1A2E' : 'transparent', color: !accountId ? '#F5F0E6' : '#1A1A2E', borderColor: !accountId ? '#1A1A2E' : '#E4DCC8' }}>None</button>
+            <button className="tap" onClick={() => setAccountId('')} style={{ fontSize: 11, padding: '5px 10px', background: !accountId ? '#1A1A2E' : 'transparent', color: !accountId ? '#F5F0E6' : 'var(--text)', borderColor: !accountId ? '#1A1A2E' : 'var(--border)' }}>None</button>
             {relevantAccounts.map((a: any) => (
-              <button key={a.id} className="tap" onClick={() => setAccountId(a.id)} style={{ fontSize: 11, padding: '5px 10px', background: accountId === a.id ? (a.color || '#1A1A2E') : 'transparent', color: accountId === a.id ? '#F5F0E6' : '#1A1A2E', borderColor: accountId === a.id ? (a.color || '#1A1A2E') : '#E4DCC8' }}>
+              <button key={a.id} className="tap" onClick={() => setAccountId(a.id)} style={{ fontSize: 11, padding: '5px 10px', background: accountId === a.id ? (a.color || '#1A1A2E') : 'transparent', color: accountId === a.id ? '#F5F0E6' : 'var(--text)', borderColor: accountId === a.id ? (a.color || '#1A1A2E') : 'var(--border)' }}>
                 {a.name}{a.type === 'credit' ? ' 💳' : ''}
               </button>
             ))}
@@ -1692,7 +1692,7 @@ export function CategoryBudgetsModal({ spending, onSave, onClose }: any) {
               <input type="number" inputMode="decimal" value={vals[c.id]} onChange={(e) => setVals((v) => ({ ...v, [c.id]: e.target.value }))} placeholder="0" style={{ width: 90, margin: 0, padding: '6px 8px', textAlign: 'right' }} />
             </div>
           ))}
-          <div className="between" style={{ margin: '12px 0 16px', paddingTop: 10, borderTop: '1px solid #E4DCC8' }}>
+          <div className="between" style={{ margin: '12px 0 16px', paddingTop: 10, borderTop: '1px solid var(--border)' }}>
             <span className="small" style={{ fontWeight: 600 }}>Total monthly</span>
             <span className="mono small" style={{ fontWeight: 600 }}>{fmtMoney(total)}</span>
           </div>
@@ -1724,13 +1724,13 @@ export function MoneyCategoriesModal({ spending, onSave, onClose }: any) {
     <ModalShell title="Categories" onClose={onClose}>
       <div className="h2" style={{ marginBottom: 8 }}>Add new</div>
       <div className="row" style={{ gap: 8, marginBottom: 8 }}>
-        <button className="tap" onClick={() => setKind('out')} style={{ flex: 1, background: kind === 'out' ? '#B8460E22' : 'transparent', borderColor: kind === 'out' ? '#B8460E' : '#E4DCC8' }}>Expense</button>
-        <button className="tap" onClick={() => setKind('in')} style={{ flex: 1, background: kind === 'in' ? '#3F7A4F22' : 'transparent', borderColor: kind === 'in' ? '#3F7A4F' : '#E4DCC8' }}>Income</button>
+        <button className="tap" onClick={() => setKind('out')} style={{ flex: 1, background: kind === 'out' ? '#B8460E22' : 'transparent', borderColor: kind === 'out' ? '#B8460E' : 'var(--border)' }}>Expense</button>
+        <button className="tap" onClick={() => setKind('in')} style={{ flex: 1, background: kind === 'in' ? '#3F7A4F22' : 'transparent', borderColor: kind === 'in' ? '#3F7A4F' : 'var(--border)' }}>Income</button>
       </div>
       <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Category name" style={{ marginBottom: 8 }} />
       <div className="row" style={{ gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
         {palette.map((p) => (
-          <button key={p} onClick={() => setColor(p)} style={{ width: 24, height: 24, borderRadius: 6, background: p, border: color === p ? '2px solid #1A1A2E' : '1px solid #E4DCC8', cursor: 'pointer' }} />
+          <button key={p} onClick={() => setColor(p)} style={{ width: 24, height: 24, borderRadius: 6, background: p, border: color === p ? '2px solid #1A1A2E' : '1px solid var(--border)', cursor: 'pointer' }} />
         ))}
       </div>
       <button className="tap" style={{ width: '100%', marginBottom: 16 }} onClick={add}><Plus size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Add category</button>
@@ -1741,7 +1741,7 @@ export function MoneyCategoriesModal({ spending, onSave, onClose }: any) {
           <div className="tiny muted" style={{ marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.1em' }}>{k === 'out' ? 'Expenses' : 'Income'}</div>
           {cats.filter((c) => c.kind === k).map((c) => (
             <div key={c.id} className="row" style={{ gap: 6, marginBottom: 6, alignItems: 'center' }}>
-              <input type="color" value={c.color} onChange={(e) => recolor(c.id, e.target.value)} style={{ width: 32, height: 32, padding: 0, border: '1px solid #E4DCC8', borderRadius: 6, background: 'transparent' }} />
+              <input type="color" value={c.color} onChange={(e) => recolor(c.id, e.target.value)} style={{ width: 32, height: 32, padding: 0, border: '1px solid var(--border)', borderRadius: 6, background: 'transparent' }} />
               <input type="text" value={c.name} onChange={(e) => rename(c.id, e.target.value)} style={{ flex: 1 }} />
               <button className="tap" onClick={() => remove(c.id)} style={{ padding: '6px 8px', color: '#B8460E' }}><Trash2 size={12} /></button>
             </div>
@@ -1796,7 +1796,7 @@ export function AddAccountModal({ account, onSave, onDelete, onClose }: any) {
     <ModalShell title={isEdit ? 'Edit account' : 'Add account'} onClose={onClose}>
       <div className="row" style={{ gap: 6, marginBottom: 14 }}>
         {(['checking', 'savings', 'credit'] as const).map((t) => (
-          <button key={t} className="tap" onClick={() => setType(t)} style={{ flex: 1, padding: '8px 4px', fontSize: 11, fontWeight: type === t ? 700 : 400, background: type === t ? '#1A1A2E' : 'transparent', color: type === t ? '#F5F0E6' : '#1A1A2E', borderColor: type === t ? '#1A1A2E' : '#E4DCC8', textTransform: 'capitalize' }}>
+          <button key={t} className="tap" onClick={() => setType(t)} style={{ flex: 1, padding: '8px 4px', fontSize: 11, fontWeight: type === t ? 700 : 400, background: type === t ? '#1A1A2E' : 'transparent', color: type === t ? '#F5F0E6' : 'var(--text)', borderColor: type === t ? '#1A1A2E' : 'var(--border)', textTransform: 'capitalize' }}>
             {t}
           </button>
         ))}
@@ -1858,7 +1858,7 @@ export function AddAccountModal({ account, onSave, onDelete, onClose }: any) {
           <label>Card color</label>
           <div className="row" style={{ gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
             {ACCOUNT_COLORS.map((c) => (
-              <button key={c} onClick={() => setColor(c)} style={{ width: 28, height: 28, borderRadius: 8, background: c, border: color === c ? '3px solid #C8932E' : '1px solid #E4DCC8', cursor: 'pointer' }} />
+              <button key={c} onClick={() => setColor(c)} style={{ width: 28, height: 28, borderRadius: 8, background: c, border: color === c ? '3px solid #C8932E' : '1px solid var(--border)', cursor: 'pointer' }} />
             ))}
           </div>
         </>
@@ -1866,7 +1866,7 @@ export function AddAccountModal({ account, onSave, onDelete, onClose }: any) {
 
       <div className="between" style={{ marginBottom: 18 }}>
         <span className="small">Include in net worth</span>
-        <button className="tap" onClick={() => setIncludeNW(!includeNW)} style={{ padding: '6px 14px', background: includeNW ? '#3F7A4F' : 'transparent', color: includeNW ? '#F5F0E6' : '#1A1A2E', borderColor: includeNW ? '#3F7A4F' : '#E4DCC8' }}>
+        <button className="tap" onClick={() => setIncludeNW(!includeNW)} style={{ padding: '6px 14px', background: includeNW ? '#3F7A4F' : 'transparent', color: includeNW ? '#F5F0E6' : 'var(--text)', borderColor: includeNW ? '#3F7A4F' : 'var(--border)' }}>
           {includeNW ? 'Yes' : 'No'}
         </button>
       </div>
@@ -1919,7 +1919,7 @@ export function AddDebtModal({ debt, onSave, onDelete, onClose }: any) {
       <label>Type of debt</label>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6, marginBottom: 14 }}>
         {DEBT_TYPES.map((t) => (
-          <button key={t.id} className="tap" onClick={() => setType(t.id)} style={{ padding: '8px', fontSize: 12, background: type === t.id ? '#B8460E22' : 'transparent', borderColor: type === t.id ? '#B8460E' : '#E4DCC8', fontWeight: type === t.id ? 600 : 400 }}>
+          <button key={t.id} className="tap" onClick={() => setType(t.id)} style={{ padding: '8px', fontSize: 12, background: type === t.id ? '#B8460E22' : 'transparent', borderColor: type === t.id ? '#B8460E' : 'var(--border)', fontWeight: type === t.id ? 600 : 400 }}>
             {t.label}
           </button>
         ))}
@@ -1964,7 +1964,7 @@ export function AddDebtModal({ debt, onSave, onDelete, onClose }: any) {
 
       <div className="between" style={{ marginBottom: 18 }}>
         <span className="small">Include in net worth calculation</span>
-        <button className="tap" onClick={() => setIncludeNW(!includeNW)} style={{ padding: '6px 14px', background: includeNW ? '#3F7A4F' : 'transparent', color: includeNW ? '#F5F0E6' : '#1A1A2E', borderColor: includeNW ? '#3F7A4F' : '#E4DCC8' }}>
+        <button className="tap" onClick={() => setIncludeNW(!includeNW)} style={{ padding: '6px 14px', background: includeNW ? '#3F7A4F' : 'transparent', color: includeNW ? '#F5F0E6' : 'var(--text)', borderColor: includeNW ? '#3F7A4F' : 'var(--border)' }}>
           {includeNW ? 'Yes' : 'No'}
         </button>
       </div>
@@ -2012,7 +2012,7 @@ export function AddOwedModal({ item, onSave, onDelete, onClose }: any) {
 
       <label>Amount</label>
       <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 12 }}>
-        <span className="mono" style={{ fontSize: 20, color: '#6B6457' }}>$</span>
+        <span className="mono" style={{ fontSize: 20, color: 'var(--text-muted)' }}>$</span>
         <input type="number" step="0.01" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" style={{ flex: 1, fontSize: 20, fontFamily: 'JetBrains Mono, monospace' }} />
       </div>
 
@@ -2025,7 +2025,7 @@ export function AddOwedModal({ item, onSave, onDelete, onClose }: any) {
       {isEdit && (
         <div className="between" style={{ marginBottom: 18 }}>
           <span className="small">Mark as paid</span>
-          <button className="tap" onClick={() => setPaid(!paid)} style={{ padding: '6px 14px', background: paid ? '#3F7A4F' : 'transparent', color: paid ? '#F5F0E6' : '#1A1A2E', borderColor: paid ? '#3F7A4F' : '#E4DCC8' }}>
+          <button className="tap" onClick={() => setPaid(!paid)} style={{ padding: '6px 14px', background: paid ? '#3F7A4F' : 'transparent', color: paid ? '#F5F0E6' : 'var(--text)', borderColor: paid ? '#3F7A4F' : 'var(--border)' }}>
             {paid ? '✓ Paid' : 'Unpaid'}
           </button>
         </div>
@@ -2093,7 +2093,7 @@ export function AccountTransferModal({ spending, onSave, onClose }: any) {
           <label>Pay from (debit / savings)</label>
           <div style={{ display: 'flex', gap: 8, marginBottom: 14, overflowX: 'auto', paddingBottom: 2 }}>
             {fromAccounts.map((a: any) => (
-              <button key={a.id} className="tap" onClick={() => setFromId(a.id)} style={{ flexShrink: 0, padding: '8px 14px', fontSize: 12, background: fromId === a.id ? (a.color || '#1A1A2E') : 'transparent', color: fromId === a.id ? '#F5F0E6' : '#1A1A2E', borderColor: fromId === a.id ? (a.color || '#1A1A2E') : '#E4DCC8' }}>
+              <button key={a.id} className="tap" onClick={() => setFromId(a.id)} style={{ flexShrink: 0, padding: '8px 14px', fontSize: 12, background: fromId === a.id ? (a.color || '#1A1A2E') : 'transparent', color: fromId === a.id ? '#F5F0E6' : 'var(--text)', borderColor: fromId === a.id ? (a.color || '#1A1A2E') : 'var(--border)' }}>
                 {a.name}{a.bank ? ` · ${a.bank}` : ''}
                 <div style={{ fontSize: 10, opacity: 0.7, marginTop: 2 }}>{fmtMoney(a.balance)}</div>
               </button>
@@ -2105,7 +2105,7 @@ export function AccountTransferModal({ spending, onSave, onClose }: any) {
       <label>Pay to (credit card)</label>
       <div style={{ display: 'flex', gap: 8, marginBottom: 14, overflowX: 'auto', paddingBottom: 2 }}>
         {toAccounts.map((a: any) => (
-          <button key={a.id} className="tap" onClick={() => setToId(a.id)} style={{ flexShrink: 0, padding: '8px 14px', fontSize: 12, background: toId === a.id ? '#B8460E' : 'transparent', color: toId === a.id ? '#F5F0E6' : '#1A1A2E', borderColor: toId === a.id ? '#B8460E' : '#E4DCC8' }}>
+          <button key={a.id} className="tap" onClick={() => setToId(a.id)} style={{ flexShrink: 0, padding: '8px 14px', fontSize: 12, background: toId === a.id ? '#B8460E' : 'transparent', color: toId === a.id ? '#F5F0E6' : 'var(--text)', borderColor: toId === a.id ? '#B8460E' : 'var(--border)' }}>
             {a.name}{a.bank ? ` · ${a.bank}` : ''}
             <div style={{ fontSize: 10, opacity: 0.75, marginTop: 2 }}>Owes {fmtMoney(a.balance)}</div>
           </button>
@@ -2114,7 +2114,7 @@ export function AccountTransferModal({ spending, onSave, onClose }: any) {
 
       <label>Payment amount</label>
       <div className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 12 }}>
-        <span className="mono" style={{ fontSize: 20, color: '#6B6457' }}>$</span>
+        <span className="mono" style={{ fontSize: 20, color: 'var(--text-muted)' }}>$</span>
         <input type="number" step="0.01" inputMode="decimal" autoFocus value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" style={{ flex: 1, fontSize: 20, fontFamily: 'JetBrains Mono, monospace' }} />
       </div>
       {to && Number(to.balance) > 0 && (
@@ -2128,7 +2128,7 @@ export function AccountTransferModal({ spending, onSave, onClose }: any) {
       <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ marginBottom: 18 }} />
 
       {from && to && parseFloat(amount) > 0 && (
-        <div style={{ background: '#F0EAD8', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 12 }}>
+        <div style={{ background: 'var(--bg-inset)', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 12 }}>
           <span className="muted">{from.name}</span> <ArrowRightLeft size={11} style={{ verticalAlign: 'middle', margin: '0 4px' }} /> <span className="muted">{to.name}</span>
           <span className="mono" style={{ float: 'right', fontWeight: 700 }}>{fmtMoney(parseFloat(amount) || 0)}</span>
         </div>

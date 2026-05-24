@@ -367,7 +367,7 @@ export function LogMealModal({ meals, settings, onSave, onClose, targetDate, mea
                 const u = p.servingUnit || 'serving';
                 const amtLabel = u !== 'serving' ? `${fmtNum(editQty * size)} ${u}` : (editQty === 1 ? '1 serving' : `${fmtNum(editQty)} servings`);
                 return (
-                  <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #E4DCC8' }}>
+                  <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
                     <QtyStepper qty={editQty} setQty={setEditQty} />
                     <div className="mono tiny muted" style={{ marginBottom: 8 }}>{amtLabel} · {sc.protein}p · {sc.carbs}c · {sc.fat}f · {sc.calories}cal</div>
                     <button className="btn" style={{ width: '100%' }} onClick={() => logItem(p, editQty)}>Log {amtLabel}</button>
@@ -539,7 +539,7 @@ export function LogMealModal({ meals, settings, onSave, onClose, targetDate, mea
       )}
 
       {dayEntries.length > 0 && (
-        <div style={{ marginTop: 16, borderTop: '1px solid #E4DCC8', paddingTop: 12 }}>
+        <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
           <div className="h3" style={{ marginBottom: 8 }}>{isToday ? "Today's meals" : `Meals on ${fmtDate(target)}`}</div>
           {dayEntries.map((e: any) => (
             <div key={e.id} className="between" style={{ padding: '6px 0' }}>
@@ -838,7 +838,7 @@ export function FoodTab({ settings, meals, water, exercise, body, onOpenLogger, 
               const over = goal > 0 && w.cals > goal;
               return (
                 <div key={w.date} title={`${fmtShortDate(w.date)} · ${w.cals} cal`} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%' }}>
-                  <div style={{ width: '100%', height: `${h}%`, minHeight: w.cals > 0 ? 3 : 0, background: w.cals === 0 ? '#E4DCC8' : over ? '#B8460E' : '#4A6741', borderRadius: '3px 3px 0 0' }} />
+                  <div style={{ width: '100%', height: `${h}%`, minHeight: w.cals > 0 ? 3 : 0, background: w.cals === 0 ? 'var(--border)' : over ? '#B8460E' : '#4A6741', borderRadius: '3px 3px 0 0' }} />
                 </div>
               );
             })}
@@ -905,7 +905,7 @@ export function FoodTab({ settings, meals, water, exercise, body, onOpenLogger, 
             )}
             <button className="tap" style={{ width: '100%', marginTop: 10 }} onClick={() => onOpenLogger(selDate, sec.key)}><Plus size={13} style={{ verticalAlign: 'middle', marginRight: 4 }} />Add food</button>
             {list.length === 0 && prevBySection[sec.key].length > 0 && (
-              <button className="tap" style={{ width: '100%', marginTop: 6, fontSize: 12, color: '#6B6457' }} onClick={() => copyPrevSection(sec.key)}>
+              <button className="tap" style={{ width: '100%', marginTop: 6, fontSize: 12, color: 'var(--text-muted)' }} onClick={() => copyPrevSection(sec.key)}>
                 <Copy size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Copy yesterday's {sec.label.toLowerCase()} ({prevBySection[sec.key].length})
               </button>
             )}

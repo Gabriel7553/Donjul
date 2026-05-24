@@ -601,11 +601,11 @@ export default function App() {
       <div className="app">
         <GlobalStyles />
         <div className="content">
-          <div style={{ height: 14, width: 120, background: '#E4DCC8', borderRadius: 6, marginBottom: 20, opacity: 0.7 }} />
-          <div style={{ height: 30, width: '70%', background: '#E4DCC8', borderRadius: 8, marginBottom: 22, opacity: 0.6 }} />
+          <div style={{ height: 14, width: 120, background: 'var(--border)', borderRadius: 6, marginBottom: 20, opacity: 0.7 }} />
+          <div style={{ height: 30, width: '70%', background: 'var(--border)', borderRadius: 8, marginBottom: 22, opacity: 0.6 }} />
           {[0, 1, 2].map((i) => (
             <div key={i} className="card" style={{ height: 90 + i * 10 }}>
-              <div style={{ height: 12, width: '40%', background: '#E4DCC8', borderRadius: 6, marginBottom: 12, opacity: 0.6 }} />
+              <div style={{ height: 12, width: '40%', background: 'var(--border)', borderRadius: 6, marginBottom: 12, opacity: 0.6 }} />
               <div style={{ height: 8, width: '90%', background: '#EFE9DB', borderRadius: 6, marginBottom: 8 }} />
               <div style={{ height: 8, width: '75%', background: '#EFE9DB', borderRadius: 6 }} />
             </div>

@@ -36,7 +36,7 @@ export function TodayTab({ settings, daily, totals, streaks, meals, workout, che
       <h1 className="h1" style={{ marginBottom: 18 }}>A day in your study.</h1>
 
       {sleepWarning && incompleteCount > 0 && (
-        <div className="card" style={{ borderLeft: `3px solid ${minsToSleep <= 60 ? '#B8460E' : '#C8932E'}`, background: minsToSleep <= 60 ? '#FDF1EC' : '#FBF7EE', marginBottom: 14 }}>
+        <div className="card" style={{ borderLeft: `3px solid ${minsToSleep <= 60 ? '#B8460E' : '#C8932E'}`, background: minsToSleep <= 60 ? '#FDF1EC' : 'var(--bg-card)', marginBottom: 14 }}>
           <div className="row" style={{ gap: 8, marginBottom: 4 }}>
             <Moon size={16} color={minsToSleep <= 60 ? '#B8460E' : '#C8932E'} />
             <span className="small" style={{ fontWeight: 600, color: minsToSleep <= 60 ? '#B8460E' : '#C8932E' }}>
@@ -173,7 +173,7 @@ function StatusBar({ daily, onBusy, onBack, onSwitch, nowMins, now, sleepTime }:
           )}
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div className="mono small" style={{ fontWeight: 600, color: '#1A1A2E', fontSize: 18 }}>{fmtTime(now)}</div>
+          <div className="mono small" style={{ fontWeight: 600, color: 'var(--text)', fontSize: 18 }}>{fmtTime(now)}</div>
           {minsLeft > 0 && minsLeft < 480 && (
             <div className="mono tiny" style={{ color: timeColor }}>
               {minsLeft <= 60 ? `${minsLeft}m to sleep` : minsLeft <= 120 ? `~${Math.round(minsLeft / 60 * 10) / 10}h to sleep` : ''}
@@ -181,7 +181,7 @@ function StatusBar({ daily, onBusy, onBack, onSwitch, nowMins, now, sleepTime }:
           )}
         </div>
       </div>
-      <div style={{ borderTop: '1px solid #E4DCC8', marginTop: 10, paddingTop: 10 }}>
+      <div style={{ borderTop: '1px solid var(--border)', marginTop: 10, paddingTop: 10 }}>
         {isBusy ? (
           <div className="row" style={{ gap: 6 }}>
             <button className="tap" onClick={onSwitch} style={{ flex: 1 }}><Repeat size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Switch</button>
@@ -254,8 +254,8 @@ function Schedule({ settings, daily, totals, onLog, subjectKeys, nowMins, checki
         const isUpcoming = !done && !isActive && !isOverdue && (blockStart - nowMins) <= 30 && blockStart > nowMins;
         const minsUntil = blockStart - nowMins;
 
-        let blockBg = '#FBF7EE';
-        let blockBorder = '1px solid #E4DCC8';
+        let blockBg = 'var(--bg-card)';
+        let blockBorder = '1px solid var(--border)';
         let statusEl = null;
 
         if (done) {
@@ -331,7 +331,7 @@ function CatchUpBanner({ settings, totals, daily, subjectKeys }: any) {
         <span className="h2" style={{ color: '#B8460E' }}>Daily targets (auto-adjusted)</span>
       </div>
       {items.map((b: any) => (
-        <div key={b.key} style={{ marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid #F0EAD8' }}>
+        <div key={b.key} style={{ marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid var(--bg-inset)' }}>
           <div className="between" style={{ marginBottom: 4 }}>
             <div className="row" style={{ gap: 6 }}>
               <div style={{ width: 8, height: 8, borderRadius: '50%', background: b.accent, flexShrink: 0, marginTop: 1 }} />
@@ -405,7 +405,7 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, c
         } else { status = `${weekDone}/${weeklyDays} this week`; }
 
         return (
-          <div key={k} style={{ marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid #E4DCC8', opacity: weeklyMet || countComplete ? 0.65 : 1 }}>
+          <div key={k} style={{ marginBottom: 18, paddingBottom: 14, borderBottom: '1px solid var(--border)', opacity: weeklyMet || countComplete ? 0.65 : 1 }}>
             <div className="between" style={{ marginBottom: 4 }}>
               <div className="row" style={{ gap: 8 }}>
                 <Icon size={14} color={subj.accent} />
@@ -466,7 +466,7 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, c
             ) : (
               <div className="row" style={{ gap: 4, marginTop: 2 }}>
                 {Array.from({ length: weeklyDays }).map((_, i) => (
-                  <div key={i} style={{ flex: 1, height: 6, borderRadius: 3, background: i < weekDone ? subj.accent : '#E4DCC8' }} />
+                  <div key={i} style={{ flex: 1, height: 6, borderRadius: 3, background: i < weekDone ? subj.accent : 'var(--border)' }} />
                 ))}
               </div>
             )}
@@ -487,7 +487,7 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, c
                 ) : (
                   <>
                     {weeklyDays < 7 && !weeklyMet && !(daily.skippedToday || []).includes(k) && (
-                      <button onClick={() => onSkipToday?.(k)} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', color: '#6B6457' }} title="Skip this subject today">
+                      <button onClick={() => onSkipToday?.(k)} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', color: 'var(--text-muted)' }} title="Skip this subject today">
                         Not today
                       </button>
                     )}
@@ -497,7 +497,7 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, c
                     <button onClick={() => onFocusStart(k)} disabled={!!focus} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', color: isFocusing ? '#4A6741' : '#6B6457' }} title="Start a focus timer">
                       <Play size={11} />
                     </button>
-                    <button onClick={() => onLogExtra(k, 'edit')} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', color: '#6B6457' }} title="Edit/reset today's time">
+                    <button onClick={() => onLogExtra(k, 'edit')} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', color: 'var(--text-muted)' }} title="Edit/reset today's time">
                       <Edit3 size={11} />
                     </button>
                     <button onClick={() => onLogExtra(k)} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', borderColor: subj.accent, color: subj.accent }}>
@@ -609,7 +609,7 @@ function CustomChallengesCard({ challenges, settings, onRestDay, onManage }: any
         const daysDone = ch.startDate ? Math.max(0, diffDays(today, ch.startDate)) : 0;
         const pct = isOpen ? 0 : Math.min(100, Math.round((daysDone / ch.days) * 100));
         return (
-          <div key={ch.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid #F0EAD8' }}>
+          <div key={ch.id} style={{ marginBottom: 12, paddingBottom: 12, borderBottom: '1px solid var(--bg-inset)' }}>
             <div className="between" style={{ marginBottom: 4 }}>
               <div>
                 <div className="small" style={{ fontWeight: 600 }}>{ch.name}</div>
@@ -617,11 +617,11 @@ function CustomChallengesCard({ challenges, settings, onRestDay, onManage }: any
               </div>
               {!isOpen && <span className="mono tiny muted">{pct}%</span>}
             </div>
-            {!isOpen && <div style={{ height: 3, background: '#F0EAD8', borderRadius: 2, overflow: 'hidden', marginBottom: 6 }}><div style={{ height: '100%', width: `${pct}%`, background: '#8E4585', borderRadius: 2 }} /></div>}
+            {!isOpen && <div style={{ height: 3, background: 'var(--bg-inset)', borderRadius: 2, overflow: 'hidden', marginBottom: 6 }}><div style={{ height: '100%', width: `${pct}%`, background: '#8E4585', borderRadius: 2 }} /></div>}
             {isLogged ? (
               <div className="tiny" style={{ color: '#3F7A4F', fontWeight: 600 }}>✓ Counted today</div>
             ) : isRest ? (
-              <div className="tiny" style={{ color: '#6B6457' }}>😴 Rest day · streak protected</div>
+              <div className="tiny" style={{ color: 'var(--text-muted)' }}>😴 Rest day · streak protected</div>
             ) : (
               <div className="row" style={{ gap: 6, alignItems: 'center', marginTop: 4 }}>
                 <div className="tiny muted" style={{ flex: 1 }}>Log {sub?.name || 'subject'} to count today</div>
@@ -704,10 +704,10 @@ function WeeklySummary({ settings, totals, daily, meals, workout }: any) {
               <div className="tiny muted" style={{ marginBottom: 2 }}>{dow}</div>
               <div style={{
                 width: 28, height: 28, lineHeight: '28px', textAlign: 'center', borderRadius: 6,
-                background: isToday ? '#1A1A2E' : hadWorkout ? '#3B5C6B' : '#FBF7EE',
+                background: isToday ? '#1A1A2E' : hadWorkout ? '#3B5C6B' : 'var(--bg-card)',
                 color: isToday || hadWorkout ? '#F5F0E6' : '#6B6457',
                 fontFamily: 'JetBrains Mono', fontSize: 12, margin: '0 auto',
-                border: '1px solid #E4DCC8',
+                border: '1px solid var(--border)',
               }}>{dayNum}</div>
             </div>
           );
