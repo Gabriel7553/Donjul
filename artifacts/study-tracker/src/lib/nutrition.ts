@@ -72,6 +72,7 @@ export function migrateMeals(meals: any): any {
   const already = !!meals.presetsMicrosMigrated;
   const rawPresets = already ? (meals.presets || []) : (meals.presets || []).filter(isCompletePreset);
   const m = {
+    ...meals,
     presets: rawPresets,
     log: meals.log || {},
     entries: meals.entries || {},
