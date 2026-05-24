@@ -924,6 +924,20 @@ export function EditSubjectModal({ subjectKey, settings, onSave, onClose }: any)
   const [showDetails, setShowDetails] = useState(!isNew);
   const set = (patch: any) => setDraft({ ...draft, ...patch });
 
+  // Auto-plan: pick a pace → compute daily minutes + days/week to finish the course by the deadline.
+  const PACES = [
+    { key: 'relaxed', label: 'Relaxed', days: 3 },
+    { key: 'moderate', label: 'Moderate', days: 5 },
+    { key: 'intense', label: 'Intense', days: 6 },
+  ];
+  const planDaily = (hours: any, deadline: any, wkDays: number) => {
+    const totalMin = (Number(hours) || 0) * 60;
+    if (!totalMin || !deadline) return 0;
+    const days = Math.max(1, diffDays(deadline, todayStr()));
+    const studyDays = Math.max(1, Math.round(days * (wkDays / 7)));
+    return Math.max(5, Math.ceil(totalMin / studyDays));
+  };
+
   const handleSave = () => {
     const clean = { ...draft };
     if (goalSel === 'deadline') { clean.countTotal = null; if (!clean.deadline) clean.deadline = addMonth(todayStr(), 3); }
@@ -1019,6 +1033,24 @@ export function EditSubjectModal({ subjectKey, settings, onSave, onClose }: any)
                     <p className="muted tiny" style={{ marginBottom: 8, lineHeight: 1.5 }}>
                       Progress bar tracks {draft.courseHours}h ({Math.round(draft.courseHours * 60)}min) of actual content, not estimated study time.
                     </p>
+                  )}
+                  {draft.courseHours > 0 && draft.deadline && (
+                    <div style={{ marginBottom: 8, padding: 10, borderRadius: 8, background: 'var(--bg-inset)' }}>
+                      <div className="small" style={{ fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}><Zap size={13} color="#C8932E" /> Auto-plan my schedule</div>
+                      <div className="row" style={{ gap: 6, marginBottom: 8 }}>
+                        {PACES.map((p) => {
+                          const d = planDaily(draft.courseHours, draft.deadline, p.days);
+                          const active = draft.weeklyDays === p.days && draft.target === d;
+                          return (
+                            <button key={p.key} className={`tap ${active ? 'active' : ''}`} style={{ flex: 1, padding: '6px 4px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }} onClick={() => set({ weeklyDays: p.days, target: d })}>
+                              <span style={{ fontSize: 12, fontWeight: 600 }}>{p.label}</span>
+                              <span className="tiny muted">{p.days}d/wk · {d}m</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="muted tiny" style={{ lineHeight: 1.4 }}>Sets your daily minutes &amp; days/week to finish {draft.courseHours}h by {fmtShortDate(draft.deadline)}. You can still tweak the Daily/Days fields above.</p>
+                    </div>
                   )}
                 </>
               )}
