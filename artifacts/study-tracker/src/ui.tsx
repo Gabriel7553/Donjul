@@ -126,11 +126,21 @@ export function GlobalStyles() {
         --text: #1A1A2E; --text-muted: #6B6457; --text-sub: #3B3B55;
         --bg: #F5F0E6; --bg-card: #FBF7EE; --bg-inset: #F0EAD8;
         --bg-inset2: #F9F5EC; --border: #E4DCC8; --border-muted: #D4CCB8;
+        --tint-good: #F0F5ED; --tint-good-bd: #C8D9C0;
+        --tint-info: #EEF2F8; --tint-info-bd: #C8D4E4;
+        --tint-warm: #F5E1D5; --tint-warm-bd: #F4C5AD;
+        --tint-purple: #F0EBF8; --tint-purple-bd: #DCCDE6;
+        --tint-cream: #F3EFE4;
       }
       .dark {
         --text: #E8E4DC; --text-muted: #9A9590; --text-sub: #C0BAB0;
         --bg: #14141C; --bg-card: #1C1C28; --bg-inset: #20202E;
         --bg-inset2: #252535; --border: #2C2C3E; --border-muted: #3A3A50;
+        --tint-good: #18271C; --tint-good-bd: #2E4A36;
+        --tint-info: #16212E; --tint-info-bd: #2C3E54;
+        --tint-warm: #2E1D14; --tint-warm-bd: #4E3422;
+        --tint-purple: #201A2C; --tint-purple-bd: #3A2E4A;
+        --tint-cream: #22222E;
       }
       .dark .h1, .dark .h3 { color: #E8E4DC !important; }
       .dark .small { color: #D8D4CC; }

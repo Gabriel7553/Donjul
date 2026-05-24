@@ -352,7 +352,7 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
           style={{
             marginBottom: 18,
             padding: '12px 14px',
-            background: '#F0E8F0',
+            background: 'var(--tint-purple)',
             border: '1px solid #D4B5CB',
             borderRadius: 10,
             display: 'flex',
@@ -1077,7 +1077,7 @@ export function WeeklyReviewModal({ settings, totals, body, workout, meals, stre
       {aiState === 'loading' && <p className="muted small" style={{ marginBottom: 14 }}>Reviewing your week…</p>}
       {aiState === 'error' && <p className="small" style={{ color: '#B8460E', marginBottom: 14 }}>{aiErr}</p>}
       {aiState === 'done' && ai && (
-        <div className="card" style={{ background: '#F3EEF6', border: '1px solid #DCCDE6', marginBottom: 16 }}>
+        <div className="card" style={{ background: 'var(--tint-purple)', border: '1px solid var(--tint-purple-bd)', marginBottom: 16 }}>
           {ai.summary && <p className="small" style={{ fontWeight: 600, marginBottom: 8, lineHeight: 1.5 }}>{ai.summary}</p>}
           {ai.wins?.length > 0 && <><div className="mono tiny" style={{ color: '#4A6741', fontWeight: 600, marginBottom: 4 }}>WINS</div>{ai.wins.map((w: string, i: number) => <div key={i} className="small" style={{ marginBottom: 3 }}>• {w}</div>)}</>}
           {ai.focus?.length > 0 && <><div className="mono tiny" style={{ color: '#8E4585', fontWeight: 600, margin: '8px 0 4px' }}>NEXT WEEK</div>{ai.focus.map((w: string, i: number) => <div key={i} className="small" style={{ marginBottom: 3 }}>→ {w}</div>)}</>}
@@ -1188,7 +1188,7 @@ export function ChallengeModal({ settings, challengeHistory, onSave, onSaveHisto
       {view === 'active' && (
         <>
           {ch.active && (
-            <div className="card" style={{ padding: 12, marginBottom: 14, background: '#F0EBF8', borderLeft: '3px solid #8E4585' }}>
+            <div className="card" style={{ padding: 12, marginBottom: 14, background: 'var(--tint-purple)', borderLeft: '3px solid #8E4585' }}>
               <div className="between" style={{ marginBottom: 8 }}>
                 <span className="small" style={{ fontWeight: 600 }}>{ch.name}</span>
                 <span className="mono tiny" style={{ color: '#8E4585' }}>{isInfinite ? '∞' : `${pct}%`}</span>
@@ -1366,7 +1366,7 @@ export function ResetDayModal({ onReset, onFullReset, onClose }: any) {
         <>
           <div
             className="row"
-            style={{ gap: 8, background: '#FDF1EC', border: '1px solid #F4C5AD', borderRadius: 8, padding: '10px 12px', marginBottom: 14 }}
+            style={{ gap: 8, background: 'var(--tint-warm)', border: '1px solid var(--tint-warm-bd)', borderRadius: 8, padding: '10px 12px', marginBottom: 14 }}
           >
             <AlertTriangle size={14} color="#B8460E" style={{ flexShrink: 0, marginTop: 1 }} />
             <p className="small" style={{ color: '#8A3010', lineHeight: 1.45 }}>
@@ -1686,7 +1686,7 @@ export function Setup({ onComplete, onImport }: any) {
                   style={{ fontFamily: 'JetBrains Mono', fontSize: 12, marginBottom: 10 }}
                 />
                 {recoverError && (
-                  <div className="small" style={{ color: '#B8460E', marginBottom: 10, padding: 8, background: '#F5E1D5', borderRadius: 6 }}>
+                  <div className="small" style={{ color: '#B8460E', marginBottom: 10, padding: 8, background: 'var(--tint-warm)', borderRadius: 6 }}>
                     {recoverError}
                   </div>
                 )}
@@ -1717,7 +1717,7 @@ export function Setup({ onComplete, onImport }: any) {
                   style={{ fontFamily: 'JetBrains Mono', fontSize: 11, padding: 10, height: 180, marginBottom: 10, resize: 'vertical', width: '100%' }}
                 />
                 {importError && (
-                  <div className="small" style={{ color: '#B8460E', marginBottom: 10, padding: 8, background: '#F5E1D5', borderRadius: 6 }}>
+                  <div className="small" style={{ color: '#B8460E', marginBottom: 10, padding: 8, background: 'var(--tint-warm)', borderRadius: 6 }}>
                     {importError}
                   </div>
                 )}

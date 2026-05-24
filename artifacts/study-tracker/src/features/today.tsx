@@ -36,7 +36,7 @@ export function TodayTab({ settings, daily, totals, streaks, meals, workout, che
       <h1 className="h1" style={{ marginBottom: 18 }}>A day in your study.</h1>
 
       {sleepWarning && incompleteCount > 0 && (
-        <div className="card" style={{ borderLeft: `3px solid ${minsToSleep <= 60 ? '#B8460E' : '#C8932E'}`, background: minsToSleep <= 60 ? '#FDF1EC' : 'var(--bg-card)', marginBottom: 14 }}>
+        <div className="card" style={{ borderLeft: `3px solid ${minsToSleep <= 60 ? '#B8460E' : '#C8932E'}`, background: minsToSleep <= 60 ? 'var(--tint-warm)' : 'var(--bg-card)', marginBottom: 14 }}>
           <div className="row" style={{ gap: 8, marginBottom: 4 }}>
             <Moon size={16} color={minsToSleep <= 60 ? '#B8460E' : '#C8932E'} />
             <span className="small" style={{ fontWeight: 600, color: minsToSleep <= 60 ? '#B8460E' : '#C8932E' }}>
@@ -203,7 +203,7 @@ function FocusTimerCard({ focus, subject, onStop }: any) {
   const secs = Math.floor((elapsedMs % 60000) / 1000);
   const Icon = ICON_MAP[subject?.icon] || Target;
   return (
-    <div className="card" style={{ borderLeft: `3px solid ${subject?.accent || '#4A6741'}`, marginBottom: 14, background: '#FDF6EE' }}>
+    <div className="card" style={{ borderLeft: `3px solid ${subject?.accent || '#4A6741'}`, marginBottom: 14, background: 'var(--tint-warm)' }}>
       <div className="between">
         <div className="row" style={{ gap: 10 }}>
           <div className="icon-wrap" style={{ background: subject?.accent || '#4A6741', width: 34, height: 34 }}><Icon size={18} /></div>
@@ -259,16 +259,16 @@ function Schedule({ settings, daily, totals, onLog, subjectKeys, nowMins, checki
         let statusEl = null;
 
         if (done) {
-          blockBg = '#F0F5ED';
-          blockBorder = '1px solid #C8D9C0';
+          blockBg = 'var(--tint-good)';
+          blockBorder = '1px solid var(--tint-good-bd)';
         } else if (isActive) {
-          blockBg = '#FDF6EE';
+          blockBg = 'var(--tint-warm)';
           blockBorder = `2px solid ${subj.accent}`;
           statusEl = <span className="pill" style={{ background: subj.accent, color: '#F5F0E6', fontSize: 10, padding: '2px 8px', letterSpacing: '0.08em' }}>NOW</span>;
         } else if (isOverdue) {
-          blockBg = '#FDF1EC';
+          blockBg = 'var(--tint-warm)';
           blockBorder = '2px solid #B8460E';
-          statusEl = <span className="pill" style={{ background: '#F5E1D5', color: '#B8460E', fontSize: 10, padding: '2px 8px' }}>OVERDUE</span>;
+          statusEl = <span className="pill" style={{ background: 'var(--tint-warm)', color: '#B8460E', fontSize: 10, padding: '2px 8px' }}>OVERDUE</span>;
         } else if (isUpcoming) {
           statusEl = <span className="mono tiny" style={{ color: '#C8932E' }}>in {minsUntil}m</span>;
         }
@@ -387,20 +387,20 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, c
         const proj = projectedDate(k, settings, totals, daily);
         const showPace = goalKind === 'deadline' && !isCheckoff && !weeklyMet;
 
-        let status = '', sColor = '#6B6457', sBg = '#EEEAE0';
-        if (weeklyMet) { status = `Done this week · ${weekDone}/${weeklyDays}`; sColor = '#4A6741'; sBg = '#E8EBE0'; }
-        else if (countComplete) { status = 'Complete'; sColor = '#4A6741'; sBg = '#E8EBE0'; }
+        let status = '', sColor = '#6B6457', sBg = 'var(--tint-cream)';
+        if (weeklyMet) { status = `Done this week · ${weekDone}/${weeklyDays}`; sColor = '#4A6741'; sBg = 'var(--tint-good)'; }
+        else if (countComplete) { status = 'Complete'; sColor = '#4A6741'; sBg = 'var(--tint-good)'; }
         else if (showPace) {
           // Use projected-vs-deadline gap — more accurate than elapsed-time comparison.
           if (!proj || proj.projected === null) {
-            status = 'no data yet'; sColor = '#6B6457'; sBg = '#EEEAE0';
+            status = 'no data yet'; sColor = '#6B6457'; sBg = 'var(--tint-cream)';
           } else {
             // diffDays(toDate, fromDate): positive = toDate is further in the future
             const projGap = diffDays(proj.projected, proj.deadline); // pos = behind, neg = ahead
             const daysOff = Math.abs(projGap);
-            if (daysOff < 1) { status = 'on pace'; sColor = '#4A6741'; sBg = '#E8EBE0'; }
-            else if (projGap < 0) { status = `${daysOff.toFixed(1)}d ahead`; sColor = '#4A6741'; sBg = '#E8EBE0'; }
-            else { status = `${daysOff.toFixed(1)}d behind`; sColor = '#B8460E'; sBg = '#F5E1D5'; }
+            if (daysOff < 1) { status = 'on pace'; sColor = '#4A6741'; sBg = 'var(--tint-good)'; }
+            else if (projGap < 0) { status = `${daysOff.toFixed(1)}d ahead`; sColor = '#4A6741'; sBg = 'var(--tint-good)'; }
+            else { status = `${daysOff.toFixed(1)}d behind`; sColor = '#B8460E'; sBg = 'var(--tint-warm)'; }
           }
         } else { status = `${weekDone}/${weeklyDays} this week`; }
 

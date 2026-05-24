@@ -175,7 +175,7 @@ export function HistoryTab({ settings, totals, workout, meals, body, activity, s
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
               {badges.map((b) => (
-                <div key={b.id} title={b.desc} style={{ textAlign: 'center', padding: '10px 4px', borderRadius: 10, background: b.earned ? 'var(--bg-card)' : '#F2EEE4', border: `1px solid ${b.earned ? '#C8932E' : 'var(--border)'}`, opacity: b.earned ? 1 : 0.5 }}>
+                <div key={b.id} title={b.desc} style={{ textAlign: 'center', padding: '10px 4px', borderRadius: 10, background: b.earned ? 'var(--bg-card)' : 'var(--tint-cream)', border: `1px solid ${b.earned ? '#C8932E' : 'var(--border)'}`, opacity: b.earned ? 1 : 0.5 }}>
                   <Trophy size={18} color={b.earned ? '#C8932E' : '#A0A898'} />
                   <div className="tiny" style={{ fontWeight: 600, marginTop: 4 }}>{b.label}</div>
                   <div className="tiny muted" style={{ lineHeight: 1.3 }}>{b.desc}</div>

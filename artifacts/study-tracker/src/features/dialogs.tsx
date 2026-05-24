@@ -221,7 +221,7 @@ export function BodyGoalsModal({ settings, onSave, onClose }: any) {
       <p className="muted small" style={{ marginBottom: 10 }}>
         Set target numbers for progress bars. Direction controls trend coloring.
       </p>
-      <div className="card" style={{ padding: '12px 14px', marginBottom: 14, background: '#EEF2F8', border: '1px solid #C8D4E4' }}>
+      <div className="card" style={{ padding: '12px 14px', marginBottom: 14, background: 'var(--tint-info)', border: '1px solid var(--tint-info-bd)' }}>
         <div className="between" style={{ marginBottom: 4 }}>
           <div className="row" style={{ gap: 8 }}>
             <Target size={14} color="#3B5C6B" />

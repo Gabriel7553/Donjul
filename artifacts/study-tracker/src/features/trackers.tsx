@@ -139,7 +139,7 @@ export function BodyTab({ settings, body, workout, onAddEntry, onEditGoals }: an
                     <div className="row" style={{ gap: 6 }}>
                       <span className="mono small">{current}{f.unit}</span>
                       {change != null && (
-                        <span className="pill" style={{ background: isGood ? '#E8EBE0' : '#F5E1D5', color: isGood ? '#4A6741' : '#B8460E', padding: '2px 8px' }}>
+                        <span className="pill" style={{ background: isGood ? 'var(--tint-good)' : 'var(--tint-warm)', color: isGood ? '#4A6741' : '#B8460E', padding: '2px 8px' }}>
                           {change >= 0 ? <ArrowUp size={10} /> : <ArrowDown size={10} />}
                           {Math.abs(change).toFixed(1)}{f.unit}
                         </span>
@@ -257,7 +257,7 @@ export function JournalTab({ journal, onSave, settings }: any) {
                     title={m.label}
                     style={{
                       flex: 1, padding: '6px 4px', border: `1px solid ${mood === m.value ? '#8E4585' : 'var(--border)'}`,
-                      borderRadius: 8, background: mood === m.value ? '#F3EEF6' : 'transparent',
+                      borderRadius: 8, background: mood === m.value ? 'var(--tint-purple)' : 'transparent',
                       cursor: 'pointer', textAlign: 'center', fontSize: 20, lineHeight: 1.3,
                     }}
                   >
@@ -322,7 +322,7 @@ export function JournalTab({ journal, onSave, settings }: any) {
                   <div>
                     <div className="row" style={{ gap: 8 }}>
                       <span className="small" style={{ fontWeight: 700 }}>{t.symbol}</span>
-                      <span className="mono tiny" style={{ color: t.direction === 'L' ? '#4A6741' : '#B8460E', background: t.direction === 'L' ? '#E8F0E6' : '#F5E1D5', padding: '1px 6px', borderRadius: 4 }}>{t.direction === 'L' ? 'LONG' : 'SHORT'}</span>
+                      <span className="mono tiny" style={{ color: t.direction === 'L' ? '#4A6741' : '#B8460E', background: t.direction === 'L' ? 'var(--tint-good)' : 'var(--tint-warm)', padding: '1px 6px', borderRadius: 4 }}>{t.direction === 'L' ? 'LONG' : 'SHORT'}</span>
                       {t.pnl && <span className="mono tiny" style={{ color: parseFloat(t.pnl) >= 0 ? '#4A6741' : '#B8460E', fontWeight: 600 }}>{parseFloat(t.pnl) >= 0 ? '+' : ''}{t.pnl}</span>}
                     </div>
                     {(t.entry || t.exit) && <div className="mono tiny muted" style={{ marginTop: 2 }}>{t.entry && `Entry ${t.entry}`}{t.exit && ` → Exit ${t.exit}`}</div>}
@@ -340,7 +340,7 @@ export function JournalTab({ journal, onSave, settings }: any) {
       {view === 'trades' && (
         <>
           {allTrades.length > 0 && (
-            <div className="card" style={{ padding: 14, marginBottom: 12, background: '#EEF8EC', border: '1px solid #C8E4C4' }}>
+            <div className="card" style={{ padding: 14, marginBottom: 12, background: 'var(--tint-good)', border: '1px solid var(--tint-good-bd)' }}>
               <div className="h3" style={{ marginBottom: 10 }}>Summary</div>
               <div className="row" style={{ gap: 16, flexWrap: 'wrap' }}>
                 <div><div className="mono tiny muted">Total P&L</div><div className="mono small" style={{ fontWeight: 700, color: totalPnl >= 0 ? '#4A6741' : '#B8460E' }}>{totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(2)}</div></div>
@@ -624,7 +624,7 @@ function ExerciseDetailModal({ name, logs, unit, onClose }: any) {
       ) : (
         <>
           {best && best.e1rm > 0 && (
-            <div className="card" style={{ margin: '0 0 14px', background: '#F3EFE4' }}>
+            <div className="card" style={{ margin: '0 0 14px', background: 'var(--tint-cream)' }}>
               <div className="between"><span className="small muted">Best set</span><span className="mono small" style={{ fontWeight: 600 }}>{best.topWeight}×{best.topReps} {unit}</span></div>
               <div className="between" style={{ marginTop: 5 }}><span className="small muted">Est. 1RM</span><span className="mono small">{best.e1rm} {unit} · {fmtShortDate(best.date)}</span></div>
             </div>

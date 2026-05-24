@@ -220,7 +220,7 @@ export function LogMealModal({ meals, settings, onSave, onClose, targetDate, mea
   const removePreset = async (id: string) => { await onSave({ ...meals, presets: meals.presets.filter((p: any) => p.id !== id) }); };
 
   const ReviewPanel = review && (
-    <div className="card" style={{ padding: 14, marginBottom: 12, background: '#F0F5ED', border: '1px solid #C8D9C0' }}>
+    <div className="card" style={{ padding: 14, marginBottom: 12, background: 'var(--tint-good)', border: '1px solid var(--tint-good-bd)' }}>
       <div className="small" style={{ fontWeight: 600, marginBottom: 2 }}>{review.name}</div>
       {review.source && <div className="muted tiny" style={{ marginBottom: 8 }}>{review.source}</div>}
       <QtyStepper qty={qty} setQty={setQty} />
@@ -233,7 +233,7 @@ export function LogMealModal({ meals, settings, onSave, onClose, targetDate, mea
               {`${s.protein}p · ${s.carbs}c · ${s.fat}f · ${s.calories}cal`}
             </div>
             {microHits.length > 0 && (
-              <div style={{ marginBottom: 10, paddingTop: 6, borderTop: '1px solid #C8D9C0' }}>
+              <div style={{ marginBottom: 10, paddingTop: 6, borderTop: '1px solid var(--tint-good-bd)' }}>
                 <div className="mono tiny muted" style={{ marginBottom: 4 }}>MICROS</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px 10px' }}>
                   {microHits.map(d => {
@@ -298,7 +298,7 @@ export function LogMealModal({ meals, settings, onSave, onClose, targetDate, mea
 
       {mode === 'scan' && (
         <>
-          <div className="card" style={{ padding: 14, marginBottom: 12, background: '#EEF2F8', border: '1px solid #C8D4E4', textAlign: 'center' }}>
+          <div className="card" style={{ padding: 14, marginBottom: 12, background: 'var(--tint-info)', border: '1px solid var(--tint-info-bd)', textAlign: 'center' }}>
             <Camera size={28} color="#3B5C6B" style={{ marginBottom: 8 }} />
             <p className="muted small" style={{ lineHeight: 1.5, marginBottom: 12 }}>Photo a nutrition label, cookbook page, or meal — or scan a product barcode.</p>
             {scanState === 'scanning' && <p className="mono small" style={{ color: '#3B5C6B' }}>Reading…</p>}
@@ -429,7 +429,7 @@ export function LogMealModal({ meals, settings, onSave, onClose, targetDate, mea
                 <span className="small" style={{ fontWeight: 600 }}>Scan label for: {parts[comboScanIdx]?.name || `Ingredient ${comboScanIdx + 1}`}</span>
                 <button className="tap" style={{ fontSize: 11, padding: '3px 8px' }} onClick={() => { setComboScanIdx(null); setScanState('idle'); setReview(null); }}>Cancel</button>
               </div>
-              <div className="card" style={{ padding: 14, marginBottom: 12, background: '#EEF2F8', border: '1px solid #C8D4E4', textAlign: 'center' }}>
+              <div className="card" style={{ padding: 14, marginBottom: 12, background: 'var(--tint-info)', border: '1px solid var(--tint-info-bd)', textAlign: 'center' }}>
                 <Camera size={24} color="#3B5C6B" style={{ marginBottom: 8 }} />
                 <p className="muted small" style={{ marginBottom: 10, lineHeight: 1.4 }}>Photo the nutrition label. Values will fill in automatically.</p>
                 {scanState === 'scanning' && <p className="mono small" style={{ color: '#3B5C6B' }}>Reading…</p>}
@@ -445,7 +445,7 @@ export function LogMealModal({ meals, settings, onSave, onClose, targetDate, mea
                 )}
               </div>
               {scanState === 'done' && review && (
-                <div className="card" style={{ padding: 12, marginBottom: 12, background: '#F0F5ED', border: '1px solid #C8D9C0' }}>
+                <div className="card" style={{ padding: 12, marginBottom: 12, background: 'var(--tint-good)', border: '1px solid var(--tint-good-bd)' }}>
                   <div className="small" style={{ fontWeight: 600, marginBottom: 4 }}>{review.name}</div>
                   {review.source && <div className="muted tiny" style={{ marginBottom: 6 }}>{review.source}</div>}
                   <div className="mono tiny muted" style={{ marginBottom: 10 }}>{review.protein}p · {review.carbs}c · {review.fat}f · {review.calories}cal</div>
@@ -500,7 +500,7 @@ export function LogMealModal({ meals, settings, onSave, onClose, targetDate, mea
                 <Plus size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} />Add ingredient
               </button>
               {parts.some((p: any) => parseFloat(p.calories) > 0 || parseFloat(p.protein) > 0) && (
-                <div className="card" style={{ padding: 12, marginBottom: 10, background: '#F0F5ED', border: '1px solid #C8D9C0' }}>
+                <div className="card" style={{ padding: 12, marginBottom: 10, background: 'var(--tint-good)', border: '1px solid var(--tint-good-bd)' }}>
                   <div className="small" style={{ fontWeight: 600, marginBottom: 4 }}>Total</div>
                   <div className="mono small">{Math.round(comboTotal.protein)}p · {Math.round(comboTotal.carbs)}c · {Math.round(comboTotal.fat)}f · {Math.round(comboTotal.calories)} cal</div>
                 </div>
