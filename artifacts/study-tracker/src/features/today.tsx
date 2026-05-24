@@ -511,7 +511,7 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, c
                     <button onClick={() => onFocusStart(k)} disabled={!!focus} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', color: isFocusing ? '#4A6741' : '#6B6457' }} title="Start a focus timer">
                       <Play size={11} />
                     </button>
-                    <button onClick={() => onLogExtra(k, 'edit')} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', color: 'var(--text-muted)' }} title="Edit/reset today's time">
+                    <button onClick={() => onLogExtra(k, 'edit')} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', color: 'var(--text-muted)' }} title="Edit/reset today's time" aria-label="Edit">
                       <Edit3 size={11} />
                     </button>
                     <button onClick={() => onLogExtra(k)} className="tap" style={{ padding: '3px 9px', fontSize: 11, fontFamily: 'JetBrains Mono', borderColor: subj.accent, color: subj.accent }}>

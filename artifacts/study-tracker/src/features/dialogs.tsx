@@ -350,7 +350,7 @@ function SortableExercise({ id, ex, onUpdate, onRemove }: any) {
           <GripVertical size={14} />
         </button>
         <input type="text" value={ex.name} onChange={e => onUpdate({ name: e.target.value })} style={{ flex: 1 }} />
-        <button onClick={onRemove} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E' }}>
+        <button onClick={onRemove} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E' }} aria-label="Delete">
           <Trash2 size={14} />
         </button>
       </div>

@@ -328,7 +328,7 @@ export function JournalTab({ journal, onSave, settings }: any) {
                     {(t.entry || t.exit) && <div className="mono tiny muted" style={{ marginTop: 2 }}>{t.entry && `Entry ${t.entry}`}{t.exit && ` → Exit ${t.exit}`}</div>}
                     {t.notes && <div className="muted tiny" style={{ marginTop: 4, fontStyle: 'italic' }}>{t.notes}</div>}
                   </div>
-                  <button onClick={() => removeTrade(t.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 4 }}><Trash2 size={14} /></button>
+                  <button onClick={() => removeTrade(t.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 4 }} aria-label="Delete"><Trash2 size={14} /></button>
                 </div>
               </div>
             ))}
@@ -591,7 +591,7 @@ export function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, 
       <div className="card">
         <div className="between" style={{ marginBottom: 8 }}>
           <div className="h2">Weekly split</div>
-          <button onClick={() => onEditSplit(location)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+          <button onClick={() => onEditSplit(location)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }} aria-label="Edit">
             <Edit3 size={16} />
           </button>
         </div>

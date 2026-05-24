@@ -62,9 +62,9 @@ export function HistoryTab({ settings, totals, workout, meals, body, activity, s
 
       <div className="card">
         <div className="between" style={{ marginBottom: 14 }}>
-          <button onClick={goPrev} className="tap" style={{ padding: 6 }}><ChevronLeft size={16} /></button>
+          <button onClick={goPrev} className="tap" style={{ padding: 6 }} aria-label="Previous"><ChevronLeft size={16} /></button>
           <div className="h3">{monthName}</div>
-          <button onClick={goNext} className="tap" style={{ padding: 6 }}><ChevronRight size={16} /></button>
+          <button onClick={goNext} className="tap" style={{ padding: 6 }} aria-label="Next"><ChevronRight size={16} /></button>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, marginBottom: 14 }}>
@@ -308,7 +308,7 @@ export function DayDetailModal({ date, settings, totals, workout, meals, body, a
                   <div className="mono tiny muted">{e.protein}p · {e.carbs}c · {e.fat}f · {e.calories}cal</div>
                 </div>
                 <button onClick={async () => onSaveMeals(removeMealEntry(meals, date, e.id))}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 4 }}>
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 4 }} aria-label="Delete">
                   <Trash2 size={14} />
                 </button>
               </div>

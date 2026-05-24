@@ -353,10 +353,10 @@ export function LogMealModal({ meals, settings, onSave, onClose, targetDate, mea
                   <div className="mono tiny muted" style={{ marginTop: 3 }}>{p.protein}p · {p.carbs}c · {p.fat}f · {p.calories}cal{qty !== 1 ? ` (×${qty})` : ''}</div>
                 </div>
                 <div className="row" style={{ gap: 2 }}>
-                  <button onClick={(e) => { e.stopPropagation(); setEditId(isEditing ? null : p.id); setEditQty(1); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: isEditing ? '#1A1A2E' : '#6B6457', padding: 4 }} title="Adjust servings before logging">
+                  <button onClick={(e) => { e.stopPropagation(); setEditId(isEditing ? null : p.id); setEditQty(1); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: isEditing ? '#1A1A2E' : '#6B6457', padding: 4 }} title="Adjust servings before logging" aria-label="Edit">
                     <Pencil size={14} />
                   </button>
-                  <button onClick={(e) => { e.stopPropagation(); removePreset(p.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 4 }}>
+                  <button onClick={(e) => { e.stopPropagation(); removePreset(p.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 4 }} aria-label="Delete">
                     <Trash2 size={14} />
                   </button>
                 </div>
@@ -469,7 +469,7 @@ export function LogMealModal({ meals, settings, onSave, onClose, targetDate, mea
                           <Camera size={11} style={{ verticalAlign: 'middle', marginRight: 3 }} />Scan
                         </button>
                         {parts.length > 1 && (
-                          <button className="tap" style={{ fontSize: 11, padding: '3px 6px', color: '#B8460E' }} onClick={() => setParts((ps: any[]) => ps.filter((_: any, j: number) => j !== i))}>
+                          <button className="tap" style={{ fontSize: 11, padding: '3px 6px', color: '#B8460E' }} onClick={() => setParts((ps: any[]) => ps.filter((_: any, j: number) => j !== i))} aria-label="Delete">
                             <Trash2 size={11} />
                           </button>
                         )}
@@ -547,7 +547,7 @@ export function LogMealModal({ meals, settings, onSave, onClose, targetDate, mea
                 <div className="small">{e.name}</div>
                 <div className="mono tiny muted">{e.protein}p · {e.carbs}c · {e.fat}f · {e.calories}cal</div>
               </div>
-              <button onClick={() => removeEntry(e.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 4 }}><Trash2 size={13} /></button>
+              <button onClick={() => removeEntry(e.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#B8460E', padding: 4 }} aria-label="Delete"><Trash2 size={13} /></button>
             </div>
           ))}
         </div>
@@ -796,12 +796,12 @@ export function FoodTab({ settings, meals, water, exercise, body, onOpenLogger, 
   return (
     <div>
       <div className="between" style={{ marginBottom: 14 }}>
-        <button className="tap" onClick={() => shiftDay(-1)}><ChevronLeft size={16} /></button>
+        <button className="tap" onClick={() => shiftDay(-1)} aria-label="Previous"><ChevronLeft size={16} /></button>
         <div style={{ textAlign: 'center' }}>
           <div className="h2">{isToday ? 'Today' : fmtShortDate(selDate)}</div>
           {!isToday && <button style={{ background: 'none', border: 'none', color: '#B8460E', cursor: 'pointer', fontSize: 12 }} onClick={() => setSelDate(todayStr())}>Jump to today</button>}
         </div>
-        <button className="tap" onClick={() => shiftDay(1)} disabled={isToday}><ChevronRight size={16} /></button>
+        <button className="tap" onClick={() => shiftDay(1)} disabled={isToday} aria-label="Next"><ChevronRight size={16} /></button>
       </div>
 
       <div className="card" style={{ marginBottom: 14 }}>
@@ -893,8 +893,8 @@ export function FoodTab({ settings, meals, water, exercise, body, onOpenLogger, 
                         ) : (
                           <div className="row" style={{ gap: 10, alignItems: 'center' }}>
                             <span className="mono tiny">{Math.round(Number(e.calories) || 0)}</span>
-                            <button style={editStyle} onClick={() => startEdit(e)}><Pencil size={13} /></button>
-                            <button style={trashStyle} onClick={() => onSaveMeals(removeMealEntry(meals, selDate, e.id))}><Trash2 size={14} /></button>
+                            <button style={editStyle} onClick={() => startEdit(e)} aria-label="Edit"><Pencil size={13} /></button>
+                            <button style={trashStyle} onClick={() => onSaveMeals(removeMealEntry(meals, selDate, e.id))} aria-label="Delete"><Trash2 size={14} /></button>
                           </div>
                         )}
                       </div>
@@ -939,7 +939,7 @@ export function FoodTab({ settings, meals, water, exercise, body, onOpenLogger, 
             </div>
             <div className="row" style={{ gap: 10, alignItems: 'center' }}>
               <span className="mono tiny" style={{ color: '#B8460E' }}>{Math.round(Number(ex.caloriesBurned) || 0)}</span>
-              <button style={trashStyle} onClick={() => onSaveExercise({ ...exercise, [selDate]: exDay.filter((x: any) => x.id !== ex.id) })}><Trash2 size={14} /></button>
+              <button style={trashStyle} onClick={() => onSaveExercise({ ...exercise, [selDate]: exDay.filter((x: any) => x.id !== ex.id) })} aria-label="Delete"><Trash2 size={14} /></button>
             </div>
           </div>
         ))}

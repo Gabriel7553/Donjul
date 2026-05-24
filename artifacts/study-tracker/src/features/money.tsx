@@ -324,7 +324,7 @@ export function TaxModal({ tax, spending, onSave, onClose }: any) {
               </div>
               <div className="row" style={{ gap: 10 }}>
                 <span className="mono small" style={{ fontWeight: 700, color: '#3F7A4F' }}>{fmtMoney(e.amount)}</span>
-                <button className="tap" onClick={() => updateYD({ entries1099: (yd.entries1099 || []).filter((x: any) => x.id !== e.id) })} style={{ padding: '3px 6px', color: '#B8460E' }}><Trash2 size={11} /></button>
+                <button className="tap" onClick={() => updateYD({ entries1099: (yd.entries1099 || []).filter((x: any) => x.id !== e.id) })} style={{ padding: '3px 6px', color: '#B8460E' }} aria-label="Delete"><Trash2 size={11} /></button>
               </div>
             </div>
           ))}
@@ -398,7 +398,7 @@ export function TaxModal({ tax, spending, onSave, onClose }: any) {
                     <span className="tiny muted">{fmtShortDate(p.datePaid)}</span>
                     <div className="row" style={{ gap: 8 }}>
                       <span className="mono tiny" style={{ color: 'var(--text)' }}>{fmtMoney(p.amount)}</span>
-                      <button className="tap" onClick={() => updateYD({ payments: (yd.payments || []).filter((x: any) => x.id !== p.id) })} style={{ padding: '2px 5px', color: '#B8460E' }}><Trash2 size={10} /></button>
+                      <button className="tap" onClick={() => updateYD({ payments: (yd.payments || []).filter((x: any) => x.id !== p.id) })} style={{ padding: '2px 5px', color: '#B8460E' }} aria-label="Delete"><Trash2 size={10} /></button>
                     </div>
                   </div>
                 ))}
@@ -573,7 +573,7 @@ export function CustomChallengesModal({ challenges, settings, onSave, onClose }:
                   <button className="tap" onClick={() => archiveChallenge(ch.id)} style={{ flex: 1, fontSize: 11, padding: '5px' }}>
                     <Trophy size={10} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Complete & archive
                   </button>
-                  <button className="tap" onClick={() => deleteChallenge(ch.id)} style={{ padding: '5px 10px', fontSize: 11, color: '#B8460E' }}>
+                  <button className="tap" onClick={() => deleteChallenge(ch.id)} style={{ padding: '5px 10px', fontSize: 11, color: '#B8460E' }} aria-label="Delete">
                     <Trash2 size={10} />
                   </button>
                 </div>
@@ -594,7 +594,7 @@ export function CustomChallengesModal({ challenges, settings, onSave, onClose }:
                         <div className="tiny muted">{sub?.name || ch.subjectKey} · Best streak: {ch.longestStreak || 0} days</div>
                         {ch.startDate && <div className="tiny muted mono">{fmtShortDate(ch.startDate)} → {fmtShortDate(ch.completedDate || today)}</div>}
                       </div>
-                      <button className="tap" onClick={() => deleteChallenge(ch.id)} style={{ padding: '3px 6px', color: 'var(--text-muted)' }}><Trash2 size={10} /></button>
+                      <button className="tap" onClick={() => deleteChallenge(ch.id)} style={{ padding: '3px 6px', color: 'var(--text-muted)' }} aria-label="Delete"><Trash2 size={10} /></button>
                     </div>
                   </div>
                 );
@@ -1306,7 +1306,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
         <button
           onClick={() => setViewMonth(prevMonth(viewMonth))}
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px', color: 'var(--text-muted)' }}
-        >
+         aria-label="Previous">
           <ChevronLeft size={16} />
         </button>
         <div style={{ textAlign: 'center' }}>
@@ -1743,7 +1743,7 @@ export function MoneyCategoriesModal({ spending, onSave, onClose }: any) {
             <div key={c.id} className="row" style={{ gap: 6, marginBottom: 6, alignItems: 'center' }}>
               <input type="color" value={c.color} onChange={(e) => recolor(c.id, e.target.value)} style={{ width: 32, height: 32, padding: 0, border: '1px solid var(--border)', borderRadius: 6, background: 'transparent' }} />
               <input type="text" value={c.name} onChange={(e) => rename(c.id, e.target.value)} style={{ flex: 1 }} />
-              <button className="tap" onClick={() => remove(c.id)} style={{ padding: '6px 8px', color: '#B8460E' }}><Trash2 size={12} /></button>
+              <button className="tap" onClick={() => remove(c.id)} style={{ padding: '6px 8px', color: '#B8460E' }} aria-label="Delete"><Trash2 size={12} /></button>
             </div>
           ))}
         </div>

@@ -433,8 +433,8 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
                       </div>
                     </div>
                     <div className="row" style={{ gap: 4 }}>
-                      <button onClick={() => onEditSubject(k)} className="tap" style={{ padding: '4px 8px' }} title="Edit"><Edit3 size={13} /></button>
-                      <button onClick={() => applySubjectChange(k, { archived: true })} className="tap" style={{ padding: '4px 8px' }} title="Archive"><Archive size={13} /></button>
+                      <button onClick={() => onEditSubject(k)} className="tap" style={{ padding: '4px 8px' }} title="Edit" aria-label="Edit"><Edit3 size={13} /></button>
+                      <button onClick={() => applySubjectChange(k, { archived: true })} className="tap" style={{ padding: '4px 8px' }} title="Archive" aria-label="Archive"><Archive size={13} /></button>
                     </div>
                   </div>
                 </SortableRow>
@@ -461,13 +461,13 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
               {subTab === 'archived' && (
                 <>
                   <button onClick={() => applySubjectChange(k, { archived: false })} className="tap" style={{ padding: '4px 10px', fontSize: 11 }}>Unarchive</button>
-                  <button onClick={() => applySubjectChange(k, { deletedAt: todayStr() })} className="tap" style={{ padding: '4px 8px', color: '#B8460E' }} title="Delete"><Trash2 size={13} /></button>
+                  <button onClick={() => applySubjectChange(k, { deletedAt: todayStr() })} className="tap" style={{ padding: '4px 8px', color: '#B8460E' }} title="Delete" aria-label="Delete"><Trash2 size={13} /></button>
                 </>
               )}
               {subTab === 'deleted' && (
                 <>
                   <button onClick={() => applySubjectChange(k, { deletedAt: null })} className="tap" style={{ padding: '4px 10px', fontSize: 11 }}>Restore</button>
-                  <button onClick={() => fullDelete(k)} className="tap" style={{ padding: '4px 8px', color: '#B8460E' }} title="Delete now"><Trash2 size={13} /></button>
+                  <button onClick={() => fullDelete(k)} className="tap" style={{ padding: '4px 8px', color: '#B8460E' }} title="Delete now" aria-label="Delete"><Trash2 size={13} /></button>
                 </>
               )}
             </div>
