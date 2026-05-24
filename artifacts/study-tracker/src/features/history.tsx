@@ -409,7 +409,7 @@ export function DayDetailModal({ date, settings, totals, workout, meals, body, a
   }
 
   return (
-    <ModalShell title={fmtDate(date)} onClose={onClose} icon={<History size={18} color="#6B6457" />}>
+    <ModalShell title={fmtDate(date)} onClose={onClose} icon={<History size={18} className="ico-muted" />}>
       {dayActivities.length > 0 && (
         <>
           <div className="h2" style={{ marginBottom: 8 }}>Activities</div>

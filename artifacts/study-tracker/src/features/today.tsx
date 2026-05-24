@@ -418,7 +418,7 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, c
 
             {showPace && proj && (
               <div className="row" style={{ gap: 6, marginBottom: 6 }}>
-                <CalIcon size={11} color="#6B6457" />
+                <CalIcon size={11} className="ico-muted" />
                 <span className="mono tiny muted">
                   Goal: {fmtShortDate(proj.deadline)}
                   {proj.projected && (

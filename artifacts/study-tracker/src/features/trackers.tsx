@@ -389,7 +389,7 @@ export function JournalTab({ journal, onSave, settings }: any) {
                   </div>
                   <div className="row" style={{ gap: 10 }}>
                     {dayTrades.length > 0 && <span className="mono tiny" style={{ color: dayPnl >= 0 ? '#4A6741' : '#B8460E' }}>{dayTrades.length} trades {dayPnl >= 0 ? '+' : ''}{dayPnl.toFixed(0)}</span>}
-                    {entry?.note && <BookMarked size={12} color="#6B6457" />}
+                    {entry?.note && <BookMarked size={12} className="ico-muted" />}
                   </div>
                 </div>
                 {entry?.note && <p className="small muted" style={{ lineHeight: 1.5, maxHeight: 60, overflow: 'hidden', WebkitLineClamp: 3, display: '-webkit-box', WebkitBoxOrient: 'vertical' }}>{entry.note}</p>}
@@ -718,7 +718,7 @@ function PlanRow({ date, plans, onClick, highlight }: any) {
           <span className="muted small">{isToday ? 'No extras logged today' : 'Tap to plan'}</span>
         )}
       </div>
-      <ChevronRight size={16} color="#6B6457" />
+      <ChevronRight size={16} className="ico-muted" />
     </div>
   );
 }

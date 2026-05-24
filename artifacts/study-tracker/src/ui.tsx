@@ -140,6 +140,9 @@ export function GlobalStyles() {
       .dark .progress-marker { background: #E8E4DC; }
       .dark .sparkline-bar { background: #C8603E; }
       .dark .pill { border-color: #3A3A50; }
+      button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible { outline: 2px solid #B8460E; outline-offset: 2px; border-radius: 4px; }
+      .dark button:focus-visible, .dark a:focus-visible, .dark input:focus-visible, .dark select:focus-visible, .dark textarea:focus-visible, .dark [role="button"]:focus-visible, .dark [tabindex]:focus-visible { outline-color: #E8A838; }
+      .ico-muted { color: var(--text-muted); }
     `}</style>
   );
 }
@@ -148,10 +151,10 @@ export function Header({ date, onSettings }: { date: string; onSettings: () => v
   return (
     <div style={{ marginBottom: 18 }}>
       <div className="between" style={{ marginBottom: 4 }}>
-        <div className="mono tiny" style={{ letterSpacing: '0.15em', color: '#6B6457', textTransform: 'uppercase' }}>
+        <div className="mono tiny" style={{ letterSpacing: '0.15em', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
           {fmtDate(date)}
         </div>
-        <button onClick={onSettings} style={{ background: 'none', border: 'none', padding: 4, cursor: 'pointer', color: '#6B6457' }}>
+        <button onClick={onSettings} aria-label="Settings" style={{ background: 'none', border: 'none', padding: 4, cursor: 'pointer', color: 'var(--text-muted)' }}>
           <SettingsIcon size={18} />
         </button>
       </div>
@@ -237,7 +240,7 @@ export function ModalShell({ title, onClose, children, icon = null, color = '#1A
             {icon}
             <div style={{ fontSize: 19, fontWeight: 600, color }}>{title}</div>
           </div>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6457' }}>
+          <button onClick={onClose} aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
             <X size={20} />
           </button>
         </div>

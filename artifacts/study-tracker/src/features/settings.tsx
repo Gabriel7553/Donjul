@@ -750,32 +750,32 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
       <button className="tap" onClick={onChallenge} style={{ width: '100%', marginBottom: 8, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
         <Zap size={14} color="#8E4585" />
         <span style={{ flex: 1 }}>60-day workout challenge{settings.challenge?.active && <span className="mono tiny muted" style={{ marginLeft: 6 }}>· active</span>}</span>
-        <ChevronRight size={14} color="#6B6457" />
+        <ChevronRight size={14} className="ico-muted" />
       </button>
       <button className="tap" onClick={onCustomChallenges} style={{ width: '100%', marginBottom: 8, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
         <Trophy size={14} color="#C8932E" />
         <span style={{ flex: 1 }}>Custom subject challenges</span>
-        <ChevronRight size={14} color="#6B6457" />
+        <ChevronRight size={14} className="ico-muted" />
       </button>
       <button className="tap" onClick={onExportImport} style={{ width: '100%', marginBottom: 8, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
         <Download size={14} color="#3B5C6B" />
         <span style={{ flex: 1 }}>Backup / restore data</span>
-        <ChevronRight size={14} color="#6B6457" />
+        <ChevronRight size={14} className="ico-muted" />
       </button>
       <button className="tap" onClick={onSyncTransfer} style={{ width: '100%', marginBottom: 8, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
         <Users size={14} color="#8E4585" />
         <span style={{ flex: 1 }}>{getStoredUsername() ? `Account: ${getStoredUsername()}` : 'Account & sync'}</span>
-        <ChevronRight size={14} color="#6B6457" />
+        <ChevronRight size={14} className="ico-muted" />
       </button>
       <button className="tap" onClick={onDiagnostics} style={{ width: '100%', marginBottom: 8, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
         <Activity size={14} color="#4A6741" />
         <span style={{ flex: 1 }}>Diagnostics</span>
-        <ChevronRight size={14} color="#6B6457" />
+        <ChevronRight size={14} className="ico-muted" />
       </button>
       <button className="tap" onClick={onResetDay} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
         <RotateCcw size={14} color="#B8460E" />
         <span style={{ flex: 1 }}>Reset today</span>
-        <ChevronRight size={14} color="#6B6457" />
+        <ChevronRight size={14} className="ico-muted" />
       </button>
     </ModalShell>
   );

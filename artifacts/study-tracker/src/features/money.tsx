@@ -826,7 +826,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
             </div>
             {accounts.length === 0 ? (
               <button className="tap" onClick={onAddAccount} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', textAlign: 'left' }}>
-                <CreditCard size={14} color="#6B6457" /><span className="small" style={{ flex: 1 }}>Add a bank account or credit card</span><ChevronRight size={14} color="#6B6457" />
+                <CreditCard size={14} className="ico-muted" /><span className="small" style={{ flex: 1 }}>Add a bank account or credit card</span><ChevronRight size={14} className="ico-muted" />
               </button>
             ) : (
               <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 4, scrollbarWidth: 'none' }}>
@@ -840,7 +840,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
                     <button key={acc.id} onClick={() => onEditAccount(acc)} style={{ flexShrink: 0, width: 172, padding: 16, borderRadius: 14, border: 'none', cursor: 'pointer', textAlign: 'left', background: isCredit ? 'var(--bg-inset2)' : (acc.color || '#1A1A2E'), boxShadow: '0 2px 10px rgba(0,0,0,0.13)' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                         <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: isCredit ? 'var(--text-muted)' : 'rgba(245,240,230,0.65)' }}>{isCredit ? 'Credit' : acc.type === 'savings' ? 'Savings' : 'Checking'}</span>
-                        {isCredit ? <CreditCard size={13} color="#6B6457" /> : <Wallet size={13} color="rgba(245,240,230,0.6)" />}
+                        {isCredit ? <CreditCard size={13} className="ico-muted" /> : <Wallet size={13} color="rgba(245,240,230,0.6)" />}
                       </div>
                       <div style={{ fontSize: 11, color: isCredit ? 'var(--text-muted)' : 'rgba(245,240,230,0.7)', marginBottom: 3 }}>{acc.bank || acc.name}</div>
                       {!isCredit && <div style={{ fontSize: 10, color: 'rgba(245,240,230,0.55)', marginBottom: 4 }}>{acc.name}</div>}
@@ -872,7 +872,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
           </div>
         ) : (
           <button className="tap" onClick={onBudget} style={{ width: '100%', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', textAlign: 'left' }}>
-            <Target size={14} color="#8E4585" /><span className="small" style={{ flex: 1 }}>Set a monthly budget to track spending</span><ChevronRight size={14} color="#6B6457" />
+            <Target size={14} color="#8E4585" /><span className="small" style={{ flex: 1 }}>Set a monthly budget to track spending</span><ChevronRight size={14} className="ico-muted" />
           </button>
         );
 
@@ -885,7 +885,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
         if (budgeted.length === 0) {
           return (
             <button className="tap" onClick={onCategoryBudgets} style={{ width: '100%', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', textAlign: 'left' }}>
-              <Target size={14} color="#6E5C8E" /><span className="small" style={{ flex: 1 }}>Set per-category budgets (e.g. Dining out $200/mo)</span><ChevronRight size={14} color="#6B6457" />
+              <Target size={14} color="#6E5C8E" /><span className="small" style={{ flex: 1 }}>Set per-category budgets (e.g. Dining out $200/mo)</span><ChevronRight size={14} className="ico-muted" />
             </button>
           );
         }
@@ -1017,7 +1017,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
             )}
             {allDebtItems.length === 0 ? (
               <button className="tap" onClick={onAddDebt} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', textAlign: 'left', background: 'transparent', border: 'none' }}>
-                <CircleDollarSign size={14} color="#6B6457" /><span className="small muted" style={{ flex: 1 }}>Track a loan or credit card balance</span><ChevronRight size={14} color="#6B6457" />
+                <CircleDollarSign size={14} className="ico-muted" /><span className="small muted" style={{ flex: 1 }}>Track a loan or credit card balance</span><ChevronRight size={14} className="ico-muted" />
               </button>
             ) : (
               <>
@@ -1102,7 +1102,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
             </div>
             {totalExpected === 0 ? (
               <button className="tap" onClick={onEditIncome} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '10px 0', textAlign: 'left', background: 'transparent', border: 'none' }}>
-                <TrendingUp size={14} color="#6B6457" /><span className="small muted" style={{ flex: 1 }}>Set your income to see debt payoff projections</span><ChevronRight size={14} color="#6B6457" />
+                <TrendingUp size={14} className="ico-muted" /><span className="small muted" style={{ flex: 1 }}>Set your income to see debt payoff projections</span><ChevronRight size={14} className="ico-muted" />
               </button>
             ) : (
               <>
@@ -1124,7 +1124,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
           <button className="tap" onClick={onTaxModal} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', textAlign: 'left', borderRadius: 10, marginBottom: 14 }}>
             <span style={{ fontSize: 22 }}>🧾</span>
             <div style={{ flex: 1 }}><div className="small" style={{ fontWeight: 600 }}>Tax tracker</div><div className="tiny muted">1099 entries · CA + Federal estimate · Quarterly payments</div></div>
-            <ChevronRight size={14} color="#6B6457" />
+            <ChevronRight size={14} className="ico-muted" />
           </button>
         );
 

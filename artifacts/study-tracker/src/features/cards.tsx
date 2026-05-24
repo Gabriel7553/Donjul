@@ -85,7 +85,7 @@ export function MicrosCard({ targets, totals }: { targets: Record<string, number
             <div className="mono tiny muted">{coverage}% essentials covered · tap to {open ? 'hide' : 'see'} details</div>
           </div>
         </div>
-        {open ? <ChevronUp size={16} color="#6B6457" /> : <ChevronDown size={16} color="#6B6457" />}
+        {open ? <ChevronUp size={16} className="ico-muted" /> : <ChevronDown size={16} className="ico-muted" />}
       </button>
       {open && (
         <div style={{ marginTop: 12 }}>
