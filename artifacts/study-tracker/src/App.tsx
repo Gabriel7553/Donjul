@@ -51,6 +51,16 @@ export default function App() {
   const [water, setWater] = useState<WaterLog>({});
   const [exercise, setExercise] = useState<any>({});
   const [modal, setModal] = useState<any>(null);
+  const [systemDark, setSystemDark] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-color-scheme: dark)')?.matches);
+
+  // Track the OS color-scheme so the "Auto" theme can follow it live.
+  useEffect(() => {
+    const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!mq) return;
+    const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+    mq.addEventListener?.('change', handler);
+    return () => mq.removeEventListener?.('change', handler);
+  }, []);
 
   // If the active tab gets hidden from the nav, fall back to Today.
   useEffect(() => {
@@ -629,7 +639,7 @@ export default function App() {
 
   const showWeekly = isSunday() && weeklyAck.lastAck !== todayStr() && !modal;
 
-  const isDark = settings.theme === 'dark';
+  const isDark = settings.theme === 'dark' || (settings.theme === 'auto' && systemDark);
 
   return (
     <div className={`app${isDark ? ' dark' : ''}`}>

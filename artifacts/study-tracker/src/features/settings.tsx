@@ -726,15 +726,20 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
         <span className="small">Appearance</span>
         <div className="row" style={{ gap: 6 }}>
           <button
-            className={`tap${draft.theme !== 'dark' ? ' active' : ''}`}
-            style={{ padding: '4px 12px', fontSize: 12 }}
+            className={`tap${(!draft.theme || draft.theme === 'light') ? ' active' : ''}`}
+            style={{ padding: '4px 11px', fontSize: 12 }}
             onClick={() => update({ theme: 'light' })}
           >☀️ Light</button>
           <button
             className={`tap${draft.theme === 'dark' ? ' active' : ''}`}
-            style={{ padding: '4px 12px', fontSize: 12 }}
+            style={{ padding: '4px 11px', fontSize: 12 }}
             onClick={() => update({ theme: 'dark' })}
           >🌙 Dark</button>
+          <button
+            className={`tap${draft.theme === 'auto' ? ' active' : ''}`}
+            style={{ padding: '4px 11px', fontSize: 12 }}
+            onClick={() => update({ theme: 'auto' })}
+          >🌗 Auto</button>
         </div>
       </div>
 
