@@ -10,7 +10,7 @@ import {
   Droplets, Utensils, Bike, Copy,
 } from 'lucide-react';
 import { pad, todayStr, nowHHMM, diffDays, addMinutes, fmtTime, fmtDate, fmtShortDate, timeToMins, isSunday, dayOfWeek } from '../lib/date';
-import { getRequiredDailyMins, expectedTotal, doneThisWeek, doneTotal, targetTotalByDeadline, subjectGoalKind, projectedDate, daysLeftInWeek, buildSchedule } from '../lib/study';
+import { getRequiredDailyMins, expectedTotal, doneThisWeek, doneTotal, targetTotalByDeadline, subjectGoalKind, projectedDate, buildSchedule } from '../lib/study';
 import { ICON_MAP } from '../lib/defaults';
 import { ModalShell, useCurrentTime } from '../ui';
 import { MacrosCard, MicrosCard } from './cards';
@@ -319,7 +319,6 @@ function Schedule({ settings, daily, totals, onLog, subjectKeys, nowMins, checki
 
 function CatchUpBanner({ settings, totals, daily, subjectKeys }: any) {
   const today = todayStr();
-  const weekDaysLeft = daysLeftInWeek();
 
   const items = (subjectKeys as string[]).flatMap((k: string) => {
     const s = settings.subjects[k];
@@ -332,9 +331,7 @@ function CatchUpBanner({ settings, totals, daily, subjectKeys }: any) {
     const extraPerDay = Math.max(0, reqDaily - originalTarget);
     // Show entry when meaningfully behind OR required daily is higher than original
     if (deficit < 5 && extraPerDay < 3) return [];
-    // Spread: extra mins/day this week to absorb the deficit
-    const weeklyExtra = weekDaysLeft > 0 ? Math.ceil(deficit / weekDaysLeft) : 0;
-    return [{ key: k, name: s.name, accent: s.accent, reqDaily, originalTarget, extraPerDay, daysLeft, deficit: Math.round(deficit), weeklyExtra, deadline: s.deadline }];
+    return [{ key: k, name: s.name, accent: s.accent, reqDaily, originalTarget, extraPerDay, daysLeft, deficit: Math.round(deficit), deadline: s.deadline }];
   });
 
   if (items.length === 0) return null;
@@ -355,10 +352,7 @@ function CatchUpBanner({ settings, totals, daily, subjectKeys }: any) {
           </div>
           <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
             {b.extraPerDay > 0 && (
-              <span className="mono tiny" style={{ color: '#B8460E' }}>↑ +{b.extraPerDay}m vs plan</span>
-            )}
-            {b.weeklyExtra > 0 && weekDaysLeft > 1 && (
-              <span className="mono tiny muted">· spread +{b.weeklyExtra}m/day × {weekDaysLeft} days this week</span>
+              <span className="mono tiny" style={{ color: '#B8460E' }}>↑ +{b.extraPerDay}m over your usual {b.originalTarget}m</span>
             )}
             <span className="mono tiny muted">· {b.daysLeft}d to {fmtShortDate(b.deadline)}</span>
           </div>
@@ -405,16 +399,16 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, c
         if (weeklyMet) { status = `Done this week · ${weekDone}/${weeklyDays}`; sColor = '#4A6741'; sBg = 'var(--tint-good)'; }
         else if (countComplete) { status = 'Complete'; sColor = '#4A6741'; sBg = 'var(--tint-good)'; }
         else if (showPace) {
-          // Use projected-vs-deadline gap — more accurate than elapsed-time comparison.
-          if (!proj || proj.projected === null) {
+          // Derive from done-vs-expected-so-far, the SAME measure the progress bar's
+          // marker shows, so the pill and the bar can never contradict each other.
+          if (totalDone <= 0 && expected <= 0) {
             status = 'no data yet'; sColor = '#6B6457'; sBg = 'var(--tint-cream)';
+          } else if (daysOff < 1) {
+            status = 'on pace'; sColor = '#4A6741'; sBg = 'var(--tint-good)';
+          } else if (diff >= 0) {
+            status = `${daysOff.toFixed(1)}d ahead`; sColor = '#4A6741'; sBg = 'var(--tint-good)';
           } else {
-            // diffDays(toDate, fromDate): positive = toDate is further in the future
-            const projGap = diffDays(proj.projected, proj.deadline); // pos = behind, neg = ahead
-            const daysOff = Math.abs(projGap);
-            if (daysOff < 1) { status = 'on pace'; sColor = '#4A6741'; sBg = 'var(--tint-good)'; }
-            else if (projGap < 0) { status = `${daysOff.toFixed(1)}d ahead`; sColor = '#4A6741'; sBg = 'var(--tint-good)'; }
-            else { status = `${daysOff.toFixed(1)}d behind`; sColor = '#B8460E'; sBg = 'var(--tint-warm)'; }
+            status = `${daysOff.toFixed(1)}d behind`; sColor = '#B8460E'; sBg = 'var(--tint-warm)';
           }
         } else { status = `${weekDone}/${weeklyDays} this week`; }
 
@@ -446,9 +440,9 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, c
 
             {showPace ? (
               <>
-                <div className="progress-bar">
+                <div className="progress-bar" title={`You're at ${Math.round(pct)}% · should be at ${Math.round(expectedPct)}% by today`}>
                   <div className="progress-fill" style={{ width: `${pct}%`, background: subj.accent }} />
-                  <div className="progress-marker" style={{ left: `${expectedPct}%` }} />
+                  <div className="progress-marker" style={{ left: `${expectedPct}%` }} title="Where you should be today" />
                 </div>
                 {(() => {
                   const reqDaily = getRequiredDailyMins(k, settings, totals, daily);
@@ -465,9 +459,9 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, c
                         )}
                         {daysLeft && <span className="mono tiny muted">· {daysLeft}d left</span>}
                       </div>
-                      <span className="mono tiny" style={{ color: isBehind ? '#B8460E' : '#4A6741', fontWeight: 600 }}>
+                      <span className="mono tiny" style={{ color: isBehind ? '#B8460E' : '#4A6741', fontWeight: 600 }} title={`Aim for ${reqDaily} min on each study day to finish by ${fmtShortDate(subj.deadline)}${extraPerDay > 0 ? ` — ${extraPerDay} over your usual ${subj.target}m to catch up` : ''}`}>
                         {isBehind && <AlertTriangle size={10} style={{ verticalAlign: 'middle', marginRight: 3 }} />}
-                        {reqDaily}m/day{extraPerDay > 0 ? ` (+${extraPerDay})` : ''}
+                        {reqDaily}m/day{extraPerDay > 0 ? ` (+${extraPerDay} catch-up)` : ''}
                       </span>
                     </div>
                   );
@@ -657,10 +651,21 @@ function ChallengeCard({ settings, workout }: any) {
   const weekNum = Math.ceil(dayNum / 7);
   const isDeloadWeek = weekNum === ch.deloadWeek;
   const pct = (dayNum / ch.days) * 100;
-  const sessions = Object.keys(workout.logs || {}).filter((d: string) => {
+  const logDates = Object.keys(workout.logs || {}).filter((d: string) => {
     const dn = diffDays(d, ch.startDate);
     return dn >= 0 && dn < ch.days;
-  }).length;
+  }).sort();
+  const sessions = logDates.length;
+  // The challenge is a calendar program (it counts days, not a streak). Surface actual
+  // workout recency so a missed session is visible instead of silently "still going".
+  const lastSession = logDates[logDates.length - 1];
+  const todayLogged = !!(workout.logs || {})[todayStr()];
+  const daysSinceLast = lastSession ? diffDays(todayStr(), lastSession) : null;
+  let recency: { text: string; color: string };
+  if (todayLogged) recency = { text: 'logged today', color: '#4A6741' };
+  else if (daysSinceLast === null) recency = { text: 'no sessions yet', color: 'var(--text-muted)' };
+  else if (daysSinceLast <= 1) recency = { text: 'last: yesterday', color: 'var(--text-muted)' };
+  else recency = { text: `${daysSinceLast}d since a session`, color: '#B8460E' };
 
   return (
     <div className="card" style={{ borderLeft: `3px solid #8E4585` }}>
@@ -676,7 +681,7 @@ function ChallengeCard({ settings, workout }: any) {
       </div>
       <div className="between">
         <span className="mono tiny muted">Week {weekNum} {isDeloadWeek && '· DELOAD'}</span>
-        <span className="mono tiny muted">{sessions} sessions logged</span>
+        <span className="mono tiny" style={{ color: recency.color }}>{sessions} sessions · {recency.text}</span>
       </div>
       {isDeloadWeek && (
         <p className="muted tiny" style={{ marginTop: 8, lineHeight: 1.4 }}>

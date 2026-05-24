@@ -70,12 +70,15 @@ export function getRequiredDailyMins(k: string, settings: any, totals: any, dail
   const target = s.courseHours ? s.courseHours * 60 : targetTotalByDeadline(k, settings);
   const remaining = Math.max(0, target - totalDone);
   const daysLeft = Math.max(1, diffDays(s.deadline, todayStr()));
+  // Spread remaining work over the STUDY days left (weeklyDays-aware), not raw calendar
+  // days — otherwise a 3×/week subject's daily target is badly understated.
+  const studyDaysLeft = Math.max(1, Math.round(daysLeft * ((s.weeklyDays || 7) / 7)));
 
   const spreadSetting = settings.catchupSpread ?? 'deadline';
 
   if (spreadSetting === 'deadline') {
-    // Current behaviour: remaining content ÷ days left (optimal gradual spread)
-    return Math.ceil(remaining / daysLeft);
+    // Current behaviour: remaining content ÷ study days left (optimal gradual spread)
+    return Math.ceil(remaining / studyDaysLeft);
   }
 
   // Windowed catch-up: keep base pace, sprint the deficit over a smaller window
@@ -95,7 +98,7 @@ export function getRequiredDailyMins(k: string, settings: any, totals: any, dail
   const catchWindow = Math.min(Math.max(1, spreadWindow), daysLeft);
   const catchupTarget = base + Math.ceil(deficit / catchWindow);
   // Must still finish all content by deadline, so take the larger of the two
-  const minRequired = Math.ceil(remaining / daysLeft);
+  const minRequired = Math.ceil(remaining / studyDaysLeft);
   return Math.max(catchupTarget, minRequired);
 }
 
@@ -104,17 +107,21 @@ export function daysLeftInWeek(): number {
   return 7 - d.getDay(); // days from today through Saturday (inclusive)
 }
 
+// Minutes you "should" have logged by the END of today — counts today, and caps at
+// the deadline so it equals targetTotalByDeadline on the final day (it previously
+// fell one day short of 100%, which skewed every on-pace readout).
 export function expectedTotal(subjectKey: string, settings: any) {
   const s = settings.subjects[subjectKey];
   if (!s) return 0;
   if (s.courseHours && s.deadline) {
     const totalMins = s.courseHours * 60;
     const totalDays = Math.max(1, diffDays(s.deadline, settings.startDate) + 1);
-    const elapsedDays = Math.max(0, diffDays(todayStr(), settings.startDate));
+    const elapsedDays = Math.max(1, Math.min(totalDays, diffDays(todayStr(), settings.startDate) + 1));
     return Math.round((elapsedDays / totalDays) * totalMins);
   }
-  const days = Math.max(0, diffDays(todayStr(), settings.startDate));
-  return Math.round(days * s.target * (s.weeklyDays / 7));
+  let days = diffDays(todayStr(), settings.startDate) + 1;
+  if (s.deadline) days = Math.min(days, diffDays(s.deadline, settings.startDate) + 1);
+  return Math.round(Math.max(1, days) * s.target * (s.weeklyDays / 7));
 }
 export function targetTotalByDeadline(subjectKey: string, settings: any) {
   const s = settings.subjects[subjectKey];
