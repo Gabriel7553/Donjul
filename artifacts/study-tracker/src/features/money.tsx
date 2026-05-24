@@ -681,6 +681,8 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
   const [filterCatId, setFilterCatId] = useState('');
   const [filterAcctId, setFilterAcctId] = useState('');
   const [filterType, setFilterType] = useState('');
+  const [filterTag, setFilterTag] = useState('');
+  const allTags = useMemo(() => [...new Set((spending.entries || []).map((e: any) => e.tag).filter(Boolean))].sort(), [spending.entries]);
 
   const recent = useMemo(
     () => [...spending.entries]
@@ -744,14 +746,15 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
       const cat = catMap[e.categoryId];
       if (txFilter.trim()) {
         const q = txFilter.toLowerCase();
-        if (!(e.name || '').toLowerCase().includes(q) && !(cat?.name || '').toLowerCase().includes(q)) return false;
+        if (!(e.name || '').toLowerCase().includes(q) && !(cat?.name || '').toLowerCase().includes(q) && !(e.tag || '').toLowerCase().includes(q)) return false;
       }
       if (filterCatId && e.categoryId !== filterCatId) return false;
       if (filterAcctId && e.accountId !== filterAcctId) return false;
       if (filterType && e.type !== filterType) return false;
+      if (filterTag && e.tag !== filterTag) return false;
       return true;
     });
-  }, [recent, txFilter, filterCatId, filterAcctId, filterType, catMap]);
+  }, [recent, txFilter, filterCatId, filterAcctId, filterType, filterTag, catMap]);
 
   const sectionOrder = useMemo(() => {
     const saved: string[] = spending.sectionOrder || [];
@@ -761,11 +764,11 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
   // Export the full transaction history to a CSV download (resolves category/account names).
   const exportCsv = () => {
     const esc = (v: any) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    const rows: any[][] = [['Date', 'Type', 'Amount', 'Category', 'Account', 'Name', 'Recurring']];
+    const rows: any[][] = [['Date', 'Type', 'Amount', 'Category', 'Account', 'Name', 'Tag', 'Recurring']];
     for (const e of [...spending.entries].sort((a: any, b: any) => String(b.date).localeCompare(String(a.date)))) {
       const cat = catMap[e.categoryId];
       const acct = accounts.find((a: any) => a.id === e.accountId);
-      rows.push([e.date, e.type === 'in' ? 'Income' : 'Expense', e.amount, cat?.name || 'Other', acct?.name || '', e.name || '', e.recurring ? 'yes' : '']);
+      rows.push([e.date, e.type === 'in' ? 'Income' : 'Expense', e.amount, cat?.name || 'Other', acct?.name || '', e.name || '', e.tag || '', e.recurring ? 'yes' : '']);
     }
     const csv = rows.map((r) => r.map(esc).join(',')).join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
@@ -1218,7 +1221,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
         );
 
       case 'transactions': {
-        const hasFilters = !!(txFilter.trim() || filterCatId || filterAcctId || filterType);
+        const hasFilters = !!(txFilter.trim() || filterCatId || filterAcctId || filterType || filterTag);
         return (
           <div className="card">
             <div className="between" style={{ marginBottom: 10 }}>
@@ -1251,12 +1254,31 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
                   {accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
               )}
+              {allTags.length > 0 && (
+                <select value={filterTag} onChange={(e) => setFilterTag(e.target.value)} style={{ flex: 1, minWidth: 100, padding: '6px 8px', fontSize: 12, borderRadius: 8, border: '1px solid var(--border)', background: filterTag ? '#1A1A2E' : undefined, color: filterTag ? '#F5F0E6' : undefined }}>
+                  <option value="">All tags</option>
+                  {allTags.map((t: any) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              )}
               {hasFilters && (
-                <button className="tap" style={{ padding: '5px 10px', fontSize: 11, color: '#B8460E' }} onClick={() => { setTxFilter(''); setFilterCatId(''); setFilterAcctId(''); setFilterType(''); }}>
+                <button className="tap" style={{ padding: '5px 10px', fontSize: 11, color: '#B8460E' }} onClick={() => { setTxFilter(''); setFilterCatId(''); setFilterAcctId(''); setFilterType(''); setFilterTag(''); }}>
                   <X size={11} style={{ verticalAlign: 'middle', marginRight: 3 }} />Clear
                 </button>
               )}
             </div>
+            {hasFilters && filteredRecent.length > 0 && (() => {
+              const fSpent = filteredRecent.filter((e: any) => e.type === 'out').reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
+              const fIn = filteredRecent.filter((e: any) => e.type === 'in').reduce((s: number, e: any) => s + (Number(e.amount) || 0), 0);
+              return (
+                <div className="between" style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 8, background: 'var(--bg-inset)' }}>
+                  <span className="tiny muted">{filterTag ? `Tagged "${filterTag}"` : 'Filtered'} · {filteredRecent.length}</span>
+                  <span className="mono small" style={{ fontWeight: 600 }}>
+                    {fSpent > 0 && <span style={{ color: '#B8460E' }}>{fmtMoney(fSpent)} spent</span>}
+                    {fIn > 0 && <span style={{ color: '#3F7A4F' }}>{fSpent > 0 ? ' · ' : ''}{fmtMoney(fIn)} in</span>}
+                  </span>
+                </div>
+              );
+            })()}
             {filteredRecent.length === 0 ? (
               <div className="muted small" style={{ padding: '12px 0', textAlign: 'center' }}>
                 {recent.length === 0
@@ -1273,7 +1295,7 @@ export function MoneyTab({ spending, tax, onAdd, onEdit, onDelete, onBudget, onC
                     <div style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, background: (cat?.color || '#6B6457') + '22', color: cat?.color || '#6B6457', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{isIn ? <ArrowDownRight size={15} /> : <ArrowUpRight size={15} />}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="small" style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name || (isIn ? 'Income' : 'Expense')}</div>
-                      <div className="tiny muted">{cat?.name || 'Other'} · {e.date}{e.recurring ? ' · recurring' : ''}{acct ? ` · ${acct.name}` : ''}</div>
+                      <div className="tiny muted">{cat?.name || 'Other'} · {e.date}{e.recurring ? ' · recurring' : ''}{acct ? ` · ${acct.name}` : ''}{e.tag ? ` · #${e.tag}` : ''}</div>
                     </div>
                     <span className="mono small" style={{ color: isIn ? '#3F7A4F' : '#B8460E', fontWeight: 600 }}>{isIn ? '+' : '−'}{fmtMoney(e.amount).replace('−', '')}</span>
                   </button>
@@ -1475,6 +1497,8 @@ export function AddTransactionModal({ entry, defaultType, spending, onSave, onDe
   const [recurring, setRecurring] = useState<boolean>(!!entry?.recurring);
   const [note, setNote] = useState<string>(entry?.note || '');
   const [accountId, setAccountId] = useState<string>(entry?.accountId || '');
+  const [tag, setTag] = useState<string>(entry?.tag || '');
+  const existingTags = useMemo(() => [...new Set((spending.entries || []).map((e: any) => e.tag).filter(Boolean))].sort(), [spending.entries]);
 
   const allAccounts: any[] = spending.accounts || [];
   const relevantAccounts = type === 'out' ? allAccounts : allAccounts.filter((a: any) => a.type !== 'credit');
@@ -1496,6 +1520,7 @@ export function AddTransactionModal({ entry, defaultType, spending, onSave, onDe
       type, amount: Math.round(amt * 100) / 100, name: name.trim(), categoryId, date, recurring,
       note: note.trim() || undefined,
       accountId: accountId || undefined,
+      tag: tag.trim() || undefined,
     };
     onSave(next);
     onClose();
@@ -1550,6 +1575,14 @@ export function AddTransactionModal({ entry, defaultType, spending, onSave, onDe
         placeholder={type === 'in' ? 'Paycheck, gig, dividend…' : 'Coffee, Netflix, rent…'}
         style={{ marginBottom: 12 }}
       />
+
+      <label>Tag (optional)</label>
+      <input
+        type="text" value={tag} onChange={(e) => setTag(e.target.value)}
+        placeholder="e.g. Honey, Trip — group across categories"
+        list="tx-tags" style={{ marginBottom: 12 }}
+      />
+      <datalist id="tx-tags">{existingTags.map((t: any) => <option key={t} value={t} />)}</datalist>
 
       <label>Category</label>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6, marginBottom: 12 }}>
