@@ -671,6 +671,7 @@ export default function App() {
               const cur = daily.skippedToday || [];
               if (!cur.includes(k)) await saveDaily({ ...daily, skippedToday: [...cur, k] });
             }}
+            onAddSubject={() => setModal({ type: 'editSubject', key: null })}
           />
         )}
         {tab === 'body' && (

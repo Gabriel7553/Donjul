@@ -15,7 +15,7 @@ import { ICON_MAP } from '../lib/defaults';
 import { ModalShell, useCurrentTime } from '../ui';
 import { MacrosCard, MicrosCard } from './cards';
 
-export function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, customChallenges, onWake, onStatus, onLogTime, onBusy, onBack, onSwitch, onLogMeal, onScheduleStart, onResetMacros, onMarkDone, onFocusStart, onFocusStop, onCoach, onRestDay, onManageChallenges, onSkipToday }: any) {
+export function TodayTab({ settings, daily, totals, streaks, meals, workout, checkins, customChallenges, onWake, onStatus, onLogTime, onBusy, onBack, onSwitch, onLogMeal, onScheduleStart, onResetMacros, onMarkDone, onFocusStart, onFocusStop, onCoach, onRestDay, onManageChallenges, onSkipToday, onAddSubject }: any) {
   const now = useCurrentTime();
   const nowMins = timeToMins(now);
   const subjectKeys = settings.subjectOrder.filter((k: string) => settings.subjects[k] && !settings.subjects[k].archived && !settings.subjects[k].deletedAt);
@@ -61,7 +61,7 @@ export function TodayTab({ settings, daily, totals, streaks, meals, workout, che
             const blocks: Record<string, any> = {
               schedule: (
                 <>
-                  <Schedule settings={settings} daily={daily} totals={totals} onLog={onLogTime} subjectKeys={subjectKeys} nowMins={nowMins} checkins={checkins} />
+                  <Schedule settings={settings} daily={daily} totals={totals} onLog={onLogTime} subjectKeys={subjectKeys} nowMins={nowMins} checkins={checkins} onAddSubject={onAddSubject} />
                   <CatchUpBanner settings={settings} totals={totals} daily={daily} subjectKeys={subjectKeys} />
                 </>
               ),
@@ -221,16 +221,30 @@ function FocusTimerCard({ focus, subject, onStop }: any) {
 }
 
 
-function Schedule({ settings, daily, totals, onLog, subjectKeys, nowMins, checkins }: any) {
+function Schedule({ settings, daily, totals, onLog, subjectKeys, nowMins, checkins, onAddSubject }: any) {
   const blocks = useMemo(() => buildSchedule(settings, daily, subjectKeys, checkins, totals), [settings, daily, subjectKeys, checkins, totals]);
 
   if (blocks.length === 0) {
+    const noSubjects = subjectKeys.length === 0;
     return (
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="h2" style={{ marginBottom: 10 }}>Today's plan</div>
-        <p className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Award size={14} /> All done for today. Anything extra counts as bonus.
-        </p>
+        {noSubjects ? (
+          <>
+            <p className="muted small" style={{ lineHeight: 1.5, marginBottom: 12 }}>
+              No subjects yet. Add one to build your daily schedule — targets, days per week, and catch-up are handled automatically.
+            </p>
+            {onAddSubject && (
+              <button className="btn btn-ghost" onClick={onAddSubject} style={{ width: '100%' }}>
+                <Plus size={14} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Add a subject
+              </button>
+            )}
+          </>
+        ) : (
+          <p className="muted small" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Award size={14} /> All done for today. Anything extra counts as bonus.
+          </p>
+        )}
       </div>
     );
   }
