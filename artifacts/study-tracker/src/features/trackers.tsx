@@ -424,6 +424,10 @@ export function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, 
     todayWorkoutIdx = activeSplit.indexOf(todayWorkout);
   }
   const todayLog = workout.logs[todayStr()];
+  // After the first log of the day, sequence mode advances to the NEXT session, so today's
+  // log belongs to the previous one. Only treat it as "this session's" when names match —
+  // otherwise the checkmark, per-exercise sets, and button would misfire on the next workout.
+  const loggedToday = todayLog && todayWorkout && todayLog.name === todayWorkout.name ? todayLog : null;
 
   const recentLogs = Object.entries(workout.logs).sort((a: any, b: any) => b[0].localeCompare(a[0])).slice(0, 5);
 
@@ -505,10 +509,10 @@ export function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, 
               </div>
               <div className="h3">{todayWorkout.name}</div>
             </div>
-            {todayLog && <Check size={20} color="#4A6741" />}
+            {loggedToday && <Check size={20} color="#4A6741" />}
           </div>
           {todayWorkout.exercises.map((ex: any, i: number) => {
-            const logged = todayLog?.exercises?.[i];
+            const logged = loggedToday?.exercises?.[i];
             const lastW = lastWeights[ex.name];
             return (
               <div key={i} onClick={() => setDetailEx(ex.name)} style={{ padding: '10px 0', borderBottom: i < todayWorkout.exercises.length - 1 ? '1px solid var(--border)' : 'none', cursor: 'pointer' }}>
@@ -530,7 +534,7 @@ export function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, 
             );
           })}
           <button className="btn" onClick={() => onLogWorkout(todayWorkoutIdx)} style={{ width: '100%', marginTop: 14 }}>
-            {todayLog ? <><Edit3 size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Edit today's log</> : <><Dumbbell size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Log workout</>}
+            {loggedToday ? <><Edit3 size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Edit today's log</> : <><Dumbbell size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Log workout</>}
           </button>
           {mode === 'sequence' && (
             <button className="btn btn-ghost" onClick={advanceSequence} style={{ width: '100%', marginTop: 8 }}>
