@@ -41,7 +41,8 @@ export function doneTotal(subjectKey: string, checkins: any) {
 export function projectedDate(subjectKey: string, settings: any, totals: any, daily: any) {
   const s = settings.subjects[subjectKey];
   if (!s || !s.deadline) return null;
-  const totalDone = (totals[subjectKey] || 0) + (daily?.completed[subjectKey] || 0);
+  // `totals` already includes today's logged minutes, so don't add daily.completed again.
+  const totalDone = totals[subjectKey] || 0;
   const target = targetTotalByDeadline(subjectKey, settings);
   const daysElapsed = Math.max(1, diffDays(todayStr(), settings.startDate) + 1);
   const avgPerDay = totalDone / daysElapsed;
@@ -66,7 +67,8 @@ export const CATCHUP_SPREAD_OPTIONS = [
 export function getRequiredDailyMins(k: string, settings: any, totals: any, daily: any): number {
   const s = settings.subjects[k];
   if (!s || !s.deadline) return s?.target || 0;
-  const totalDone = (totals[k] || 0) + (daily?.completed[k] || 0);
+  // `totals` already includes today's logged minutes, so don't add daily.completed again.
+  const totalDone = totals[k] || 0;
   const target = s.courseHours ? s.courseHours * 60 : targetTotalByDeadline(k, settings);
   const remaining = Math.max(0, target - totalDone);
   const daysLeft = Math.max(1, diffDays(s.deadline, todayStr()));

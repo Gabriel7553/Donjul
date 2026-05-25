@@ -531,12 +531,12 @@ export function SettingsModal({ settings, body, onSave, onClose, onEditSubject, 
 
       <div className="h2" style={{ marginBottom: 8, marginTop: 8 }}>Macros</div>
       <div className="row" style={{ gap: 8, marginBottom: 8 }}>
-        <div style={{ flex: 1 }}><label>Protein (g)</label><input type="number" value={draft.macroTargets.protein} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, protein: parseInt(e.target.value) || 0 } })} /></div>
-        <div style={{ flex: 1 }}><label>Calories</label><input type="number" value={draft.macroTargets.calories} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, calories: parseInt(e.target.value) || 0 } })} /></div>
+        <div style={{ flex: 1 }}><label>Protein (g)</label><input type="number" value={draft.macroTargets.protein} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, protein: Math.max(0, parseInt(e.target.value) || 0) } })} /></div>
+        <div style={{ flex: 1 }}><label>Calories</label><input type="number" value={draft.macroTargets.calories} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, calories: Math.max(0, parseInt(e.target.value) || 0) } })} /></div>
       </div>
       <div className="row" style={{ gap: 8, marginBottom: 10 }}>
-        <div style={{ flex: 1 }}><label>Carbs (g)</label><input type="number" value={draft.macroTargets.carbs} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, carbs: parseInt(e.target.value) || 0 } })} /></div>
-        <div style={{ flex: 1 }}><label>Fat (g)</label><input type="number" value={draft.macroTargets.fat} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, fat: parseInt(e.target.value) || 0 } })} /></div>
+        <div style={{ flex: 1 }}><label>Carbs (g)</label><input type="number" value={draft.macroTargets.carbs} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, carbs: Math.max(0, parseInt(e.target.value) || 0) } })} /></div>
+        <div style={{ flex: 1 }}><label>Fat (g)</label><input type="number" value={draft.macroTargets.fat} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, fat: Math.max(0, parseInt(e.target.value) || 0) } })} /></div>
       </div>
       {suggested ? (
         <button
@@ -924,18 +924,21 @@ export function EditSubjectModal({ subjectKey, settings, onSave, onClose }: any)
   const [showDetails, setShowDetails] = useState(!isNew);
   const set = (patch: any) => setDraft({ ...draft, ...patch });
 
-  // Auto-plan: pick a pace → compute daily minutes + days/week to finish the course by the deadline.
+  // Auto-plan: pick a pace → set daily minutes + days/week. With total hours + a deadline we
+  // divide the work across the study days left; otherwise we use the pace's default commitment.
   const PACES = [
-    { key: 'relaxed', label: 'Relaxed', days: 3 },
-    { key: 'moderate', label: 'Moderate', days: 5 },
-    { key: 'intense', label: 'Intense', days: 6 },
+    { key: 'relaxed', label: 'Relaxed', days: 3, mins: 20 },
+    { key: 'moderate', label: 'Moderate', days: 5, mins: 35 },
+    { key: 'intense', label: 'Intense', days: 6, mins: 60 },
   ];
-  const planDaily = (hours: any, deadline: any, wkDays: number) => {
+  const planDaily = (hours: any, deadline: any, pace: { days: number; mins: number }) => {
     const totalMin = (Number(hours) || 0) * 60;
-    if (!totalMin || !deadline) return 0;
-    const days = Math.max(1, diffDays(deadline, todayStr()));
-    const studyDays = Math.max(1, Math.round(days * (wkDays / 7)));
-    return Math.max(5, Math.ceil(totalMin / studyDays));
+    if (totalMin && deadline) {
+      const days = Math.max(1, diffDays(deadline, todayStr()));
+      const studyDays = Math.max(1, Math.round(days * (pace.days / 7)));
+      return Math.max(5, Math.ceil(totalMin / studyDays));
+    }
+    return pace.mins;
   };
 
   const handleSave = () => {
@@ -1003,7 +1006,7 @@ export function EditSubjectModal({ subjectKey, settings, onSave, onClose }: any)
 
           <div className="row" style={{ gap: 8, marginBottom: 12 }}>
             {draft.trackingMode === 'time' && (
-              <div style={{ flex: 1 }}><label>Daily (min)</label><input type="number" value={draft.target} onChange={(e) => set({ target: parseInt(e.target.value) || 0 })} /></div>
+              <div style={{ flex: 1 }}><label>Daily (min)</label><input type="number" min="0" value={draft.target} onChange={(e) => set({ target: Math.max(0, parseInt(e.target.value) || 0) })} /></div>
             )}
             <div style={{ flex: 1 }}><label>Days/week</label><input type="number" min="1" max="7" value={draft.weeklyDays} onChange={(e) => set({ weeklyDays: Math.min(7, Math.max(1, parseInt(e.target.value) || 1)) })} /></div>
           </div>
@@ -1017,43 +1020,49 @@ export function EditSubjectModal({ subjectKey, settings, onSave, onClose }: any)
           {goalSel === 'deadline' && (
             <>
               <input type="date" value={draft.deadline || addMonth(todayStr(), 3)} onChange={(e) => set({ deadline: e.target.value })} style={{ marginBottom: 10 }} />
-              {draft.trackingMode === 'time' && (
+              {draft.trackingMode === 'time' && (() => {
+                const effDeadline = draft.deadline || addMonth(todayStr(), 3);
+                const hasHours = draft.courseHours > 0;
+                return (
                 <>
-                  <label>Total course hours <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>(optional — overrides deadline math for progress bar)</span></label>
+                  <label>Total hours to reach goal <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>(optional — set this to plan by content, e.g. a 36h course)</span></label>
                   <input
                     type="number"
                     min="0"
                     step="0.5"
                     value={draft.courseHours ?? ''}
-                    onChange={(e) => set({ courseHours: e.target.value === '' ? null : parseFloat(e.target.value) || null })}
+                    onChange={(e) => set({ courseHours: e.target.value === '' ? null : Math.max(0, parseFloat(e.target.value) || 0) || null })}
                     placeholder="e.g. 36"
                     style={{ marginBottom: 8 }}
                   />
-                  {draft.courseHours > 0 && (
+                  {hasHours && (
                     <p className="muted tiny" style={{ marginBottom: 8, lineHeight: 1.5 }}>
                       Progress bar tracks {draft.courseHours}h ({Math.round(draft.courseHours * 60)}min) of actual content, not estimated study time.
                     </p>
                   )}
-                  {draft.courseHours > 0 && draft.deadline && (
-                    <div style={{ marginBottom: 8, padding: 10, borderRadius: 8, background: 'var(--bg-inset)' }}>
-                      <div className="small" style={{ fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}><Zap size={13} color="#C8932E" /> Auto-plan my schedule</div>
-                      <div className="row" style={{ gap: 6, marginBottom: 8 }}>
-                        {PACES.map((p) => {
-                          const d = planDaily(draft.courseHours, draft.deadline, p.days);
-                          const active = draft.weeklyDays === p.days && draft.target === d;
-                          return (
-                            <button key={p.key} className={`tap ${active ? 'active' : ''}`} style={{ flex: 1, padding: '6px 4px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }} onClick={() => set({ weeklyDays: p.days, target: d })}>
-                              <span style={{ fontSize: 12, fontWeight: 600 }}>{p.label}</span>
-                              <span className="tiny muted">{p.days}d/wk · {d}m</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <p className="muted tiny" style={{ lineHeight: 1.4 }}>Sets your daily minutes &amp; days/week to finish {draft.courseHours}h by {fmtShortDate(draft.deadline)}. You can still tweak the Daily/Days fields above.</p>
+                  <div style={{ marginBottom: 8, padding: 10, borderRadius: 8, background: 'var(--bg-inset)' }}>
+                    <div className="small" style={{ fontWeight: 600, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}><Zap size={13} color="#C8932E" /> Auto-plan my schedule</div>
+                    <div className="row" style={{ gap: 6, marginBottom: 8 }}>
+                      {PACES.map((p) => {
+                        const d = planDaily(draft.courseHours, effDeadline, p);
+                        const active = draft.weeklyDays === p.days && draft.target === d;
+                        return (
+                          <button key={p.key} className={`tap ${active ? 'active' : ''}`} style={{ flex: 1, padding: '6px 4px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }} onClick={() => set({ weeklyDays: p.days, target: d })}>
+                            <span style={{ fontSize: 12, fontWeight: 600 }}>{p.label}</span>
+                            <span className="tiny muted">{p.days}d/wk · {d}m</span>
+                          </button>
+                        );
+                      })}
                     </div>
-                  )}
+                    <p className="muted tiny" style={{ lineHeight: 1.4 }}>
+                      {hasHours
+                        ? <>Sets your daily minutes &amp; days/week to finish {draft.courseHours}h by {fmtShortDate(effDeadline)}. You can still tweak the Daily/Days fields above.</>
+                        : <>Picks your daily minutes &amp; days/week from a pace. Add total hours above to plan precisely toward {fmtShortDate(effDeadline)}.</>}
+                    </p>
+                  </div>
                 </>
-              )}
+                );
+              })()}
             </>
           )}
           {goalSel === 'count' && (
@@ -1635,12 +1644,12 @@ export function Setup({ onComplete, onImport }: any) {
       content: (
         <>
           <div className="row" style={{ gap: 8, marginBottom: 10 }}>
-            <div style={{ flex: 1 }}><label>Protein (g)</label><input type="number" value={draft.macroTargets.protein} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, protein: parseInt(e.target.value) || 0 } })} /></div>
-            <div style={{ flex: 1 }}><label>Calories</label><input type="number" value={draft.macroTargets.calories} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, calories: parseInt(e.target.value) || 0 } })} /></div>
+            <div style={{ flex: 1 }}><label>Protein (g)</label><input type="number" value={draft.macroTargets.protein} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, protein: Math.max(0, parseInt(e.target.value) || 0) } })} /></div>
+            <div style={{ flex: 1 }}><label>Calories</label><input type="number" value={draft.macroTargets.calories} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, calories: Math.max(0, parseInt(e.target.value) || 0) } })} /></div>
           </div>
           <div className="row" style={{ gap: 8 }}>
-            <div style={{ flex: 1 }}><label>Carbs (g)</label><input type="number" value={draft.macroTargets.carbs} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, carbs: parseInt(e.target.value) || 0 } })} /></div>
-            <div style={{ flex: 1 }}><label>Fat (g)</label><input type="number" value={draft.macroTargets.fat} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, fat: parseInt(e.target.value) || 0 } })} /></div>
+            <div style={{ flex: 1 }}><label>Carbs (g)</label><input type="number" value={draft.macroTargets.carbs} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, carbs: Math.max(0, parseInt(e.target.value) || 0) } })} /></div>
+            <div style={{ flex: 1 }}><label>Fat (g)</label><input type="number" value={draft.macroTargets.fat} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, fat: Math.max(0, parseInt(e.target.value) || 0) } })} /></div>
           </div>
           <div className="muted tiny" style={{ marginTop: 10, lineHeight: 1.4 }}>
             Defaults: 170p / 2300cal for recomp. Edit anytime.
