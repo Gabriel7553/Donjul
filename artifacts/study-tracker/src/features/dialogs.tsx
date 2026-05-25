@@ -70,7 +70,7 @@ export function LogTimeModal({ subject, settings, daily, onLog, onSet, onClose, 
       ) : (
         <>
           <label>{mode === 'add' ? 'Minutes to add' : 'Set today\'s total to (minutes)'}</label>
-          <input type="number" min="0" value={mins} onChange={(e) => setMins(parseInt(e.target.value) || 0)} style={{ marginBottom: 12 }} />
+          <input type="number" min="0" value={mins} onChange={(e) => setMins(Math.max(0, parseInt(e.target.value) || 0))} style={{ marginBottom: 12 }} />
           <div className="row" style={{ gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
             {mode === 'add'
               ? [15, 30, 45, 60].map(m => <button key={m} className={`tap ${mins === m ? 'active' : ''}`} onClick={() => setMins(m)}>{m}m</button>)
@@ -133,7 +133,7 @@ export function BusyModal({ onConfirm, onClose, busyPresets, onSavePresets, isSw
           <div className="row" style={{ gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
             {[30, 60, 90, 120, 180].map(m => <button key={m} className={`tap ${mins === m ? 'active' : ''}`} onClick={() => setMins(m)}>{m < 60 ? `${m}m` : `${m / 60}h`}</button>)}
           </div>
-          <input type="number" value={mins} onChange={(e) => setMins(parseInt(e.target.value) || 0)} style={{ marginBottom: 14 }} />
+          <input type="number" min="0" value={mins} onChange={(e) => setMins(Math.max(0, parseInt(e.target.value) || 0))} style={{ marginBottom: 14 }} />
         </>
       )}
       <button className="btn" style={{ width: '100%' }} onClick={confirm}>
@@ -187,7 +187,12 @@ export function AddMeasurementModal({ onSave, onClose, previous }: any) {
       ))}
       <button className="btn" style={{ width: '100%', marginTop: 8 }} onClick={() => {
         const entry: Record<string, any> = { date: todayStr() };
-        Object.entries(values).forEach(([k, v]) => { if (v !== '' && v != null) entry[k] = parseFloat(v); });
+        Object.entries(values).forEach(([k, v]) => {
+          if (v === '' || v == null) return;
+          const n = parseFloat(v as any);
+          if (!Number.isFinite(n)) return;
+          entry[k] = k === 'body_fat' ? Math.min(100, Math.max(0, n)) : Math.max(0, n);
+        });
         onSave(entry);
       }}>
         <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save measurements

@@ -323,7 +323,8 @@ function CatchUpBanner({ settings, totals, daily, subjectKeys }: any) {
   const items = (subjectKeys as string[]).flatMap((k: string) => {
     const s = settings.subjects[k];
     if (!s || s.archived || s.deletedAt || s.trackingMode === 'checkoff' || !s.deadline) return [];
-    const totalDone = (totals[k] || 0) + (daily.completed[k] || 0);
+    // `totals` already includes today's logged minutes.
+    const totalDone = totals[k] || 0;
     const deficit = expectedTotal(k, settings) - totalDone;
     const daysLeft = Math.max(1, diffDays(s.deadline, today));
     const reqDaily = getRequiredDailyMins(k, settings, totals, daily);
@@ -384,7 +385,8 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, c
         const countComplete = goalKind === 'count' && sessionsDone >= (subj.countTotal || 0);
 
         // On-pace metrics only meaningful for timed subjects with a deadline.
-        const totalDone = (totals[k] || 0) + todayDone;
+        // `totals` already includes today's logged minutes, so don't add todayDone again.
+        const totalDone = totals[k] || 0;
         const expected = expectedTotal(k, settings);
         const target = targetTotalByDeadline(k, settings);
         const pct = Math.min(100, (totalDone / Math.max(target, 1)) * 100);

@@ -161,7 +161,7 @@ export function LogMealModal({ meals, settings, onSave, onClose, targetDate, mea
   const logManual = async () => {
     const micros: any = {};
     for (const k of MICRO_KEYS) micros[k] = parseFloat(manualMicros[k]) || 0;
-    await logItem({ name: manual.name || 'Manual entry', source: 'Manual', protein: parseFloat(manual.protein) || 0, carbs: parseFloat(manual.carbs) || 0, fat: parseFloat(manual.fat) || 0, calories: parseFloat(manual.calories) || 0, servingSize: parseFloat(manual.servingSize) || 1, servingUnit: manual.servingUnit || 'serving', ...micros }, qty);
+    await logItem({ name: manual.name || 'Manual entry', source: 'Manual', protein: Math.max(0, parseFloat(manual.protein) || 0), carbs: Math.max(0, parseFloat(manual.carbs) || 0), fat: Math.max(0, parseFloat(manual.fat) || 0), calories: Math.max(0, parseFloat(manual.calories) || 0), servingSize: parseFloat(manual.servingSize) || 1, servingUnit: manual.servingUnit || 'serving', ...micros }, qty);
   };
 
   const partSum = (p: any) => {
@@ -212,7 +212,7 @@ export function LogMealModal({ meals, settings, onSave, onClose, targetDate, mea
     setComboScanIdx(null); setReview(null); setScanState('idle');
   };
   const addPreset = async () => {
-    const p = { id: 'p' + Date.now(), name: newPreset.name, protein: parseFloat(newPreset.protein) || 0, carbs: parseFloat(newPreset.carbs) || 0, fat: parseFloat(newPreset.fat) || 0, calories: parseFloat(newPreset.calories) || 0, source: newPreset.source, servingSize: parseFloat(newPreset.servingSize) || 1, servingUnit: newPreset.servingUnit || 'serving' };
+    const p = { id: 'p' + Date.now(), name: newPreset.name, protein: Math.max(0, parseFloat(newPreset.protein) || 0), carbs: Math.max(0, parseFloat(newPreset.carbs) || 0), fat: Math.max(0, parseFloat(newPreset.fat) || 0), calories: Math.max(0, parseFloat(newPreset.calories) || 0), source: newPreset.source, servingSize: parseFloat(newPreset.servingSize) || 1, servingUnit: newPreset.servingUnit || 'serving' };
     await onSave({ ...meals, presets: [...meals.presets, p] });
     setMode('preset');
     setNewPreset({ name: '', protein: '', carbs: '', fat: '', calories: '', source: '', servingSize: '1', servingUnit: 'serving' });
