@@ -92,10 +92,12 @@ function diffDays(toDate: string, fromDate = todayStr()) {
 }
 function addMinutes(time: string, mins: number) {
   const [h, m] = time.split(':').map(Number);
-  const total = h * 60 + m + mins;
+  const total = Math.max(0, h * 60 + m + mins);
   const nh = Math.floor((total / 60) % 24);
   return `${pad(nh)}:${pad(total % 60)}`;
 }
+// Coerce a user-entered value to a safe non-negative number (blank/garbage/negative → 0).
+const clamp0 = (v: any) => { const n = typeof v === 'number' ? v : parseFloat(v); return Number.isFinite(n) && n > 0 ? n : 0; };
 // Display-unit prefs, set once from settings on load so pure formatters can read them.
 const APP_UNITS = { timeFormat: '12h', weight: 'lb', length: 'in', weekStart: 0 };
 function setAppUnits(u: any) { if (u) Object.assign(APP_UNITS, u); }
@@ -338,7 +340,7 @@ function suggestMacros(latestBody: any, bodyGoals: any) {
 function projectedDate(subjectKey: string, settings: any, totals: any, daily: any) {
   const s = settings.subjects[subjectKey];
   if (!s || !s.deadline) return null;
-  const totalDone = (totals[subjectKey] || 0) + (daily?.completed[subjectKey] || 0);
+  const totalDone = totals[subjectKey] || 0;
   const target = targetTotalByDeadline(subjectKey, settings);
   const daysElapsed = Math.max(1, diffDays(todayStr(), settings.startDate) + 1);
   const avgPerDay = totalDone / daysElapsed;
@@ -541,6 +543,26 @@ function targetTotalByDeadline(subjectKey: string, settings: any) {
   if (!s || !s.deadline) return 0;
   const totalDays = Math.max(1, diffDays(s.deadline, settings.startDate) + 1);
   return Math.round(totalDays * s.target * (s.weeklyDays / 7));
+}
+
+// Merge saved/imported settings onto defaults so older or partial payloads never miss required keys.
+function normalizeSettingsLoaded(s: any) {
+  const src = (s && typeof s === 'object') ? s : {};
+  const merged: any = {
+    ...DEFAULT_SETTINGS,
+    ...src,
+    subjects: { ...DEFAULT_SETTINGS.subjects, ...(src.subjects || {}) },
+    macroTargets: { ...DEFAULT_SETTINGS.macroTargets, ...(src.macroTargets || {}) },
+    bodyGoals: { ...DEFAULT_SETTINGS.bodyGoals, ...(src.bodyGoals || {}) },
+    units: { ...DEFAULT_SETTINGS.units, ...(src.units || {}) },
+  };
+  if (!Array.isArray(merged.subjectOrder)) merged.subjectOrder = [];
+  for (const k of Object.keys(merged.subjects)) {
+    merged.subjects[k] = normalizeSubject(merged.subjects[k]);
+    if (!merged.subjectOrder.includes(k)) merged.subjectOrder.push(k);
+  }
+  merged.subjectOrder = merged.subjectOrder.filter((k: string) => merged.subjects[k]);
+  return merged;
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -996,7 +1018,8 @@ function Progress({ settings, totals, daily, streaks, subjectKeys, onLogExtra, c
         const countComplete = goalKind === 'count' && sessionsDone >= (subj.countTotal || 0);
 
         // On-pace metrics only meaningful for timed subjects with a deadline.
-        const totalDone = (totals[k] || 0) + todayDone;
+        // `totals` already includes today's logged minutes, so don't add todayDone again.
+        const totalDone = totals[k] || 0;
         const expected = expectedTotal(k, settings);
         const target = targetTotalByDeadline(k, settings);
         const pct = Math.min(100, (totalDone / Math.max(target, 1)) * 100);
@@ -1781,7 +1804,7 @@ function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, setting
               </div>
             );
           })}
-          <button className="btn" onClick={() => onLogWorkout(todayWorkoutIdx)} style={{ width: '100%', marginTop: 14 }}>
+          <button className="btn" onClick={() => onLogWorkout(todayWorkoutIdx, location)} style={{ width: '100%', marginTop: 14 }}>
             {todayLog ? <><Edit3 size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Edit today's log</> : <><Dumbbell size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Log workout</>}
           </button>
           {mode === 'sequence' && (
@@ -1809,8 +1832,8 @@ function WorkoutTab({ workout, onLogWorkout, onEditSplit, onSaveWorkout, setting
 
       <div className="card">
         <div className="between" style={{ marginBottom: 8 }}>
-          <div className="h2">Weekly split</div>
-          <button onClick={onEditSplit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6457' }}>
+          <div className="h2">Weekly split · {location === 'home' ? 'Home' : 'Gym'}</div>
+          <button onClick={() => onEditSplit(location)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6B6457' }}>
             <Edit3 size={16} />
           </button>
         </div>
@@ -2215,7 +2238,7 @@ function LogTimeModal({ subject, settings, daily, onLog, onSet, onClose, editMod
       ) : (
         <>
           <label>{mode === 'add' ? 'Minutes to add' : 'Set today\'s total to (minutes)'}</label>
-          <input type="number" min="0" value={mins} onChange={(e) => setMins(parseInt(e.target.value) || 0)} style={{ marginBottom: 12 }} />
+          <input type="number" min="0" value={mins} onChange={(e) => setMins(Math.max(0, parseInt(e.target.value) || 0))} style={{ marginBottom: 12 }} />
           <div className="row" style={{ gap: 8, marginBottom: 18, flexWrap: 'wrap' }}>
             {mode === 'add'
               ? [15, 30, 45, 60].map(m => <button key={m} className={`tap ${mins === m ? 'active' : ''}`} onClick={() => setMins(m)}>{m}m</button>)
@@ -2278,7 +2301,7 @@ function BusyModal({ onConfirm, onClose, busyPresets, onSavePresets, isSwitch }:
           <div className="row" style={{ gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
             {[30, 60, 90, 120, 180].map(m => <button key={m} className={`tap ${mins === m ? 'active' : ''}`} onClick={() => setMins(m)}>{m < 60 ? `${m}m` : `${m / 60}h`}</button>)}
           </div>
-          <input type="number" value={mins} onChange={(e) => setMins(parseInt(e.target.value) || 0)} style={{ marginBottom: 14 }} />
+          <input type="number" min="0" value={mins} onChange={(e) => setMins(Math.max(0, parseInt(e.target.value) || 0))} style={{ marginBottom: 14 }} />
         </>
       )}
       <button className="btn" style={{ width: '100%' }} onClick={confirm}>
@@ -2332,7 +2355,15 @@ function AddMeasurementModal({ onSave, onClose, previous }: any) {
       ))}
       <button className="btn" style={{ width: '100%', marginTop: 8 }} onClick={() => {
         const entry: Record<string, any> = { date: todayStr() };
-        MEASUREMENT_FIELDS.forEach((f) => { const v = values[f.key]; if (v !== '' && v != null) { const canon = fromDisplayVal(f.unit, v); if (canon != null) entry[f.key] = canon; } });
+        MEASUREMENT_FIELDS.forEach((f) => {
+          const v = values[f.key];
+          if (v === '' || v == null) return;
+          let canon = fromDisplayVal(f.unit, v);
+          if (canon == null) return;
+          canon = Math.max(0, canon);
+          if (f.key === 'body_fat') canon = Math.min(100, canon);
+          entry[f.key] = canon;
+        });
         onSave(entry);
       }}>
         <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save measurements
@@ -2407,10 +2438,11 @@ function BodyGoalsModal({ settings, onSave, onClose }: any) {
   );
 }
 
-function LogWorkoutModal({ dayIdx, workout, onSave, onClose }: any) {
-  const day = workout.split[dayIdx];
+function LogWorkoutModal({ dayIdx, location, workout, onSave, onClose }: any) {
+  const split = location === 'home' ? (workout.homeSplit || HOME_WORKOUT_SPLIT) : (workout.split || DEFAULT_WORKOUT_SPLIT);
+  const day = split[dayIdx] || split[0];
   const today = todayStr();
-  const initial = workout.logs[today] || { name: day.name, location: 'gym', exercises: day.exercises.map((ex: any) => ({ name: ex.name, sets: Array(ex.sets).fill(0).map(() => ({ weight: '', reps: '', rpe: '' })) })) };
+  const initial = workout.logs[today] || { name: day.name, location: location || 'gym', exercises: (day.exercises || []).map((ex: any) => ({ name: ex.name, sets: Array(Math.max(1, ex.sets || 1)).fill(0).map(() => ({ weight: '', reps: '', rpe: '' })) })) };
   const [data, setData] = useState(initial);
 
   const setSet = (exIdx: number, setIdx: number, field: string, value: string) => {
@@ -2463,9 +2495,9 @@ function LogWorkoutModal({ dayIdx, workout, onSave, onClose }: any) {
         const isFirstLog = !workout.logs[today];
         const nextWorkout = { ...workout, logs: { ...workout.logs, [today]: data } };
         if (isFirstLog && (workout.mode || 'sequence') === 'sequence') {
-          const nonRestDays = workout.split.filter((d: any) => !d.rest);
+          const nonRestDays = split.filter((d: any) => !d.rest);
           const cur = workout.sequencePosition || 1;
-          nextWorkout.sequencePosition = (cur % nonRestDays.length) + 1;
+          if (nonRestDays.length > 0) nextWorkout.sequencePosition = (cur % nonRestDays.length) + 1;
         }
         await onSave(nextWorkout);
         onClose();
@@ -2476,8 +2508,9 @@ function LogWorkoutModal({ dayIdx, workout, onSave, onClose }: any) {
   );
 }
 
-function EditSplitModal({ workout, onSave, onClose }: any) {
-  const [split, setSplit] = useState(workout.split);
+function EditSplitModal({ workout, location, onSave, onClose }: any) {
+  const isHome = location === 'home';
+  const [split, setSplit] = useState(isHome ? (workout.homeSplit || HOME_WORKOUT_SPLIT) : (workout.split || DEFAULT_WORKOUT_SPLIT));
   const [openDay, setOpenDay] = useState<number | null>(null);
   const updateDay = (idx: number, patch: any) => setSplit(split.map((d: any, i: number) => i === idx ? { ...d, ...patch } : d));
   const updateExercise = (dayIdx: number, exIdx: number, patch: any) => updateDay(dayIdx, { exercises: split[dayIdx].exercises.map((e: any, i: number) => i === exIdx ? { ...e, ...patch } : e) });
@@ -2485,7 +2518,7 @@ function EditSplitModal({ workout, onSave, onClose }: any) {
   const removeExercise = (dayIdx: number, exIdx: number) => updateDay(dayIdx, { exercises: split[dayIdx].exercises.filter((_: any, i: number) => i !== exIdx) });
 
   return (
-    <ModalShell title="Edit weekly split" onClose={onClose} icon={<Edit3 size={18} color="#3B5C6B" />}>
+    <ModalShell title={`Edit ${isHome ? 'home' : 'gym'} split`} onClose={onClose} icon={<Edit3 size={18} color="#3B5C6B" />}>
       {split.map((day: any, i: number) => (
         <div key={i} className="card" style={{ marginBottom: 10, padding: 12 }}>
           <div className="between" onClick={() => setOpenDay(openDay === i ? null : i)} style={{ cursor: 'pointer' }}>
@@ -2527,7 +2560,7 @@ function EditSplitModal({ workout, onSave, onClose }: any) {
           )}
         </div>
       ))}
-      <button className="btn" style={{ width: '100%', marginTop: 8 }} onClick={async () => { await onSave({ ...workout, split }); onClose(); }}>
+      <button className="btn" style={{ width: '100%', marginTop: 8 }} onClick={async () => { await onSave({ ...workout, [isHome ? 'homeSplit' : 'split']: split }); onClose(); }}>
         <Save size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Save split
       </button>
     </ModalShell>
@@ -2643,10 +2676,10 @@ function LogMealModal({ meals, settings, onSave, onClose }: any) {
   };
 
   const logManual = async () => {
-    await logItem({ name: manual.name || 'Manual entry', source: 'Manual', protein: parseFloat(manual.protein) || 0, carbs: parseFloat(manual.carbs) || 0, fat: parseFloat(manual.fat) || 0, calories: parseFloat(manual.calories) || 0 }, qty);
+    await logItem({ name: manual.name || 'Manual entry', source: 'Manual', protein: clamp0(manual.protein), carbs: clamp0(manual.carbs), fat: clamp0(manual.fat), calories: clamp0(manual.calories) }, qty);
   };
   const addPreset = async () => {
-    const p = { id: 'p' + Date.now(), name: newPreset.name, protein: parseFloat(newPreset.protein) || 0, carbs: parseFloat(newPreset.carbs) || 0, fat: parseFloat(newPreset.fat) || 0, calories: parseFloat(newPreset.calories) || 0, source: newPreset.source };
+    const p = { id: 'p' + Date.now(), name: newPreset.name, protein: clamp0(newPreset.protein), carbs: clamp0(newPreset.carbs), fat: clamp0(newPreset.fat), calories: clamp0(newPreset.calories), source: newPreset.source };
     await onSave({ ...meals, presets: [...meals.presets, p] });
     setMode('preset');
     setNewPreset({ name: '', protein: '', carbs: '', fat: '', calories: '', source: '' });
@@ -2957,12 +2990,12 @@ function SettingsModal({ settings, body, onSave, onClose, onEditSubject, onAddSu
 
       <div className="h2" style={{ marginBottom: 8, marginTop: 8 }}>Macros</div>
       <div className="row" style={{ gap: 8, marginBottom: 8 }}>
-        <div style={{ flex: 1 }}><label>Protein (g)</label><input type="number" value={draft.macroTargets.protein} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, protein: parseInt(e.target.value) || 0 } })} /></div>
-        <div style={{ flex: 1 }}><label>Calories</label><input type="number" value={draft.macroTargets.calories} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, calories: parseInt(e.target.value) || 0 } })} /></div>
+        <div style={{ flex: 1 }}><label>Protein (g)</label><input type="number" value={draft.macroTargets.protein} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, protein: Math.max(0, parseInt(e.target.value) || 0) } })} /></div>
+        <div style={{ flex: 1 }}><label>Calories</label><input type="number" value={draft.macroTargets.calories} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, calories: Math.max(0, parseInt(e.target.value) || 0) } })} /></div>
       </div>
       <div className="row" style={{ gap: 8, marginBottom: 10 }}>
-        <div style={{ flex: 1 }}><label>Carbs (g)</label><input type="number" value={draft.macroTargets.carbs} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, carbs: parseInt(e.target.value) || 0 } })} /></div>
-        <div style={{ flex: 1 }}><label>Fat (g)</label><input type="number" value={draft.macroTargets.fat} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, fat: parseInt(e.target.value) || 0 } })} /></div>
+        <div style={{ flex: 1 }}><label>Carbs (g)</label><input type="number" value={draft.macroTargets.carbs} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, carbs: Math.max(0, parseInt(e.target.value) || 0) } })} /></div>
+        <div style={{ flex: 1 }}><label>Fat (g)</label><input type="number" value={draft.macroTargets.fat} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, fat: Math.max(0, parseInt(e.target.value) || 0) } })} /></div>
       </div>
       {suggested ? (
         <button className="tap" style={{ width: '100%', marginBottom: 16, fontSize: 12 }} onClick={() => update({ macroTargets: suggested })}>
@@ -3124,7 +3157,7 @@ function EditSubjectModal({ subjectKey, settings, onSave, onClose }: any) {
 
           <div className="row" style={{ gap: 8, marginBottom: 12 }}>
             {draft.trackingMode === 'time' && (
-              <div style={{ flex: 1 }}><label>Daily (min)</label><input type="number" value={draft.target} onChange={(e) => set({ target: parseInt(e.target.value) || 0 })} /></div>
+              <div style={{ flex: 1 }}><label>Daily (min)</label><input type="number" min="0" value={draft.target} onChange={(e) => set({ target: Math.max(0, parseInt(e.target.value) || 0) })} /></div>
             )}
             <div style={{ flex: 1 }}><label>Days/week</label><input type="number" min="1" max="7" value={draft.weeklyDays} onChange={(e) => set({ weeklyDays: Math.min(7, Math.max(1, parseInt(e.target.value) || 1)) })} /></div>
           </div>
@@ -3235,10 +3268,10 @@ function WeeklyReviewModal({ settings, totals, body, workout, meals, streaks, on
         );
       })()}
       <div className="h2" style={{ marginTop: 16, marginBottom: 8 }}>Body</div>
-      {body.entries.length === 0 ? (
+      {(body.entries?.length || 0) === 0 ? (
         <p className="muted small">No measurements yet.</p>
       ) : (
-        <p className="small">{body.entries.length} entries logged · next on {fmtShortDate(settings.nextMeasurement)}</p>
+        <p className="small">{body.entries.length} entries logged{settings.nextMeasurement ? ` · next on ${fmtShortDate(settings.nextMeasurement)}` : ''}</p>
       )}
       <button className="btn" style={{ width: '100%', marginTop: 18 }} onClick={onAck}>
         <Check size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Got it
@@ -3418,6 +3451,20 @@ function ExportImportModal({ data, onImport, onClose }: any) {
     } catch (e) {}
   };
 
+  const handleDownload = () => {
+    try {
+      const blob = new Blob([exportJson], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `study-tracker-backup-${todayStr()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {}
+  };
+
   const handleImport = () => {
     try {
       const parsed = JSON.parse(importText);
@@ -3474,6 +3521,9 @@ function ExportImportModal({ data, onImport, onClose }: any) {
           <textarea readOnly value={exportJson} style={{ fontFamily: 'JetBrains Mono', fontSize: 10, padding: 10, height: 200, marginBottom: 12, resize: 'vertical', width: '100%' }} onClick={(e) => (e.target as HTMLTextAreaElement).select()} />
           <button className="btn" style={{ width: '100%' }} onClick={handleCopy}>
             {copied ? <><Check size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Copied!</> : 'Copy to clipboard'}
+          </button>
+          <button className="tap" style={{ width: '100%', marginTop: 8 }} onClick={handleDownload}>
+            <Download size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} /> Download as file
           </button>
         </>
       )}
@@ -3559,12 +3609,12 @@ function Setup({ onComplete, onImport }: any) {
       content: (
         <>
           <div className="row" style={{ gap: 8, marginBottom: 10 }}>
-            <div style={{ flex: 1 }}><label>Protein (g)</label><input type="number" value={draft.macroTargets.protein} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, protein: parseInt(e.target.value) || 0 } })} /></div>
-            <div style={{ flex: 1 }}><label>Calories</label><input type="number" value={draft.macroTargets.calories} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, calories: parseInt(e.target.value) || 0 } })} /></div>
+            <div style={{ flex: 1 }}><label>Protein (g)</label><input type="number" value={draft.macroTargets.protein} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, protein: Math.max(0, parseInt(e.target.value) || 0) } })} /></div>
+            <div style={{ flex: 1 }}><label>Calories</label><input type="number" value={draft.macroTargets.calories} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, calories: Math.max(0, parseInt(e.target.value) || 0) } })} /></div>
           </div>
           <div className="row" style={{ gap: 8 }}>
-            <div style={{ flex: 1 }}><label>Carbs (g)</label><input type="number" value={draft.macroTargets.carbs} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, carbs: parseInt(e.target.value) || 0 } })} /></div>
-            <div style={{ flex: 1 }}><label>Fat (g)</label><input type="number" value={draft.macroTargets.fat} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, fat: parseInt(e.target.value) || 0 } })} /></div>
+            <div style={{ flex: 1 }}><label>Carbs (g)</label><input type="number" value={draft.macroTargets.carbs} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, carbs: Math.max(0, parseInt(e.target.value) || 0) } })} /></div>
+            <div style={{ flex: 1 }}><label>Fat (g)</label><input type="number" value={draft.macroTargets.fat} onChange={(e) => update({ macroTargets: { ...draft.macroTargets, fat: Math.max(0, parseInt(e.target.value) || 0) } })} /></div>
           </div>
           <div className="muted tiny" style={{ marginTop: 10, lineHeight: 1.4 }}>
             Defaults: 170p / 2300cal for recomp. Edit anytime.
@@ -3676,7 +3726,7 @@ export default function App() {
     (async () => {
       await syncPull(); // hydrate from server if it has newer data (survives device/browser changes)
       const s = await safeGet(K.settings, DEFAULT_SETTINGS);
-      const merged = { ...DEFAULT_SETTINGS, ...s, subjects: { ...DEFAULT_SETTINGS.subjects, ...(s.subjects || {}) }, macroTargets: { ...DEFAULT_SETTINGS.macroTargets, ...(s.macroTargets || {}) } };
+      const merged = normalizeSettingsLoaded(s);
       // Normalize subjects to the flexible model and purge soft-deletes older than 15 days.
       for (const k of Object.keys(merged.subjects)) {
         const sub = normalizeSubject(merged.subjects[k]);
@@ -3803,6 +3853,32 @@ export default function App() {
   const saveCheckins = async (next: any) => { setCheckins(next); await safeSet(K.checkins, next); };
   const saveActivity = async (next: any) => { setActivity(next); await safeSet(K.activity, next); };
 
+  // Restore a backup/export, normalizing every section so a partial or older payload can't break the app.
+  const applyImport = async (d: any) => {
+    if (!d || typeof d !== 'object') return false;
+    if (d.settings) { const s = normalizeSettingsLoaded(d.settings); s.setupComplete = true; setAppUnits(s.units); setSettings(s); await safeSet(K.settings, s); }
+    if (d.totals && typeof d.totals === 'object') { setTotals(d.totals); await safeSet(K.totals, d.totals); }
+    if (d.body) { const b = { entries: Array.isArray(d.body.entries) ? d.body.entries : [] }; setBody(b); await safeSet(K.body, b); }
+    if (d.workout) {
+      const w = { split: DEFAULT_WORKOUT_SPLIT, logs: {}, mode: 'sequence', sequencePosition: 1, ...d.workout };
+      if (!Array.isArray(w.split)) w.split = DEFAULT_WORKOUT_SPLIT;
+      if (!w.logs || typeof w.logs !== 'object') w.logs = {};
+      if (!w.mode) w.mode = 'sequence';
+      if (w.sequencePosition == null) w.sequencePosition = 1;
+      setWorkout(w); await safeSet(K.workout, w);
+    }
+    if (d.meals) { const m = migrateMeals({ presets: d.meals.presets || [], log: d.meals.log || {}, entries: d.meals.entries || {} }); setMeals(m); await safeSet(K.meals, m); }
+    if (d.plans && typeof d.plans === 'object') { setPlans(d.plans); await safeSet(K.plans, d.plans); }
+    if (d.streaks && typeof d.streaks === 'object') { setStreaks(d.streaks); await safeSet(K.streaks, d.streaks); }
+    if (d.journal && typeof d.journal === 'object') { setJournal(d.journal); await safeSet(K.journal, d.journal); }
+    if (Array.isArray(d.challengeHistory)) { setChallengeHistory(d.challengeHistory); await safeSet(K.challengeHistory, d.challengeHistory); }
+    if (Array.isArray(d.busyPresets)) { setBusyPresets(d.busyPresets); await safeSet(K.busyPresets, d.busyPresets); }
+    if (d.activity && typeof d.activity === 'object') { setActivity(d.activity); await safeSet(K.activity, d.activity); }
+    if (d.checkins && typeof d.checkins === 'object') { setCheckins(d.checkins); await safeSet(K.checkins, d.checkins); }
+    if (d.weeklyAck && typeof d.weeklyAck === 'object') { setWeeklyAck(d.weeklyAck); await safeSet(K.weeklyReview, d.weeklyAck); }
+    return true;
+  };
+
   const undoToast = (label: string, restore: () => void | Promise<void>) => {
     toast(label, { action: { label: 'Undo', onClick: () => { void restore(); } }, duration: 6000 });
   };
@@ -3834,6 +3910,7 @@ export default function App() {
   };
 
   const setSubjectTime = async (subject: string, newMins: number) => {
+    newMins = Math.max(0, Math.round(Number(newMins) || 0));
     const prevDaily = daily, prevTotals = totals, prevStreaks = streaks;
     const oldMins = daily.completed[subject] || 0;
     const diff = newMins - oldMins;
@@ -3871,6 +3948,8 @@ export default function App() {
   };
 
   const logTime = async (subject: string, minutes: number) => {
+    minutes = Math.max(0, Math.round(Number(minutes) || 0));
+    if (minutes === 0) return;
     const prevDaily = daily, prevTotals = totals, prevStreaks = streaks;
     const target = settings.subjects[subject]?.target || 0;
     const wasUnderTarget = (daily.completed[subject] || 0) < target;
@@ -4003,15 +4082,7 @@ export default function App() {
   }
 
   if (!settings.setupComplete) {
-    return <Setup onComplete={(s: any) => saveSettings({ ...s, setupComplete: true })} onImport={async (d: any) => {
-      if (d.settings) { setSettings(d.settings); await safeSet(K.settings, d.settings); }
-      if (d.totals) { setTotals(d.totals); await safeSet(K.totals, d.totals); }
-      if (d.body) { setBody(d.body); await safeSet(K.body, d.body); }
-      if (d.workout) { setWorkout(d.workout); await safeSet(K.workout, d.workout); }
-      if (d.meals) { setMeals(d.meals); await safeSet(K.meals, d.meals); }
-      if (d.plans) { setPlans(d.plans); await safeSet(K.plans, d.plans); }
-      if (d.streaks) { setStreaks(d.streaks); await safeSet(K.streaks, d.streaks); }
-    }} />;
+    return <Setup onComplete={(s: any) => saveSettings({ ...s, setupComplete: true })} onImport={applyImport} />;
   }
 
   const showWeekly = isSunday() && weeklyAck.lastAck !== todayStr() && !modal;
@@ -4051,8 +4122,8 @@ export default function App() {
         {tab === 'workout' && (
           <WorkoutTab
             workout={workout} settings={settings}
-            onLogWorkout={(idx: number) => setModal({ type: 'logWorkout', dayIdx: idx })}
-            onEditSplit={() => setModal({ type: 'editSplit' })}
+            onLogWorkout={(idx: number, loc: string) => setModal({ type: 'logWorkout', dayIdx: idx, location: loc })}
+            onEditSplit={(loc: string) => setModal({ type: 'editSplit', location: loc })}
             onSaveWorkout={saveWorkout}
           />
         )}
@@ -4084,28 +4155,14 @@ export default function App() {
       {modal?.type === 'busyBack' && <BusyBackModal daily={daily} onConfirm={(log: boolean) => { endBusy(log); setModal(null); }} onClose={() => setModal(null)} />}
       {modal?.type === 'addMeasurement' && <AddMeasurementModal onSave={async (entry: any) => { const next = { ...body, entries: [...body.entries, entry] }; const nextSettings = { ...settings, nextMeasurement: addMonth(todayStr(), 1) }; await saveBody(next); await saveSettings(nextSettings); setModal(null); }} onClose={() => setModal(null)} previous={body.entries[body.entries.length - 1]} />}
       {modal?.type === 'bodyGoals' && <BodyGoalsModal settings={settings} onSave={saveSettings} onClose={() => setModal(null)} />}
-      {modal?.type === 'logWorkout' && <LogWorkoutModal dayIdx={modal.dayIdx} workout={workout} onSave={saveWorkout} onClose={() => setModal(null)} />}
-      {modal?.type === 'editSplit' && <EditSplitModal workout={workout} onSave={saveWorkout} onClose={() => setModal(null)} />}
+      {modal?.type === 'logWorkout' && <LogWorkoutModal dayIdx={modal.dayIdx} location={modal.location} workout={workout} onSave={saveWorkout} onClose={() => setModal(null)} />}
+      {modal?.type === 'editSplit' && <EditSplitModal workout={workout} location={modal.location} onSave={saveWorkout} onClose={() => setModal(null)} />}
       {modal?.type === 'challenge' && <ChallengeModal settings={settings} challengeHistory={challengeHistory} onSave={saveSettings} onSaveHistory={saveChallengeHistory} onClose={() => setModal(null)} />}
       {modal?.type === 'logMeal' && <LogMealModal meals={meals} settings={settings} onSave={saveMeals} onClose={() => setModal(null)} />}
       {modal?.type === 'nutritionCoach' && <NutritionCoachModal settings={settings} meals={meals} body={body} onLogItem={async (item: any) => { await saveMeals(addMealEntry(meals, todayStr(), { qty: 1, ...item })); toast(`Logged ${item.name}`); }} onClose={() => setModal(null)} />}
       {modal?.type === 'planDay' && <PlanDayModal date={modal.date} plans={plans} onSave={savePlans} onClose={() => setModal(null)} />}
       {modal?.type === 'dayDetail' && <DayDetailModal date={modal.date} settings={settings} totals={totals} workout={workout} meals={meals} body={body} activity={activity} onClose={() => setModal(null)} />}
-      {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, journal, challengeHistory, busyPresets, weeklyAck }} onImport={async (d: any) => {
-        if (d.settings) { setSettings(d.settings); await safeSet(K.settings, d.settings); }
-        if (d.totals) { setTotals(d.totals); await safeSet(K.totals, d.totals); }
-        if (d.body) { setBody(d.body); await safeSet(K.body, d.body); }
-        if (d.workout) { setWorkout(d.workout); await safeSet(K.workout, d.workout); }
-        if (d.meals) { setMeals(d.meals); await safeSet(K.meals, d.meals); }
-        if (d.plans) { setPlans(d.plans); await safeSet(K.plans, d.plans); }
-        if (d.streaks) { setStreaks(d.streaks); await safeSet(K.streaks, d.streaks); }
-        if (d.journal) { setJournal(d.journal); await safeSet(K.journal, d.journal); }
-        if (d.challengeHistory) { setChallengeHistory(d.challengeHistory); await safeSet(K.challengeHistory, d.challengeHistory); }
-        if (d.busyPresets) { setBusyPresets(d.busyPresets); await safeSet(K.busyPresets, d.busyPresets); }
-        if (d.activity) { await safeSet(K.activity, d.activity); }
-        if (d.checkins) { await safeSet(K.checkins, d.checkins); }
-        setModal(null);
-      }} onClose={() => setModal(null)} />}
+      {modal?.type === 'exportImport' && <ExportImportModal data={{ settings, totals, body, workout, meals, plans, streaks, journal, challengeHistory, busyPresets, activity, checkins, weeklyAck }} onImport={async (d: any) => { await applyImport(d); setModal(null); }} onClose={() => setModal(null)} />}
       {showWeekly && <WeeklyReviewModal settings={settings} totals={totals} body={body} workout={workout} meals={meals} streaks={streaks} onAck={async () => { const next = { lastAck: todayStr() }; await safeSet(K.weeklyReview, next); setWeeklyAck(next); }} onSkip={async () => { const next = { lastAck: todayStr() }; await safeSet(K.weeklyReview, next); setWeeklyAck(next); }} />}
     </div>
   );
